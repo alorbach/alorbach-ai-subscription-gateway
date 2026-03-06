@@ -1,0 +1,27 @@
+{
+    "name": "alorbach/ai-subscription-gateway",
+    "description": "Precise credit-based AI API billing layer for WordPress",
+    "authors": [
+        {
+            "name": "Andre Lorbach",
+            "homepage": "https://alorbach.com"
+        }
+    ],
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "yethee/tiktoken": "^1.0"
+    },
+    "suggest": {
+        "james-heinrich/getid3": "For automatic audio duration detection in Whisper transcription"
+    },
+    "autoload": {
+        "classmap": [
+            "includes/",
+            "admin/"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

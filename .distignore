@@ -1,0 +1,10 @@
+/.git
+/.github
+/node_modules
+/.DS_Store
+/*.zip
+*.log
+composer.lock
+package-lock.json
+README.md
+.gitignore
