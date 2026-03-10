@@ -28,6 +28,27 @@ class User_Display {
 	}
 
 	/**
+	 * Convert UC to USD (1 UC = 0.000001 USD).
+	 *
+	 * @param int $uc_amount Amount in UC.
+	 * @return float USD value.
+	 */
+	public static function uc_to_usd( $uc_amount ) {
+		return (float) $uc_amount * 0.000001;
+	}
+
+	/**
+	 * Format UC as USD string (e.g. "$0.50").
+	 *
+	 * @param int $uc_amount Amount in UC.
+	 * @return string Formatted USD string.
+	 */
+	public static function format_uc_as_usd( $uc_amount ) {
+		$usd = self::uc_to_usd( (int) $uc_amount );
+		return '$' . number_format_i18n( $usd, 2 );
+	}
+
+	/**
 	 * Format UC as Credits string.
 	 *
 	 * @param int $uc_amount Amount in UC.

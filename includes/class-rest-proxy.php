@@ -35,7 +35,7 @@ class REST_Proxy {
 					},
 				),
 				'model'      => array(
-					'default'           => 'gpt-4o-mini',
+					'default'           => 'gpt-4.1-mini',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 				'max_tokens' => array(
@@ -81,7 +81,7 @@ class REST_Proxy {
 			},
 			'args'                => array(
 				'prompt' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
-				'size'   => array( 'default' => '1024x1024', 'enum' => array( '1024x1024', '1792x1024', '1024x1792' ) ),
+				'size'   => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'      => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 			),
 		) );
@@ -95,6 +95,97 @@ class REST_Proxy {
 			'args'                => array(
 				'audio_base64'     => array( 'required' => true ),
 				'duration_seconds' => array( 'required' => false, 'sanitize_callback' => 'absint' ),
+				'model'            => array( 'default' => 'whisper-1', 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		$admin_permission = function () {
+			return current_user_can( 'manage_options' );
+		};
+
+		register_rest_route( 'alorbach/v1', '/admin/verify-api-key', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_verify_api_key' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'provider' => array(
+					'required'          => true,
+					'type'              => 'string',
+					'enum'              => array( 'openai', 'azure', 'google' ),
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/verify-text', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_verify_text' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'provider' => array(
+					'required'          => true,
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'model'    => array(
+					'required'          => true,
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/verify-image', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_verify_image' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'size' => array(
+					'default'           => '1024x1024',
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/verify-audio', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_verify_audio' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'model' => array(
+					'default'           => 'whisper-1',
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/fetch-importable-models', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'admin_fetch_importable_models' ),
+			'permission_callback' => $admin_permission,
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/import-models', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_import_models' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'selected' => array(
+					'required' => false,
+					'type'     => 'object',
+					'description' => 'Selected model IDs: { text: [], image: [], audio: [] }',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/reset-models', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_reset_models' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'selected' => array(
+					'required' => false,
+					'type'     => 'object',
+					'description' => 'Selected model IDs: { text: [], image: [], audio: [] }',
+				),
 			),
 		) );
 	}
@@ -133,7 +224,8 @@ class REST_Proxy {
 			'max_tokens'  => $max_tokens,
 		);
 
-		$response = API_Client::chat( 'openai', $body );
+		$provider = API_Client::get_provider_for_model( $model );
+		$response = API_Client::chat( $provider, $body );
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
@@ -309,6 +401,7 @@ class REST_Proxy {
 		$user_id   = get_current_user_id();
 		$audio_b64 = $request->get_param( 'audio_base64' );
 		$duration  = (int) $request->get_param( 'duration_seconds' );
+		$model     = $request->get_param( 'model' ) ?: 'whisper-1';
 
 		$decoded = base64_decode( $audio_b64, true );
 		if ( false === $decoded ) {
@@ -330,21 +423,112 @@ class REST_Proxy {
 			return new \WP_Error( 'invalid_duration', __( 'duration_seconds required when getID3 is not available.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
-		$cost = Cost_Matrix::get_whisper_cost( $duration );
+		$cost = Cost_Matrix::get_audio_cost( $duration, $model );
 		$balance = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			@unlink( $tmp );
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
-		$response = API_Client::transcribe( $tmp );
+		$response = API_Client::transcribe( $tmp, $model );
 		@unlink( $tmp );
 
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'audio_deduction', 'whisper-1', -$cost );
+		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost );
 		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Admin: Verify API key.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_verify_api_key( $request ) {
+		$provider = $request->get_param( 'provider' );
+		$method   = 'verify_' . $provider . '_key';
+		if ( ! method_exists( API_Validator::class, $method ) ) {
+			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Unknown provider.', 'alorbach-ai-gateway' ) ) );
+		}
+		$result = API_Validator::$method();
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Verify text model.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_verify_text( $request ) {
+		$provider = $request->get_param( 'provider' );
+		$model    = $request->get_param( 'model' );
+		$result   = API_Validator::verify_text_model( $provider, $model );
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Verify image model.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_verify_image( $request ) {
+		$size   = $request->get_param( 'size' );
+		$result = API_Validator::verify_image_model( $size );
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Verify audio model.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_verify_audio( $request ) {
+		$model  = $request->get_param( 'model' ) ?: 'whisper-1';
+		$result = API_Validator::verify_audio_model( $model );
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Fetch importable models (with capabilities). Does not import.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_fetch_importable_models( $request ) {
+		$result = Model_Importer::fetch_importable_models();
+		$result['capability_labels'] = Model_Importer::$capability_labels;
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Import models from providers.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_import_models( $request ) {
+		$selected = $request->get_param( 'selected' );
+		$selected = is_array( $selected ) ? $selected : null;
+		$result = Model_Importer::import_from_providers( false, $selected );
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Reset models and re-import from APIs.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_reset_models( $request ) {
+		$selected = $request->get_param( 'selected' );
+		$selected = is_array( $selected ) ? $selected : null;
+		$result = Model_Importer::reset_and_import( $selected );
+		return rest_ensure_response( $result );
 	}
 }

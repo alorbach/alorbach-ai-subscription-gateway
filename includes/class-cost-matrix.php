@@ -19,38 +19,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Cost_Matrix {
 
 	/**
-	 * Default costs per 1M input tokens (in UC).
-	 * 1 USD = 1,000,000 UC.
-	 *
-	 * @var array
-	 */
-	private static $default_costs = array(
-		'gpt-4o'        => array( 'input' => 2500000, 'output' => 10000000, 'cached' => 1250000 ),
-		'gpt-4o-mini'   => array( 'input' => 150000, 'output' => 600000, 'cached' => 75000 ),
-		'gpt-4-turbo'   => array( 'input' => 10000000, 'output' => 30000000, 'cached' => 5000000 ),
-		'gpt-4'         => array( 'input' => 30000000, 'output' => 60000000, 'cached' => 15000000 ),
-		'gpt-3.5-turbo' => array( 'input' => 500000, 'output' => 1500000, 'cached' => 250000 ),
-	);
-
-	/**
-	 * DALL-E costs per image (UC).
-	 *
-	 * @var array
-	 */
-	private static $image_costs = array(
-		'1024x1024' => 40000,
-		'1792x1024' => 80000,
-		'1024x1792' => 80000,
-	);
-
-	/**
-	 * Whisper cost per second (UC).
-	 *
-	 * @var int
-	 */
-	private static $whisper_cost_per_second = 100;
-
-	/**
 	 * Get input cost per token (UC).
 	 *
 	 * @param string $model Model name.
@@ -109,20 +77,42 @@ class Cost_Matrix {
 	 * @return int UC cost.
 	 */
 	public static function get_image_cost( $size = '1024x1024' ) {
-		$costs = get_option( 'alorbach_image_costs', self::$image_costs );
+		$costs = get_option( 'alorbach_image_costs', array() );
+		$costs = is_array( $costs ) ? $costs : array();
 		$costs = apply_filters( 'alorbach_image_costs', $costs );
 		return isset( $costs[ $size ] ) ? (int) $costs[ $size ] : 40000;
 	}
 
 	/**
-	 * Get Whisper transcription cost (UC) for given duration in seconds.
+	 * Get audio transcription cost (UC) for given duration and model.
 	 *
-	 * @param int $seconds Duration in seconds.
+	 * @param int    $seconds Duration in seconds.
+	 * @param string $model   Model (e.g. whisper-1, gpt-4o-transcribe). Default whisper-1.
 	 * @return int UC cost.
 	 */
-	public static function get_whisper_cost( $seconds ) {
-		$rate = (int) apply_filters( 'alorbach_whisper_cost_per_second', self::$whisper_cost_per_second );
+	public static function get_audio_cost( $seconds, $model = 'whisper-1' ) {
+		$costs = get_option( 'alorbach_audio_costs', array() );
+		$costs = is_array( $costs ) ? $costs : array();
+		$costs = apply_filters( 'alorbach_audio_costs', $costs );
+		$rate  = isset( $costs[ $model ] ) ? (int) $costs[ $model ] : 100;
 		return max( 0, (int) ceil( $seconds * $rate ) );
+	}
+
+	/**
+	 * @deprecated Use get_audio_cost() instead.
+	 */
+	public static function get_whisper_cost( $seconds ) {
+		return self::get_audio_cost( $seconds, 'whisper-1' );
+	}
+
+	/**
+	 * Get costs for model when importing (always default tier).
+	 *
+	 * @param string $model Model name.
+	 * @return array{input: int, output: int, cached: int}
+	 */
+	public static function get_import_costs( $model ) {
+		return array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
 	}
 
 	/**
@@ -132,9 +122,10 @@ class Cost_Matrix {
 	 * @return array
 	 */
 	private static function get_costs_for_model( $model ) {
-		$saved = get_option( 'alorbach_cost_matrix', array() );
-		$all   = array_merge( self::$default_costs, is_array( $saved ) ? $saved : array() );
-		$all   = apply_filters( 'alorbach_cost_matrix', $all );
-		return isset( $all[ $model ] ) ? $all[ $model ] : array( 'input' => 500000, 'output' => 1500000, 'cached' => 250000 );
+		$saved   = get_option( 'alorbach_cost_matrix', array() );
+		$saved   = is_array( $saved ) ? $saved : array();
+		$all     = apply_filters( 'alorbach_cost_matrix', $saved );
+		$default = isset( $all['default'] ) ? $all['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
+		return isset( $all[ $model ] ) ? $all[ $model ] : $default;
 	}
 }

@@ -18,5 +18,7 @@ delete_option( 'alorbach_cost_matrix' );
 delete_option( 'alorbach_plans' );
 delete_option( 'alorbach_product_to_plan' );
 delete_option( 'alorbach_image_costs' );
+delete_option( 'alorbach_audio_costs' );
+delete_option( 'alorbach_whisper_cost_per_second' );
 delete_option( 'alorbach_stripe_webhook_secret' );
 delete_option( 'alorbach_db_version' );

@@ -47,7 +47,7 @@ class Admin_User_Credits {
 			<table class="form-table">
 				<tr>
 					<th><?php esc_html_e( 'Balance', 'alorbach-ai-gateway' ); ?></th>
-					<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $balance ) ); ?></td>
+					<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $balance ) ); ?> <span class="description">(<?php echo esc_html( __( 'worth', 'alorbach-ai-gateway' ) . ' ' . \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?>)</span></td>
 				</tr>
 				<tr>
 					<th><?php esc_html_e( 'Usage this month', 'alorbach-ai-gateway' ); ?></th>
@@ -74,7 +74,7 @@ class Admin_User_Credits {
 		<table class="form-table">
 			<tr>
 				<th><?php esc_html_e( 'Balance', 'alorbach-ai-gateway' ); ?></th>
-				<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $balance ) ); ?></td>
+				<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $balance ) ); ?> <span class="description">(<?php echo esc_html( __( 'worth', 'alorbach-ai-gateway' ) . ' ' . \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?>)</span></td>
 			</tr>
 			<tr>
 				<th><?php esc_html_e( 'Usage this month', 'alorbach-ai-gateway' ); ?></th>
