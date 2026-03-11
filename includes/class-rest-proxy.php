@@ -188,6 +188,12 @@ class REST_Proxy {
 				),
 			),
 		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/refresh-azure-prices', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_refresh_azure_prices' ),
+			'permission_callback' => $admin_permission,
+		) );
 	}
 
 	/**
@@ -530,5 +536,16 @@ class REST_Proxy {
 		$selected = is_array( $selected ) ? $selected : null;
 		$result = Model_Importer::reset_and_import( $selected );
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Clear Azure Retail Prices cache so next import fetches fresh data.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_refresh_azure_prices( $request ) {
+		Azure_Retail_Prices::clear_cache();
+		return rest_ensure_response( array( 'success' => true, 'message' => __( 'Azure prices cache cleared. Next import will fetch fresh data.', 'alorbach-ai-gateway' ) ) );
 	}
 }

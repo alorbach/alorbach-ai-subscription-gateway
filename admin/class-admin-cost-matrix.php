@@ -158,20 +158,23 @@ class Admin_Cost_Matrix {
 
 		$default       = isset( $cost_matrix['default'] ) ? $cost_matrix['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
 		$custom_models = array_diff_key( $cost_matrix, array( 'default' => 1 ) );
+		ksort( $custom_models );
 		$rest_verify_text  = rest_url( 'alorbach/v1/admin/verify-text' );
 		$rest_verify_image = rest_url( 'alorbach/v1/admin/verify-image' );
 		$rest_verify_audio = rest_url( 'alorbach/v1/admin/verify-audio' );
 		$rest_fetch        = rest_url( 'alorbach/v1/admin/fetch-importable-models' );
 		$rest_import       = rest_url( 'alorbach/v1/admin/import-models' );
 		$rest_reset        = rest_url( 'alorbach/v1/admin/reset-models' );
+		$rest_refresh_azure = rest_url( 'alorbach/v1/admin/refresh-azure-prices' );
 		$nonce             = wp_create_nonce( 'wp_rest' );
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Models', 'alorbach-ai-gateway' ); ?></h1>
 			<p>
-				<?php esc_html_e( 'Import enabled models from your API providers (with known costs where available), or add manually. Costs in UC. 1 UC = 0.000001 USD.', 'alorbach-ai-gateway' ); ?>
+				<?php esc_html_e( 'Import enabled models from your API providers. Azure text model costs are fetched from the Azure Retail Prices API when available. Costs in UC. 1 UC = 0.000001 USD.', 'alorbach-ai-gateway' ); ?>
 				<button type="button" class="button" id="alorbach_import_models_btn"><?php esc_html_e( 'Import models', 'alorbach-ai-gateway' ); ?></button>
 				<button type="button" class="button" id="alorbach_reset_models_btn"><?php esc_html_e( 'Reset models', 'alorbach-ai-gateway' ); ?></button>
+				<button type="button" class="button button-small" id="alorbach_refresh_azure_btn" title="<?php esc_attr_e( 'Clear Azure prices cache so next import fetches fresh data', 'alorbach-ai-gateway' ); ?>"><?php esc_html_e( 'Refresh Azure prices', 'alorbach-ai-gateway' ); ?></button>
 				<span id="alorbach_import_result"></span>
 			</p>
 
@@ -215,6 +218,16 @@ class Admin_Cost_Matrix {
 			.alorbach-test-result-modal .alorbach-result-body { margin: 1rem 0; max-height: 60vh; overflow: auto; }
 			.alorbach-test-result-modal .alorbach-result-body img { max-width: 100%; height: auto; display: block; }
 			.alorbach-test-result-modal .alorbach-result-body pre { white-space: pre-wrap; word-wrap: break-word; background: #f6f7f7; padding: 1rem; border-radius: 4px; }
+			.alorbach-cost-grid { border-collapse: collapse; width: 100%; margin-bottom: 1.5rem; }
+			.alorbach-cost-grid th, .alorbach-cost-grid td { border: 1px solid #c3c4c7; padding: 8px 12px; text-align: left; }
+			.alorbach-cost-grid th { background: #f0f0f1; font-weight: 600; }
+			.alorbach-cost-grid td.alorbach-cost-num { text-align: right; }
+			.alorbach-cost-grid .alorbach-usd { font-size: 0.9em; color: #646970; margin-left: 6px; }
+			.alorbach-cost-grid .alorbach-cost-cell { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+			.alorbach-cost-grid .alorbach-cost-cell input[type="number"] { width: 100px; }
+			.alorbach-cost-grid .alorbach-cost-cell input[type="number"].alorbach-uc-input { width: 110px; }
+			.alorbach-cost-grid .alorbach-actions { white-space: nowrap; }
+			.alorbach-cost-grid-wrapper { overflow-x: auto; }
 			</style>
 
 			<div id="alorbach_test_result_modal" class="alorbach-modal alorbach-test-result-modal" style="display:none;">
@@ -225,6 +238,13 @@ class Admin_Cost_Matrix {
 				</div>
 			</div>
 
+			<?php
+			$format_usd = function ( $uc ) {
+				$usd = \Alorbach\AIGateway\User_Display::uc_to_usd( (int) $uc );
+				$decimals = $usd >= 0.01 ? 2 : 4;
+				return '$' . number_format_i18n( $usd, $decimals );
+			};
+			?>
 			<form method="post">
 				<?php wp_nonce_field( 'alorbach_cost_matrix', 'alorbach_cost_matrix_nonce' ); ?>
 
@@ -233,98 +253,173 @@ class Admin_Cost_Matrix {
 				<?php if ( empty( $custom_models ) ) : ?>
 					<p class="description"><?php esc_html_e( 'No models yet. Use Import models to fetch from your API providers, or add a custom model below.', 'alorbach-ai-gateway' ); ?></p>
 				<?php endif; ?>
-				<table class="form-table">
-					<tr>
-						<th><?php esc_html_e( 'Default (unknown models)', 'alorbach-ai-gateway' ); ?></th>
-						<td>
-							<input type="number" name="text_default_input" value="<?php echo esc_attr( $default['input'] ?? '' ); ?>" placeholder="400000" /> Input UC/1M
-							<input type="number" name="text_default_output" value="<?php echo esc_attr( $default['output'] ?? '' ); ?>" placeholder="1600000" /> Output UC/1M
-							<input type="number" name="text_default_cached" value="<?php echo esc_attr( $default['cached'] ?? '' ); ?>" placeholder="40000" /> Cached UC/1M
-						</td>
-					</tr>
-					<?php foreach ( $custom_models as $model => $costs ) :
-						$provider = Admin_Cost_Matrix::get_test_provider_for_model( $model );
-						list( $model_base, $model_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $model );
-						$model_display = $model_version ? $model_base . ' (' . $model_version . ')' : $model;
-					?>
-						<tr>
-							<th>
-								<?php echo esc_html( $model_display ); ?>
-								<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_model' => '1', 'model' => $model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_model', '_wpnonce' ) ); ?>" class="button button-small" style="margin-left: 8px;"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
-							</th>
-							<td>
-								<input type="number" name="cost_matrix[<?php echo esc_attr( $model ); ?>][input]" value="<?php echo esc_attr( $costs['input'] ?? '' ); ?>" placeholder="Input UC/1M" /> Input
-								<input type="number" name="cost_matrix[<?php echo esc_attr( $model ); ?>][output]" value="<?php echo esc_attr( $costs['output'] ?? '' ); ?>" placeholder="Output UC/1M" /> Output
-								<input type="number" name="cost_matrix[<?php echo esc_attr( $model ); ?>][cached]" value="<?php echo esc_attr( $costs['cached'] ?? '' ); ?>" placeholder="Cached UC/1M" /> Cached
-								<button type="button" class="button alorbach-test-text" data-provider="<?php echo esc_attr( $provider ); ?>" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
-								<span class="alorbach-test-result" data-type="text" data-model="<?php echo esc_attr( $model ); ?>"></span>
-							</td>
-						</tr>
-					<?php endforeach; ?>
-					<tr>
-						<th><?php esc_html_e( 'Add custom model', 'alorbach-ai-gateway' ); ?></th>
-						<td>
-							<input type="text" id="alorbach_new_model" placeholder="e.g. gpt-4o, o1-mini, gpt-5-mini" style="width: 220px;" />
-							<button type="button" class="button" id="alorbach_add_model_btn"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></button>
-						</td>
-					</tr>
-				</table>
+				<div class="alorbach-cost-grid-wrapper">
+					<table class="alorbach-cost-grid form-table">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'Input (per 1M tokens)', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'Output (per 1M tokens)', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'Cached (per 1M tokens)', 'alorbach-ai-gateway' ); ?></th>
+								<th><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td><?php esc_html_e( 'Default (unknown models)', 'alorbach-ai-gateway' ); ?></td>
+								<td class="alorbach-cost-num">
+									<div class="alorbach-cost-cell">
+										<input type="number" name="text_default_input" class="alorbach-uc-input" value="<?php echo esc_attr( $default['input'] ?? '' ); ?>" placeholder="400000" data-alorbach-usd />
+										<span class="alorbach-usd"><?php echo esc_html( $format_usd( $default['input'] ?? 0 ) ); ?></span>
+									</div>
+								</td>
+								<td class="alorbach-cost-num">
+									<div class="alorbach-cost-cell">
+										<input type="number" name="text_default_output" class="alorbach-uc-input" value="<?php echo esc_attr( $default['output'] ?? '' ); ?>" placeholder="1600000" data-alorbach-usd />
+										<span class="alorbach-usd"><?php echo esc_html( $format_usd( $default['output'] ?? 0 ) ); ?></span>
+									</div>
+								</td>
+								<td class="alorbach-cost-num">
+									<div class="alorbach-cost-cell">
+										<input type="number" name="text_default_cached" class="alorbach-uc-input" value="<?php echo esc_attr( $default['cached'] ?? '' ); ?>" placeholder="40000" data-alorbach-usd />
+										<span class="alorbach-usd"><?php echo esc_html( $format_usd( $default['cached'] ?? 0 ) ); ?></span>
+									</div>
+								</td>
+								<td class="alorbach-actions">—</td>
+							</tr>
+							<?php foreach ( $custom_models as $model => $costs ) :
+								$provider = Admin_Cost_Matrix::get_test_provider_for_model( $model );
+								list( $model_base, $model_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $model );
+								$model_display = $model_version ? $model_base . ' (' . $model_version . ')' : $model;
+								$input_uc  = isset( $costs['input'] ) && $costs['input'] !== '' ? (int) $costs['input'] : 0;
+								$output_uc = isset( $costs['output'] ) && $costs['output'] !== '' ? (int) $costs['output'] : 0;
+								$cached_uc = isset( $costs['cached'] ) && $costs['cached'] !== '' ? (int) $costs['cached'] : 0;
+							?>
+								<tr>
+									<td>
+										<?php echo esc_html( $model_display ); ?>
+									</td>
+									<td class="alorbach-cost-num">
+										<div class="alorbach-cost-cell">
+											<input type="number" name="cost_matrix[<?php echo esc_attr( $model ); ?>][input]" class="alorbach-uc-input" value="<?php echo esc_attr( $costs['input'] ?? '' ); ?>" placeholder="Input UC/1M" data-alorbach-usd />
+											<span class="alorbach-usd"><?php echo esc_html( $format_usd( $input_uc ) ); ?></span>
+										</div>
+									</td>
+									<td class="alorbach-cost-num">
+										<div class="alorbach-cost-cell">
+											<input type="number" name="cost_matrix[<?php echo esc_attr( $model ); ?>][output]" class="alorbach-uc-input" value="<?php echo esc_attr( $costs['output'] ?? '' ); ?>" placeholder="Output UC/1M" data-alorbach-usd />
+											<span class="alorbach-usd"><?php echo esc_html( $format_usd( $output_uc ) ); ?></span>
+										</div>
+									</td>
+									<td class="alorbach-cost-num">
+										<div class="alorbach-cost-cell">
+											<input type="number" name="cost_matrix[<?php echo esc_attr( $model ); ?>][cached]" class="alorbach-uc-input" value="<?php echo esc_attr( $costs['cached'] ?? '' ); ?>" placeholder="Cached UC/1M" data-alorbach-usd />
+											<span class="alorbach-usd"><?php echo esc_html( $format_usd( $cached_uc ) ); ?></span>
+										</div>
+									</td>
+									<td class="alorbach-actions">
+										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_model' => '1', 'model' => $model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_model', '_wpnonce' ) ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
+										<button type="button" class="button alorbach-test-text" data-provider="<?php echo esc_attr( $provider ); ?>" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<span class="alorbach-test-result" data-type="text" data-model="<?php echo esc_attr( $model ); ?>"></span>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+							<tr>
+								<td colspan="5">
+									<label for="alorbach_new_model" class="screen-reader-text"><?php esc_html_e( 'Add custom model', 'alorbach-ai-gateway' ); ?></label>
+									<input type="text" id="alorbach_new_model" placeholder="<?php esc_attr_e( 'e.g. gpt-4o, o1-mini, gpt-5-mini', 'alorbach-ai-gateway' ); ?>" style="width: 220px;" />
+									<button type="button" class="button" id="alorbach_add_model_btn"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></button>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
 
 				<h2><?php esc_html_e( 'Image (DALL-E)', 'alorbach-ai-gateway' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Cost per image by size. Add custom sizes as needed.', 'alorbach-ai-gateway' ); ?> <?php esc_html_e( 'Test generates 1 image (costs credits on OpenAI).', 'alorbach-ai-gateway' ); ?></p>
-				<table class="form-table">
-					<?php foreach ( $image_costs as $size => $cost ) :
-						list( $size_base, $size_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $size );
-						$size_display = $size_version ? $size_base . ' (' . $size_version . ')' : $size;
-					?>
-						<tr>
-							<th>
-								<?php echo esc_html( $size_display ); ?>
-								<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_image' => '1', 'size' => $size ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_image', '_wpnonce' ) ); ?>" class="button button-small" style="margin-left: 8px;"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
-							</th>
-							<td>
-								<input type="number" name="image_costs[<?php echo esc_attr( $size ); ?>]" value="<?php echo esc_attr( $cost ); ?>" placeholder="40000" /> UC per image
-								<button type="button" class="button alorbach-test-image" data-size="<?php echo esc_attr( $size ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
-								<span class="alorbach-test-result" data-type="image" data-size="<?php echo esc_attr( $size ); ?>"></span>
-							</td>
-						</tr>
-					<?php endforeach; ?>
-					<tr>
-						<th><?php esc_html_e( 'Add custom size', 'alorbach-ai-gateway' ); ?></th>
-						<td>
-							<input type="text" id="alorbach_new_image" placeholder="e.g. 1792x1024, 1024x1792" style="width: 180px;" />
-							<button type="button" class="button" id="alorbach_add_image_btn"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></button>
-						</td>
-					</tr>
-				</table>
+				<div class="alorbach-cost-grid-wrapper">
+					<table class="alorbach-cost-grid form-table">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Model / Size', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'UC per image (USD)', 'alorbach-ai-gateway' ); ?></th>
+								<th><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $image_costs as $size => $cost ) :
+								list( $size_base, $size_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $size );
+								$size_display = $size_version ? $size_base . ' (' . $size_version . ')' : $size;
+								$cost_int = (int) $cost;
+							?>
+								<tr>
+									<td><?php echo esc_html( $size_display ); ?></td>
+									<td class="alorbach-cost-num">
+										<div class="alorbach-cost-cell">
+											<input type="number" name="image_costs[<?php echo esc_attr( $size ); ?>]" class="alorbach-uc-input" value="<?php echo esc_attr( $cost ); ?>" placeholder="40000" data-alorbach-usd />
+											<span class="alorbach-usd"><?php echo esc_html( $format_usd( $cost_int ) ); ?></span>
+										</div>
+									</td>
+									<td class="alorbach-actions">
+										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_image' => '1', 'size' => $size ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_image', '_wpnonce' ) ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
+										<button type="button" class="button alorbach-test-image" data-size="<?php echo esc_attr( $size ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<span class="alorbach-test-result" data-type="image" data-size="<?php echo esc_attr( $size ); ?>"></span>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+							<tr>
+								<td colspan="3">
+									<label for="alorbach_new_image" class="screen-reader-text"><?php esc_html_e( 'Add custom size', 'alorbach-ai-gateway' ); ?></label>
+									<input type="text" id="alorbach_new_image" placeholder="<?php esc_attr_e( 'e.g. 1792x1024, 1024x1792', 'alorbach-ai-gateway' ); ?>" style="width: 180px;" />
+									<button type="button" class="button" id="alorbach_add_image_btn"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></button>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
 
 				<h2><?php esc_html_e( 'Audio (transcription)', 'alorbach-ai-gateway' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Cost per second of audio by model. Add custom models as needed.', 'alorbach-ai-gateway' ); ?></p>
-				<table class="form-table">
-					<?php foreach ( $audio_costs as $model => $rate ) :
-						list( $audio_base, $audio_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $model );
-						$audio_display = $audio_version ? $audio_base . ' (' . $audio_version . ')' : $model;
-					?>
-						<tr>
-							<th>
-								<?php echo esc_html( $audio_display ); ?>
-								<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_audio' => '1', 'model' => $model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_audio', '_wpnonce' ) ); ?>" class="button button-small" style="margin-left: 8px;"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
-							</th>
-							<td>
-								<input type="number" name="audio_costs[<?php echo esc_attr( $model ); ?>]" value="<?php echo esc_attr( $rate ); ?>" placeholder="100" /> UC per second
-								<button type="button" class="button alorbach-test-audio" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
-								<span class="alorbach-test-result" data-type="audio" data-model="<?php echo esc_attr( $model ); ?>"></span>
-							</td>
-						</tr>
-					<?php endforeach; ?>
-					<tr>
-						<th><?php esc_html_e( 'Add custom model', 'alorbach-ai-gateway' ); ?></th>
-						<td>
-							<input type="text" id="alorbach_new_audio" placeholder="e.g. gpt-4o-transcribe" style="width: 200px;" />
-							<button type="button" class="button" id="alorbach_add_audio_btn"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></button>
-						</td>
-					</tr>
-				</table>
+				<div class="alorbach-cost-grid-wrapper">
+					<table class="alorbach-cost-grid form-table">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'UC per second (USD)', 'alorbach-ai-gateway' ); ?></th>
+								<th><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $audio_costs as $model => $rate ) :
+								list( $audio_base, $audio_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $model );
+								$audio_display = $audio_version ? $audio_base . ' (' . $audio_version . ')' : $model;
+								$rate_int = (int) $rate;
+							?>
+								<tr>
+									<td><?php echo esc_html( $audio_display ); ?></td>
+									<td class="alorbach-cost-num">
+										<div class="alorbach-cost-cell">
+											<input type="number" name="audio_costs[<?php echo esc_attr( $model ); ?>]" class="alorbach-uc-input" value="<?php echo esc_attr( $rate ); ?>" placeholder="100" data-alorbach-usd />
+											<span class="alorbach-usd"><?php echo esc_html( $format_usd( $rate_int ) ); ?></span>
+										</div>
+									</td>
+									<td class="alorbach-actions">
+										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_audio' => '1', 'model' => $model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_audio', '_wpnonce' ) ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
+										<button type="button" class="button alorbach-test-audio" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<span class="alorbach-test-result" data-type="audio" data-model="<?php echo esc_attr( $model ); ?>"></span>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+							<tr>
+								<td colspan="3">
+									<label for="alorbach_new_audio" class="screen-reader-text"><?php esc_html_e( 'Add custom model', 'alorbach-ai-gateway' ); ?></label>
+									<input type="text" id="alorbach_new_audio" placeholder="<?php esc_attr_e( 'e.g. gpt-4o-transcribe', 'alorbach-ai-gateway' ); ?>" style="width: 200px;" />
+									<button type="button" class="button" id="alorbach_add_audio_btn"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></button>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
 
 				<p class="submit"><input type="submit" class="button button-primary" value="<?php esc_attr_e( 'Save', 'alorbach-ai-gateway' ); ?>" /></p>
 			</form>
@@ -352,6 +447,22 @@ class Admin_Cost_Matrix {
 			};
 
 			(function() {
+				function formatUcAsUsd(uc) {
+					var val = parseInt(uc, 10) || 0;
+					var usd = val * 0.000001;
+					var decimals = usd >= 0.01 ? 2 : 4;
+					return '$' + usd.toFixed(decimals);
+				}
+				document.querySelectorAll('input[data-alorbach-usd]').forEach(function(inp) {
+					inp.addEventListener('input', function() {
+						var cell = this.closest('.alorbach-cost-cell');
+						if (cell) {
+							var span = cell.querySelector('.alorbach-usd');
+							if (span) span.textContent = formatUcAsUsd(this.value);
+						}
+					});
+				});
+
 				var nonce = <?php echo wp_json_encode( $nonce ); ?>;
 				var restVerifyText = <?php echo wp_json_encode( $rest_verify_text ); ?>;
 				var restVerifyImage = <?php echo wp_json_encode( $rest_verify_image ); ?>;
@@ -359,6 +470,7 @@ class Admin_Cost_Matrix {
 				var restFetch = <?php echo wp_json_encode( $rest_fetch ); ?>;
 				var restImport = <?php echo wp_json_encode( $rest_import ); ?>;
 				var restReset = <?php echo wp_json_encode( $rest_reset ); ?>;
+				var restRefreshAzure = <?php echo wp_json_encode( $rest_refresh_azure ); ?>;
 				var okText = <?php echo wp_json_encode( __( 'OK', 'alorbach-ai-gateway' ) ); ?>;
 				var errText = <?php echo wp_json_encode( __( 'Error', 'alorbach-ai-gateway' ) ); ?>;
 				var headers = { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce };
@@ -578,6 +690,23 @@ class Admin_Cost_Matrix {
 				});
 				document.getElementById('alorbach_reset_models_btn').addEventListener('click', function() {
 					openImportModal('reset');
+				});
+				document.getElementById('alorbach_refresh_azure_btn').addEventListener('click', function() {
+					var btn = this;
+					var orig = btn.textContent;
+					btn.disabled = true;
+					btn.textContent = '...';
+					fetch(restRefreshAzure, { method: 'POST', headers: headers })
+						.then(function(r) { return r.json(); })
+						.then(function(data) {
+							var resultEl = document.getElementById('alorbach_import_result');
+							setResult(resultEl, data.success, data.message || (data.success ? '<?php echo esc_js( __( 'Azure prices cache cleared.', 'alorbach-ai-gateway' ) ); ?>' : ''));
+						})
+						.catch(function(err) {
+							var resultEl = document.getElementById('alorbach_import_result');
+							setResult(resultEl, false, err.message);
+						})
+						.finally(function() { btn.disabled = false; btn.textContent = orig; });
 				});
 			})();
 			</script>
