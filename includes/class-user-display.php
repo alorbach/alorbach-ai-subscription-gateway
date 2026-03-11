@@ -28,6 +28,27 @@ class User_Display {
 	}
 
 	/**
+	 * Convert Credits to UC (1 Credit = 1000 UC).
+	 *
+	 * @param float $credits Amount in Credits.
+	 * @return int UC amount.
+	 */
+	public static function credits_to_uc( $credits ) {
+		$ratio = apply_filters( 'alorbach_uc_to_credit_ratio', ALORBACH_UC_TO_CREDIT );
+		return (int) round( (float) $credits * max( 1, (int) $ratio ) );
+	}
+
+	/**
+	 * Convert USD to UC (1 USD = 1,000,000 UC).
+	 *
+	 * @param float $usd Amount in USD.
+	 * @return int UC amount.
+	 */
+	public static function usd_to_uc( $usd ) {
+		return (int) round( (float) $usd * 1000000 );
+	}
+
+	/**
 	 * Convert UC to USD (1 UC = 0.000001 USD).
 	 *
 	 * @param int $uc_amount Amount in UC.
