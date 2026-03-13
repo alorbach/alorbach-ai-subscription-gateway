@@ -184,13 +184,15 @@ class Admin_Demo_Defaults {
 	 * Render Demo Defaults page.
 	 */
 	public static function render() {
-		$text_models  = self::get_text_models();
-		$image_sizes  = self::get_image_sizes();
-		$audio_models = self::get_audio_models();
-		$video_models = self::get_video_models();
+		$text_models   = self::get_text_models();
+		$image_sizes   = self::get_image_sizes();
+		$image_models  = self::get_image_models();
+		$audio_models  = self::get_audio_models();
+		$video_models  = self::get_video_models();
 
 		$default_chat   = get_option( 'alorbach_demo_default_chat_model', $text_models[0] ?? 'gpt-4.1-mini' );
 		$default_image  = get_option( 'alorbach_demo_default_image_model', $image_sizes[0] ?? '1024x1024' );
+		$default_image_model = get_option( 'alorbach_image_default_model', $image_models[0] ?? 'dall-e-3' );
 		$default_audio  = get_option( 'alorbach_demo_default_audio_model', $audio_models[0] ?? 'whisper-1' );
 		$default_video  = get_option( 'alorbach_demo_default_video_model', $video_models[0] ?? 'sora-2' );
 		$allow_chat     = (bool) get_option( 'alorbach_demo_allow_chat_model_select', false );
@@ -203,6 +205,7 @@ class Admin_Demo_Defaults {
 		if ( isset( $_POST['alorbach_demo_defaults_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_demo_defaults_nonce'] ) ), 'alorbach_demo_defaults' ) ) {
 			$default_chat  = isset( $_POST['alorbach_demo_default_chat_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_chat_model'] ) ) : $default_chat;
 			$default_image = isset( $_POST['alorbach_demo_default_image_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_image_model'] ) ) : $default_image;
+			$default_image_model = isset( $_POST['alorbach_image_default_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_model'] ) ) : $default_image_model;
 			$default_audio = isset( $_POST['alorbach_demo_default_audio_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_audio_model'] ) ) : $default_audio;
 			$default_video = isset( $_POST['alorbach_demo_default_video_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_video_model'] ) ) : $default_video;
 			$allow_chat         = ! empty( $_POST['alorbach_demo_allow_chat_model_select'] );
@@ -213,6 +216,7 @@ class Admin_Demo_Defaults {
 
 			update_option( 'alorbach_demo_default_chat_model', $default_chat );
 			update_option( 'alorbach_demo_default_image_model', $default_image );
+			update_option( 'alorbach_image_default_model', $default_image_model );
 			update_option( 'alorbach_demo_default_audio_model', $default_audio );
 			update_option( 'alorbach_demo_default_video_model', $default_video );
 			update_option( 'alorbach_demo_allow_chat_model_select', $allow_chat );
@@ -262,6 +266,17 @@ class Admin_Demo_Defaults {
 									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $default_chat, $m ); ?>><?php echo esc_html( $m ); ?></option>
 								<?php endforeach; ?>
 							</select>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_image_default_model"><?php esc_html_e( 'Default image model', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<select name="alorbach_image_default_model" id="alorbach_image_default_model">
+								<?php foreach ( $image_models as $m ) : ?>
+									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $default_image_model, $m ); ?>><?php echo esc_html( $m ); ?></option>
+								<?php endforeach; ?>
+							</select>
+							<p class="description"><?php esc_html_e( 'e.g. dall-e-3, gpt-image-1.5', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 					<tr>

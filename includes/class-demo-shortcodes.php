@@ -96,6 +96,9 @@ class Demo_Shortcodes {
 					<input type="number" class="alorbach-demo-n" value="1" min="1" max="10" style="width:60px;">
 				</label>
 			</div>
+			<p class="alorbach-demo-cost-wrap" style="display:none;">
+				<span class="alorbach-demo-cost" aria-live="polite"></span>
+			</p>
 			<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
 			<div class="alorbach-demo-images"></div>
 			<div class="alorbach-demo-usage" aria-live="polite"></div>
@@ -140,6 +143,9 @@ class Demo_Shortcodes {
 					<select class="alorbach-demo-model-select"></select>
 				</label>
 			</div>
+			<p class="alorbach-demo-cost-wrap" style="display:none;">
+				<span class="alorbach-demo-cost" aria-live="polite"></span>
+			</p>
 			<button type="button" class="button button-primary alorbach-demo-transcribe-btn" style="margin-top:1rem;"><?php esc_html_e( 'Transcribe', 'alorbach-ai-gateway' ); ?></button>
 			<div class="alorbach-demo-result"></div>
 			<div class="alorbach-demo-usage" aria-live="polite"></div>
@@ -179,6 +185,9 @@ class Demo_Shortcodes {
 					<select class="alorbach-demo-model-select"></select>
 				</label>
 			</div>
+			<p class="alorbach-demo-cost-wrap" style="display:none;">
+				<span class="alorbach-demo-cost" aria-live="polite"></span>
+			</p>
 			<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
 			<div class="alorbach-demo-videos"></div>
 			<div class="alorbach-demo-usage" aria-live="polite"></div>
@@ -208,6 +217,7 @@ class Demo_Shortcodes {
 			'restUrl'     => rest_url( 'alorbach/v1' ),
 			'nonce'       => wp_create_nonce( 'wp_rest' ),
 			'creditsLabel' => __( 'Credits', 'alorbach-ai-gateway' ),
+			'costLabel'    => __( 'Cost: ', 'alorbach-ai-gateway' ),
 		) );
 	}
 }

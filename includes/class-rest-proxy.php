@@ -75,6 +75,27 @@ class REST_Proxy {
 			},
 		) );
 
+		register_rest_route( 'alorbach/v1', '/me/estimate', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'me_estimate' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args'                => array(
+				'type'             => array(
+					'required'          => true,
+					'type'              => 'string',
+					'enum'              => array( 'image', 'video', 'audio' ),
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'size'             => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
+				'quality'           => array( 'default' => 'medium', 'sanitize_callback' => 'sanitize_text_field' ),
+				'n'                 => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
+				'model'             => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'duration_seconds'  => array( 'default' => 0, 'sanitize_callback' => 'absint' ),
+			),
+		) );
+
 		register_rest_route( 'alorbach/v1', '/stripe-webhook', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'stripe_webhook' ),
@@ -277,7 +298,8 @@ class REST_Proxy {
 		);
 
 		$response['cost_uc']      = $uc_cost;
-		$response['cost_credits'] = User_Display::uc_to_credits( $uc_cost );
+		$response['cost_credits']  = User_Display::uc_to_credits( $uc_cost );
+		$response['cost_usd']     = User_Display::uc_to_usd( $uc_cost );
 		return rest_ensure_response( $response );
 	}
 
@@ -291,8 +313,9 @@ class REST_Proxy {
 		$user_id = get_current_user_id();
 		$balance = Ledger::get_balance( $user_id );
 		return rest_ensure_response( array(
-			'balance_uc' => $balance,
+			'balance_uc'      => $balance,
 			'balance_credits' => User_Display::uc_to_credits( $balance ),
+			'balance_usd'     => User_Display::uc_to_usd( $balance ),
 		) );
 	}
 
@@ -366,6 +389,41 @@ class REST_Proxy {
 				'allow_select' => $allow_video,
 				'options'      => $video_options,
 			),
+		) );
+	}
+
+	/**
+	 * Get estimated cost for image, video, or audio based on selected settings.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function me_estimate( $request ) {
+		$type = $request->get_param( 'type' );
+		$cost_uc = 0;
+
+		if ( $type === 'image' ) {
+			$size    = $request->get_param( 'size' ) ?: '1024x1024';
+			$quality = $request->get_param( 'quality' ) ?: 'medium';
+			$n       = max( 1, min( 10, (int) $request->get_param( 'n' ) ) );
+			$model   = get_option( 'alorbach_image_default_model', 'dall-e-3' );
+			$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
+			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
+		} elseif ( $type === 'video' ) {
+			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_video_model', 'sora-2' );
+			$api_cost = Cost_Matrix::get_video_cost( $model );
+			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
+		} elseif ( $type === 'audio' ) {
+			$duration = max( 1, (int) $request->get_param( 'duration_seconds' ) );
+			$model    = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_audio_model', 'whisper-1' );
+			$api_cost  = Cost_Matrix::get_audio_cost( $duration, $model );
+			$cost_uc   = Cost_Matrix::apply_user_cost( $api_cost );
+		}
+
+		return rest_ensure_response( array(
+			'cost_uc'      => $cost_uc,
+			'cost_credits' => User_Display::uc_to_credits( $cost_uc ),
+			'cost_usd'     => User_Display::uc_to_usd( $cost_uc ),
 		) );
 	}
 
@@ -483,6 +541,7 @@ class REST_Proxy {
 		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
+		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
 		return rest_ensure_response( $response );
 	}
 
@@ -537,7 +596,8 @@ class REST_Proxy {
 		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost );
 		$response['cost_uc']           = $cost;
 		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
-		$response['duration_seconds']  = $duration;
+		$response['cost_usd']           = User_Display::uc_to_usd( $cost );
+		$response['duration_seconds']   = $duration;
 		return rest_ensure_response( $response );
 	}
 
@@ -567,6 +627,7 @@ class REST_Proxy {
 		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
+		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
 		return rest_ensure_response( $response );
 	}
 

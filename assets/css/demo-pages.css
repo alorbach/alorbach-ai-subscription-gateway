@@ -31,6 +31,16 @@
 	color: #2271b1;
 }
 
+.alorbach-demo-cost-wrap {
+	margin: 0 0 1rem 0;
+}
+
+.alorbach-demo-cost {
+	font-weight: 600;
+	color: #2271b1;
+	font-size: 1rem;
+}
+
 .alorbach-demo-messages {
 	min-height: 200px;
 	max-height: 400px;

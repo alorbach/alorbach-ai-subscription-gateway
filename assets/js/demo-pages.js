@@ -30,13 +30,35 @@
 		apiFetch('/me/balance').then(function (r) { return r.json(); }).then(function (data) {
 			if (data.balance_credits !== undefined) {
 				var el = container.querySelector('.alorbach-demo-balance');
-				if (el) el.textContent = data.balance_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+				if (el) {
+					var txt = data.balance_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+					if (data.balance_usd !== undefined) txt += ' ($' + data.balance_usd.toFixed(2) + ')';
+					el.textContent = txt;
+				}
 			}
 		}).catch(function () {});
 	}
 
 	function getModels(container) {
 		return apiFetch('/me/models').then(function (r) { return r.json(); });
+	}
+
+	function updateCostEstimate(container, type, params, costEl) {
+		if (!costEl) return;
+		var wrap = costEl.parentElement && costEl.parentElement.classList && costEl.parentElement.classList.contains('alorbach-demo-cost-wrap') ? costEl.parentElement : null;
+		var qs = Object.keys(params).map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
+		apiFetch('/me/estimate?' + qs).then(function (r) { return r.json(); }).then(function (data) {
+			if (data.cost_credits !== undefined) {
+				var credits = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+				var usd = data.cost_usd !== undefined ? ' ($' + data.cost_usd.toFixed(2) + ')' : '';
+				costEl.textContent = (config.costLabel || 'Cost: ') + credits + usd;
+				costEl.style.display = '';
+				if (wrap) wrap.style.display = '';
+			}
+		}).catch(function () {
+			costEl.style.display = 'none';
+			if (wrap) wrap.style.display = 'none';
+		});
 	}
 
 	function handleError(err, container) {
@@ -149,7 +171,11 @@
 					var ct = data.usage.completion_tokens || 0;
 					if (pt || ct) usageParts.push((pt + ct) + ' tokens');
 				}
-				if (data.cost_credits !== undefined) usageParts.push(data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits'));
+				if (data.cost_credits !== undefined) {
+					var costTxt = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+					if (data.cost_usd !== undefined) costTxt += ' ($' + data.cost_usd.toFixed(2) + ')';
+					usageParts.push(costTxt);
+				}
 				var usageInfo = usageParts.length ? usageParts.join(' | ') : '';
 				appendMessage('assistant', content, usageInfo);
 				getBalance(container);
@@ -206,7 +232,21 @@
 				});
 			}
 			container.dataset.quality = q.default || 'medium';
+			refreshImageCost();
 		});
+
+		function refreshImageCost() {
+			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1024x1024';
+			var quality = (qualitySelect && qualitySelect.value) || container.dataset.quality || 'medium';
+			var n = (nInput && parseInt(nInput.value, 10)) || 1;
+			n = Math.min(10, Math.max(1, n));
+			updateCostEstimate(container, 'image', { type: 'image', size: size, quality: quality, n: n }, container.querySelector('.alorbach-demo-cost'));
+		}
+
+		if (sizeSelect) sizeSelect.addEventListener('change', refreshImageCost);
+		if (qualitySelect) qualitySelect.addEventListener('change', refreshImageCost);
+		if (nInput) nInput.addEventListener('change', refreshImageCost);
+		if (nInput) nInput.addEventListener('input', refreshImageCost);
 
 		function generate() {
 			var prompt = (promptEl && promptEl.value || '').trim();
@@ -269,7 +309,11 @@
 						var tok = data.usage.total_tokens || (data.usage.output_tokens || 0);
 						if (tok) usageParts.push(tok + ' tokens');
 					}
-					if (data.cost_credits !== undefined) usageParts.push(data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits'));
+					if (data.cost_credits !== undefined) {
+						var costTxt = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+						if (data.cost_usd !== undefined) costTxt += ' ($' + data.cost_usd.toFixed(2) + ')';
+						usageParts.push(costTxt);
+					}
 					usageEl.textContent = usageParts.length ? usageParts.join(' | ') : '';
 					usageEl.style.display = usageParts.length ? '' : 'none';
 				}
@@ -317,6 +361,22 @@
 			container.dataset.model = audio.default || 'whisper-1';
 		});
 
+		function refreshAudioCost() {
+			var costEl = container.querySelector('.alorbach-demo-cost');
+			if (!costEl) return;
+			var wrap = costEl.parentElement && costEl.parentElement.classList && costEl.parentElement.classList.contains('alorbach-demo-cost-wrap') ? costEl.parentElement : null;
+			if (!selectedFile || !duration) {
+				costEl.textContent = '';
+				costEl.style.display = 'none';
+				if (wrap) wrap.style.display = 'none';
+				return;
+			}
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'whisper-1';
+			updateCostEstimate(container, 'audio', { type: 'audio', duration_seconds: duration, model: model }, costEl);
+		}
+
+		if (modelSelect) modelSelect.addEventListener('change', refreshAudioCost);
+
 		function readDuration(file, cb) {
 			var url = URL.createObjectURL(file);
 			var audio = new Audio();
@@ -346,7 +406,9 @@
 			selectedFile = file;
 			if (fileInfo) fileInfo.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
 			readDuration(file, function (d) {
+				duration = d || 0;
 				if (fileInfo && d) fileInfo.textContent += ' ~' + d + 's';
+				refreshAudioCost();
 			});
 		}
 
@@ -397,7 +459,11 @@
 						if (usageEl) {
 							var usageParts = [];
 							if (data.duration_seconds) usageParts.push(data.duration_seconds + 's');
-							if (data.cost_credits !== undefined) usageParts.push(data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits'));
+							if (data.cost_credits !== undefined) {
+								var costTxt = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+								if (data.cost_usd !== undefined) costTxt += ' ($' + data.cost_usd.toFixed(2) + ')';
+								usageParts.push(costTxt);
+							}
 							usageEl.textContent = usageParts.length ? usageParts.join(' | ') : '';
 							usageEl.style.display = usageParts.length ? '' : 'none';
 						}
@@ -439,7 +505,15 @@
 				});
 			}
 			container.dataset.model = video.default || 'sora-2';
+			refreshVideoCost();
 		});
+
+		function refreshVideoCost() {
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
+			updateCostEstimate(container, 'video', { type: 'video', model: model }, container.querySelector('.alorbach-demo-cost'));
+		}
+
+		if (modelSelect) modelSelect.addEventListener('change', refreshVideoCost);
 
 		function generate() {
 			var prompt = (promptEl && promptEl.value || '').trim();
@@ -487,7 +561,11 @@
 				var usageEl = container.querySelector('.alorbach-demo-usage');
 				if (usageEl) {
 					var usageParts = [];
-					if (data.cost_credits !== undefined) usageParts.push(data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits'));
+					if (data.cost_credits !== undefined) {
+						var costTxt = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+						if (data.cost_usd !== undefined) costTxt += ' ($' + data.cost_usd.toFixed(2) + ')';
+						usageParts.push(costTxt);
+					}
 					usageEl.textContent = usageParts.length ? usageParts.join(' | ') : '';
 					usageEl.style.display = usageParts.length ? '' : 'none';
 				}
