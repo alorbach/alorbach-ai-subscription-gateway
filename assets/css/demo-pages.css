@@ -88,11 +88,47 @@
 	resize: vertical;
 }
 
+/* Form card for image/video demos */
+.alorbach-demo-form-card {
+	background: #f9fafb;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+	padding: 1.5rem;
+	margin-bottom: 1.5rem;
+}
+
+.alorbach-demo-prompt-row {
+	margin-bottom: 1.25rem;
+}
+
+.alorbach-demo-prompt-row label {
+	display: block;
+	font-weight: 600;
+	font-size: 0.9rem;
+	margin-bottom: 0.5rem;
+	color: #374151;
+}
+
+.alorbach-demo-prompt-row .alorbach-demo-prompt,
+.alorbach-demo-prompt-row textarea.alorbach-demo-prompt {
+	display: block !important;
+	width: 100% !important;
+	min-width: 0 !important;
+	min-height: 4.5rem !important;
+	resize: vertical;
+}
+
+.alorbach-demo-action-row {
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid #e5e7eb;
+}
+
 .alorbach-demo-settings {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 1rem;
-	margin-bottom: 1rem;
+	margin-bottom: 0;
 	align-items: center;
 }
 
@@ -100,10 +136,25 @@
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
+	white-space: nowrap;
+	flex-shrink: 0;
 }
 
 .alorbach-demo-settings select {
 	min-width: 140px;
+}
+
+.alorbach-demo-model-wrap {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	align-items: center;
+	margin-bottom: 0;
+}
+
+.alorbach-demo-model-wrap label {
+	white-space: nowrap;
+	flex-shrink: 0;
 }
 
 .alorbach-demo-error {
@@ -150,23 +201,40 @@
 	}
 }
 
+.alorbach-demo.alorbach-demo-image,
+.alorbach-demo.alorbach-demo-video {
+	max-width: 800px;
+}
+
 .alorbach-demo-images {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-	gap: 1rem;
-	margin-top: 1rem;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: 1.25rem;
+	margin-top: 1.5rem;
 }
 
 .alorbach-demo-image-item {
 	position: relative;
+	background: #fff;
+	border-radius: 8px;
+	border: 1px solid #e5e7eb;
+	overflow: hidden;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .alorbach-demo-image-item img {
-	max-width: 100%;
+	display: block;
+	width: 100%;
 	height: auto;
-	border-radius: 4px;
-	border: 1px solid #c3c4c7;
+	border-radius: 0;
+	border: none;
 	cursor: pointer;
+}
+
+.alorbach-demo-image-actions {
+	padding: 0.5rem 0.75rem;
+	background: #f9fafb;
+	border-top: 1px solid #e5e7eb;
 }
 
 .alorbach-demo-image-actions {
@@ -269,22 +337,125 @@
 .alorbach-demo-videos {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-	gap: 1rem;
-	margin-top: 1rem;
+	gap: 1.25rem;
+	margin-top: 1.5rem;
 }
 
 .alorbach-demo-video-item {
 	position: relative;
+	background: #0a0a0a;
+	border-radius: 8px;
+	border: 1px solid #e5e7eb;
+	overflow: hidden;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .alorbach-demo-video-item video {
+	display: block;
 	width: 100%;
 	max-width: 100%;
-	border-radius: 4px;
-	border: 1px solid #c3c4c7;
+	border-radius: 0;
+	border: none;
 	background: #000;
 }
 
 .alorbach-demo-video-actions {
-	margin-top: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	background: #1a1a1a;
+	border-top: 1px solid #333;
+}
+
+/* Theme-independent buttons and form inputs (no reliance on wp-admin styles).
+   High specificity and !important ensure styles apply across all themes. */
+.alorbach-demo button,
+.alorbach-demo .button,
+.alorbach-demo input[type="submit"],
+.alorbach-demo input[type="button"] {
+	display: inline-block !important;
+	padding: 0.5rem 1.25rem !important;
+	font-size: 0.875rem !important;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, sans-serif !important;
+	line-height: 1.4 !important;
+	text-align: center !important;
+	text-decoration: none !important;
+	white-space: nowrap !important;
+	cursor: pointer !important;
+	border: 1px solid transparent !important;
+	border-radius: 4px !important;
+	background: #f0f0f1 !important;
+	color: #2c3338 !important;
+	box-sizing: border-box !important;
+	-webkit-appearance: none !important;
+	appearance: none !important;
+}
+
+.alorbach-demo button:hover,
+.alorbach-demo .button:hover {
+	background: #e0e0e1 !important;
+	color: #2c3338 !important;
+}
+
+.alorbach-demo .button-primary,
+.alorbach-demo button.button-primary {
+	background: #2271b1 !important;
+	color: #fff !important;
+	border-color: #2271b1 !important;
+}
+
+.alorbach-demo .button-primary:hover,
+.alorbach-demo button.button-primary:hover {
+	background: #135e96 !important;
+	color: #fff !important;
+	border-color: #135e96 !important;
+}
+
+.alorbach-demo input[type="text"],
+.alorbach-demo input[type="number"],
+.alorbach-demo input.regular-text,
+.alorbach-demo input.alorbach-demo-prompt,
+.alorbach-demo input.alorbach-demo-n,
+.alorbach-demo select,
+.alorbach-demo select.alorbach-demo-size-select,
+.alorbach-demo select.alorbach-demo-quality-select,
+.alorbach-demo textarea {
+	display: inline-block !important;
+	padding: 0.5rem 0.75rem !important;
+	font-size: 0.875rem !important;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, sans-serif !important;
+	line-height: 1.4 !important;
+	border: 1px solid #8c8f94 !important;
+	border-radius: 4px !important;
+	background: #fff !important;
+	color: #2c3338 !important;
+	box-sizing: border-box !important;
+	-webkit-appearance: none !important;
+	appearance: none !important;
+	min-height: 2.25rem !important;
+}
+
+.alorbach-demo input[type="text"],
+.alorbach-demo input.alorbach-demo-prompt {
+	min-width: 200px !important;
+}
+
+.alorbach-demo input[type="number"],
+.alorbach-demo input.alorbach-demo-n {
+	width: 4rem !important;
+	min-width: 4rem !important;
+}
+
+.alorbach-demo select,
+.alorbach-demo select.alorbach-demo-size-select,
+.alorbach-demo select.alorbach-demo-quality-select {
+	min-width: 140px !important;
+}
+
+.alorbach-demo input[type="text"]:focus,
+.alorbach-demo input[type="number"]:focus,
+.alorbach-demo input.regular-text:focus,
+.alorbach-demo select:focus,
+.alorbach-demo textarea:focus {
+	border-color: #2271b1 !important;
+	outline: none !important;
+	box-shadow: 0 0 0 1px #2271b1 !important;
 }

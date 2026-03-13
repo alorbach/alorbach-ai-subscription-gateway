@@ -29,6 +29,8 @@ function alorbach_load_textdomain() {
 	load_plugin_textdomain( 'alorbach-ai-gateway', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
 }
 
+add_action( 'init', array( 'Alorbach\AIGateway\Ledger', 'maybe_upgrade' ), 5 );
+
 register_activation_hook( __FILE__, 'alorbach_activate' );
 function alorbach_activate() {
 	Alorbach\AIGateway\Ledger::create_table();

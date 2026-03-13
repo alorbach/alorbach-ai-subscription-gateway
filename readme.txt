@@ -41,6 +41,9 @@ OpenAI, Azure OpenAI, Google (Gemini). API keys are configured in the admin.
 = How do I create demo pages for testing? =
 Go to AI Gateway > Demo Defaults. Set default models and optionally allow users to select models. Click "Create sample pages" to create demo pages: AI Chat Demo, Image Generator, Audio Transcription, and Video Generator. You can also add shortcodes manually: `[alorbach_demo_chat]`, `[alorbach_demo_image]`, `[alorbach_demo_transcribe]`, `[alorbach_demo_video]`.
 
+= Where is the developer documentation? =
+Go to AI Gateway > Developer in the admin. It includes shortcodes, REST API endpoints, hooks/filters, and PHP usage examples with copyable code samples.
+
 == Changelog ==
 
 = 1.0.0 =

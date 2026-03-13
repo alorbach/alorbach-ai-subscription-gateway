@@ -294,7 +294,8 @@ class REST_Proxy {
 			$prompt_tokens,
 			$cached_tokens,
 			$completion_tokens,
-			$request_signature
+			$request_signature,
+			$api_cost
 		);
 
 		$response['cost_uc']      = $uc_cost;
@@ -538,7 +539,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost );
+		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost, null, null, null, null, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
@@ -593,7 +594,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost );
+		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost, null, null, null, null, $api_cost );
 		$response['cost_uc']           = $cost;
 		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']           = User_Display::uc_to_usd( $cost );
@@ -624,7 +625,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost );
+		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost, null, null, null, null, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $cost );

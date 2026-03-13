@@ -161,7 +161,8 @@ class Admin_User_Balance {
 							<th><?php esc_html_e( 'User', 'alorbach-ai-gateway' ); ?></th>
 							<th><?php esc_html_e( 'Type', 'alorbach-ai-gateway' ); ?></th>
 							<th><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
-							<th><?php esc_html_e( 'UC Amount', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'AI Budget (UC)', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'User Charge (UC)', 'alorbach-ai-gateway' ); ?></th>
 							<th><?php esc_html_e( 'Credits', 'alorbach-ai-gateway' ); ?></th>
 							<th><?php esc_html_e( 'Date', 'alorbach-ai-gateway' ); ?></th>
 						</tr>
@@ -172,12 +173,14 @@ class Admin_User_Balance {
 							$user_login = $user ? $user->user_login : '';
 							$user_email = $user ? $user->user_email : '';
 							$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] );
+							$api_cost_uc = isset( $row['api_cost_uc'] ) ? $row['api_cost_uc'] : null;
 							?>
 							<tr>
 								<td><?php echo esc_html( $row['transaction_id'] ); ?></td>
 								<td><?php echo esc_html( $user_login ? $user_login . ' (' . $user_email . ')' : $row['user_id'] ); ?></td>
 								<td><?php echo esc_html( $row['transaction_type'] ); ?></td>
 								<td><?php echo esc_html( $row['model_used'] ?? '—' ); ?></td>
+								<td><?php echo $api_cost_uc !== null && $api_cost_uc !== '' ? esc_html( number_format_i18n( (int) $api_cost_uc ) ) : '—'; ?></td>
 								<td><?php echo esc_html( number_format_i18n( $row['uc_amount'] ) ); ?></td>
 								<td><?php echo esc_html( number_format_i18n( $credits, 2 ) ); ?></td>
 								<td><?php echo esc_html( $row['created_at'] ); ?></td>
@@ -236,13 +239,14 @@ class Admin_User_Balance {
 			return;
 		}
 
-		fputcsv( $out, array( 'transaction_id', 'user_id', 'user_login', 'user_email', 'transaction_type', 'model_used', 'uc_amount', 'credits', 'created_at' ) );
+		fputcsv( $out, array( 'transaction_id', 'user_id', 'user_login', 'user_email', 'transaction_type', 'model_used', 'api_cost_uc', 'user_charge_uc', 'credits', 'created_at' ) );
 
 		foreach ( $rows as $row ) {
 			$user      = $row['user_id'] ? get_user_by( 'id', $row['user_id'] ) : null;
 			$user_login = $user ? $user->user_login : '';
 			$user_email = $user ? $user->user_email : '';
 			$credits   = \Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] );
+			$api_cost_uc = isset( $row['api_cost_uc'] ) && $row['api_cost_uc'] !== null && $row['api_cost_uc'] !== '' ? $row['api_cost_uc'] : '';
 			fputcsv( $out, array(
 				$row['transaction_id'],
 				$row['user_id'],
@@ -250,6 +254,7 @@ class Admin_User_Balance {
 				$user_email,
 				$row['transaction_type'],
 				$row['model_used'] ?? '',
+				$api_cost_uc,
 				$row['uc_amount'],
 				$credits,
 				$row['created_at'],

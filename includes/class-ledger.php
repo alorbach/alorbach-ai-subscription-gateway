@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Ledger {
 
 	const TABLE_NAME = 'alorbach_ledger';
-	const DB_VERSION = '1.0';
+	const DB_VERSION = '1.1';
 
 	/**
 	 * Create the ledger table.
@@ -33,6 +33,7 @@ class Ledger {
 			transaction_type varchar(32) NOT NULL,
 			model_used varchar(64) DEFAULT NULL,
 			uc_amount bigint(20) NOT NULL,
+			api_cost_uc bigint(20) DEFAULT NULL,
 			raw_input_tokens int(11) DEFAULT NULL,
 			cached_tokens int(11) DEFAULT NULL,
 			raw_output_tokens int(11) DEFAULT NULL,
@@ -47,6 +48,16 @@ class Ledger {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 		update_option( 'alorbach_db_version', self::DB_VERSION );
+	}
+
+	/**
+	 * Upgrade database schema if needed (e.g. after plugin update).
+	 */
+	public static function maybe_upgrade() {
+		$current = get_option( 'alorbach_db_version', '0' );
+		if ( version_compare( $current, self::DB_VERSION, '<' ) ) {
+			self::create_table();
+		}
 	}
 
 	/**
@@ -70,9 +81,10 @@ class Ledger {
 	 * @param int|null    $cached_tokens      Cached tokens.
 	 * @param int|null    $raw_output_tokens  Output tokens.
 	 * @param string|null $request_signature  Request hash for idempotency.
+	 * @param int|null    $api_cost_uc        Raw API cost in UC (for deductions; used to separate AI budget from user charge).
 	 * @return int|false Insert ID or false.
 	 */
-	public static function insert_transaction( $user_id, $transaction_type, $model_used, $uc_amount, $raw_input_tokens = null, $cached_tokens = null, $raw_output_tokens = null, $request_signature = null ) {
+	public static function insert_transaction( $user_id, $transaction_type, $model_used, $uc_amount, $raw_input_tokens = null, $cached_tokens = null, $raw_output_tokens = null, $request_signature = null, $api_cost_uc = null ) {
 		global $wpdb;
 		$table = self::get_table_name();
 
@@ -83,12 +95,13 @@ class Ledger {
 				'transaction_type'   => sanitize_text_field( $transaction_type ),
 				'model_used'         => $model_used ? sanitize_text_field( $model_used ) : null,
 				'uc_amount'          => (int) $uc_amount,
+				'api_cost_uc'        => $api_cost_uc !== null ? (int) $api_cost_uc : null,
 				'raw_input_tokens'   => $raw_input_tokens !== null ? (int) $raw_input_tokens : null,
 				'cached_tokens'      => $cached_tokens !== null ? (int) $cached_tokens : null,
 				'raw_output_tokens'  => $raw_output_tokens !== null ? (int) $raw_output_tokens : null,
 				'request_signature'  => $request_signature ? sanitize_text_field( $request_signature ) : null,
 			),
-			array( '%d', '%s', '%s', '%d', '%d', '%d', '%d', '%s' )
+			array( '%d', '%s', '%s', '%d', '%d', '%d', '%d', '%d', '%s' )
 		);
 
 		return $result ? $wpdb->insert_id : false;
@@ -200,12 +213,12 @@ class Ledger {
 			$values[] = $offset;
 			if ( count( $values ) > 2 ) {
 				$rows = $wpdb->get_results( $wpdb->prepare(
-					"SELECT l.transaction_id, l.user_id, l.transaction_type, l.model_used, l.uc_amount, l.raw_input_tokens, l.cached_tokens, l.raw_output_tokens, l.created_at FROM {$table} l WHERE {$where_sql} ORDER BY l.created_at DESC LIMIT %d OFFSET %d",
+					"SELECT l.transaction_id, l.user_id, l.transaction_type, l.model_used, l.uc_amount, l.api_cost_uc, l.raw_input_tokens, l.cached_tokens, l.raw_output_tokens, l.created_at FROM {$table} l WHERE {$where_sql} ORDER BY l.created_at DESC LIMIT %d OFFSET %d",
 					...$values
 				), ARRAY_A );
 			} else {
 				$rows = $wpdb->get_results( $wpdb->prepare(
-					"SELECT transaction_id, user_id, transaction_type, model_used, uc_amount, raw_input_tokens, cached_tokens, raw_output_tokens, created_at FROM {$table} ORDER BY created_at DESC LIMIT %d OFFSET %d",
+					"SELECT transaction_id, user_id, transaction_type, model_used, uc_amount, api_cost_uc, raw_input_tokens, cached_tokens, raw_output_tokens, created_at FROM {$table} ORDER BY created_at DESC LIMIT %d OFFSET %d",
 					$per_page,
 					$offset
 				), ARRAY_A );

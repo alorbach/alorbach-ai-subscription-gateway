@@ -78,28 +78,32 @@ class Demo_Shortcodes {
 				<span class="alorbach-demo-balance"><?php echo esc_html( $credits ); ?></span>
 			</div>
 			<div class="alorbach-demo-error" style="display:none;"></div>
-			<div class="alorbach-demo-settings">
-				<label>
-					<?php esc_html_e( 'Prompt:', 'alorbach-ai-gateway' ); ?>
-					<input type="text" class="alorbach-demo-prompt regular-text" placeholder="<?php esc_attr_e( 'Describe the image...', 'alorbach-ai-gateway' ); ?>" style="min-width:200px;">
-				</label>
-				<label class="alorbach-demo-size-wrap">
-					<?php esc_html_e( 'Size:', 'alorbach-ai-gateway' ); ?>
-					<select class="alorbach-demo-size-select"></select>
-				</label>
-				<label class="alorbach-demo-quality-wrap" style="display:none;">
-					<?php esc_html_e( 'Quality:', 'alorbach-ai-gateway' ); ?>
-					<select class="alorbach-demo-quality-select"></select>
-				</label>
-				<label>
-					<?php esc_html_e( 'Number:', 'alorbach-ai-gateway' ); ?>
-					<input type="number" class="alorbach-demo-n" value="1" min="1" max="10" style="width:60px;">
-				</label>
+			<div class="alorbach-demo-form-card">
+				<div class="alorbach-demo-prompt-row">
+					<label for="alorbach-image-prompt"><?php esc_html_e( 'Prompt', 'alorbach-ai-gateway' ); ?></label>
+					<textarea id="alorbach-image-prompt" class="alorbach-demo-prompt" rows="3" placeholder="<?php esc_attr_e( 'Describe the image you want to create...', 'alorbach-ai-gateway' ); ?>"></textarea>
+				</div>
+				<div class="alorbach-demo-settings">
+					<label class="alorbach-demo-size-wrap">
+						<?php esc_html_e( 'Size', 'alorbach-ai-gateway' ); ?>
+						<select class="alorbach-demo-size-select"></select>
+					</label>
+					<label class="alorbach-demo-quality-wrap" style="display:none;">
+						<?php esc_html_e( 'Quality', 'alorbach-ai-gateway' ); ?>
+						<select class="alorbach-demo-quality-select"></select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Number', 'alorbach-ai-gateway' ); ?>
+						<input type="number" class="alorbach-demo-n" value="1" min="1" max="10">
+					</label>
+				</div>
+				<p class="alorbach-demo-cost-wrap" style="display:none;">
+					<span class="alorbach-demo-cost" aria-live="polite"></span>
+				</p>
+				<div class="alorbach-demo-action-row">
+					<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
+				</div>
 			</div>
-			<p class="alorbach-demo-cost-wrap" style="display:none;">
-				<span class="alorbach-demo-cost" aria-live="polite"></span>
-			</p>
-			<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
 			<div class="alorbach-demo-images"></div>
 			<div class="alorbach-demo-usage" aria-live="polite"></div>
 		</div>
@@ -175,20 +179,24 @@ class Demo_Shortcodes {
 				<span class="alorbach-demo-balance"><?php echo esc_html( $credits ); ?></span>
 			</div>
 			<div class="alorbach-demo-error" style="display:none;"></div>
-			<div class="alorbach-demo-settings">
-				<label>
-					<?php esc_html_e( 'Prompt:', 'alorbach-ai-gateway' ); ?>
-					<input type="text" class="alorbach-demo-prompt regular-text" placeholder="<?php esc_attr_e( 'Describe the video...', 'alorbach-ai-gateway' ); ?>" style="min-width:200px;">
-				</label>
-				<label class="alorbach-demo-model-wrap" style="display:none;">
-					<?php esc_html_e( 'Model:', 'alorbach-ai-gateway' ); ?>
-					<select class="alorbach-demo-model-select"></select>
-				</label>
+			<div class="alorbach-demo-form-card">
+				<div class="alorbach-demo-prompt-row">
+					<label for="alorbach-video-prompt"><?php esc_html_e( 'Prompt', 'alorbach-ai-gateway' ); ?></label>
+					<textarea id="alorbach-video-prompt" class="alorbach-demo-prompt" rows="3" placeholder="<?php esc_attr_e( 'Describe the video you want to create...', 'alorbach-ai-gateway' ); ?>"></textarea>
+				</div>
+				<div class="alorbach-demo-settings alorbach-demo-model-wrap" style="display:none;">
+					<label>
+						<?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?>
+						<select class="alorbach-demo-model-select"></select>
+					</label>
+				</div>
+				<p class="alorbach-demo-cost-wrap" style="display:none;">
+					<span class="alorbach-demo-cost" aria-live="polite"></span>
+				</p>
+				<div class="alorbach-demo-action-row">
+					<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
+				</div>
 			</div>
-			<p class="alorbach-demo-cost-wrap" style="display:none;">
-				<span class="alorbach-demo-cost" aria-live="polite"></span>
-			</p>
-			<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
 			<div class="alorbach-demo-videos"></div>
 			<div class="alorbach-demo-usage" aria-live="polite"></div>
 		</div>
