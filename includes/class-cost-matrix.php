@@ -84,6 +84,19 @@ class Cost_Matrix {
 	}
 
 	/**
+	 * Get video generation cost (UC) per video.
+	 *
+	 * @param string $model Model ID (e.g. sora-2).
+	 * @return int UC cost per video.
+	 */
+	public static function get_video_cost( $model = 'sora-2' ) {
+		$costs = get_option( 'alorbach_video_costs', array() );
+		$costs = is_array( $costs ) ? $costs : array();
+		$costs = apply_filters( 'alorbach_video_costs', $costs );
+		return isset( $costs[ $model ] ) ? (int) $costs[ $model ] : 400000;
+	}
+
+	/**
 	 * Get audio transcription cost (UC) for given duration and model.
 	 *
 	 * @param int    $seconds Duration in seconds.

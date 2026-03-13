@@ -32,6 +32,9 @@ function alorbach_load_textdomain() {
 register_activation_hook( __FILE__, 'alorbach_activate' );
 function alorbach_activate() {
 	Alorbach\AIGateway\Ledger::create_table();
+	if ( apply_filters( 'alorbach_create_sample_pages_on_activation', false ) ) {
+		Alorbach\AIGateway\Admin\Admin_Demo_Defaults::create_sample_pages();
+	}
 }
 
 register_deactivation_hook( __FILE__, 'alorbach_deactivate' );
@@ -69,6 +72,10 @@ add_shortcode( 'alorbach_usage_month', 'alorbach_usage_month_shortcode' );
 function alorbach_usage_month_shortcode() {
 	return Alorbach\AIGateway\User_Display::render_usage_month();
 }
+
+add_shortcode( 'alorbach_demo_chat', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_chat' ) );
+add_shortcode( 'alorbach_demo_image', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_image' ) );
+add_shortcode( 'alorbach_demo_transcribe', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_transcribe' ) );
 
 add_action( 'plugins_loaded', 'alorbach_register_woocommerce_hooks' );
 function alorbach_register_woocommerce_hooks() {

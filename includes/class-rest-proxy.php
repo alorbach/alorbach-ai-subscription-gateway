@@ -67,6 +67,14 @@ class REST_Proxy {
 			),
 		) );
 
+		register_rest_route( 'alorbach/v1', '/me/models', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'me_models' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+		) );
+
 		register_rest_route( 'alorbach/v1', '/stripe-webhook', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'stripe_webhook' ),
@@ -96,6 +104,7 @@ class REST_Proxy {
 				'audio_base64'     => array( 'required' => true ),
 				'duration_seconds' => array( 'required' => false, 'sanitize_callback' => 'absint' ),
 				'model'            => array( 'default' => 'whisper-1', 'sanitize_callback' => 'sanitize_text_field' ),
+				'prompt'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -253,6 +262,8 @@ class REST_Proxy {
 			$request_signature
 		);
 
+		$response['cost_uc']      = $uc_cost;
+		$response['cost_credits'] = User_Display::uc_to_credits( $uc_cost );
 		return rest_ensure_response( $response );
 	}
 
@@ -285,6 +296,45 @@ class REST_Proxy {
 			'usage_uc' => $usage,
 			'usage_credits' => User_Display::uc_to_credits( $usage ),
 			'period' => $period,
+		) );
+	}
+
+	/**
+	 * Get configured models for demo pages (defaults, allow_select, options).
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function me_models( $request ) {
+		$admin = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
+		$text_options  = $admin::get_text_models();
+		$image_options = $admin::get_image_sizes();
+		$audio_options = $admin::get_audio_models();
+
+		$default_chat  = get_option( 'alorbach_demo_default_chat_model', $text_options[0] ?? 'gpt-4.1-mini' );
+		$default_image = get_option( 'alorbach_demo_default_image_model', $image_options[0] ?? '1024x1024' );
+		$default_audio = get_option( 'alorbach_demo_default_audio_model', $audio_options[0] ?? 'whisper-1' );
+
+		$allow_chat  = (bool) get_option( 'alorbach_demo_allow_chat_model_select', false );
+		$allow_image = (bool) get_option( 'alorbach_demo_allow_image_model_select', false );
+		$allow_audio = (bool) get_option( 'alorbach_demo_allow_audio_model_select', false );
+
+		return rest_ensure_response( array(
+			'text'  => array(
+				'default'     => in_array( $default_chat, $text_options, true ) ? $default_chat : ( $text_options[0] ?? 'gpt-4.1-mini' ),
+				'allow_select' => $allow_chat,
+				'options'     => $text_options,
+			),
+			'image' => array(
+				'default'     => in_array( $default_image, $image_options, true ) ? $default_image : ( $image_options[0] ?? '1024x1024' ),
+				'allow_select' => $allow_image,
+				'options'     => $image_options,
+			),
+			'audio' => array(
+				'default'     => in_array( $default_audio, $audio_options, true ) ? $default_audio : ( $audio_options[0] ?? 'whisper-1' ),
+				'allow_select' => $allow_audio,
+				'options'     => $audio_options,
+			),
 		) );
 	}
 
@@ -394,6 +444,8 @@ class REST_Proxy {
 		}
 
 		Ledger::insert_transaction( $user_id, 'image_deduction', 'dall-e-3', -$cost );
+		$response['cost_uc']      = $cost;
+		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		return rest_ensure_response( $response );
 	}
 
@@ -408,6 +460,7 @@ class REST_Proxy {
 		$audio_b64 = $request->get_param( 'audio_base64' );
 		$duration  = (int) $request->get_param( 'duration_seconds' );
 		$model     = $request->get_param( 'model' ) ?: 'whisper-1';
+		$prompt    = $request->get_param( 'prompt' ) ?: '';
 
 		$decoded = base64_decode( $audio_b64, true );
 		if ( false === $decoded ) {
@@ -436,7 +489,7 @@ class REST_Proxy {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
-		$response = API_Client::transcribe( $tmp, $model );
+		$response = API_Client::transcribe( $tmp, $model, $prompt );
 		@unlink( $tmp );
 
 		if ( is_wp_error( $response ) ) {
@@ -444,6 +497,9 @@ class REST_Proxy {
 		}
 
 		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost );
+		$response['cost_uc']           = $cost;
+		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
+		$response['duration_seconds']  = $duration;
 		return rest_ensure_response( $response );
 	}
 

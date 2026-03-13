@@ -252,10 +252,12 @@ class API_Client {
 	 *
 	 * @param string $file_path Path to audio file.
 	 * @param string $model    Model (e.g. whisper-1, gpt-4o-transcribe). Default whisper-1.
+	 * @param string $prompt   Optional prompt for context (spelling, style). Supported by Whisper.
 	 * @return array|WP_Error Response with 'text' or error.
 	 */
-	public static function transcribe( $file_path, $model = 'whisper-1' ) {
+	public static function transcribe( $file_path, $model = 'whisper-1', $prompt = '' ) {
 		$model    = $model ?: 'whisper-1';
+		$prompt   = is_string( $prompt ) ? trim( $prompt ) : '';
 		$keys     = get_option( 'alorbach_api_keys', array() );
 		$keys     = is_array( $keys ) ? $keys : array();
 		$provider = self::get_provider_for_model( $model );
@@ -270,6 +272,15 @@ class API_Client {
 			$body .= '--' . $boundary . "\r\n";
 			$body .= 'Content-Disposition: form-data; name="model"' . "\r\n\r\n";
 			$body .= $model . "\r\n";
+			if ( $prompt !== '' ) {
+				$body .= '--' . $boundary . "\r\n";
+				$body .= 'Content-Disposition: form-data; name="prompt"' . "\r\n\r\n";
+				$body .= $prompt . "\r\n";
+			}
+		} elseif ( $prompt !== '' ) {
+			$body .= '--' . $boundary . "\r\n";
+			$body .= 'Content-Disposition: form-data; name="prompt"' . "\r\n\r\n";
+			$body .= $prompt . "\r\n";
 		}
 		$body .= '--' . $boundary . "\r\n";
 		$body .= 'Content-Disposition: form-data; name="file"; filename="' . basename( $file_path ) . '"' . "\r\n";
