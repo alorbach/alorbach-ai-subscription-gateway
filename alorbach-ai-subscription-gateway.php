@@ -76,6 +76,7 @@ function alorbach_usage_month_shortcode() {
 add_shortcode( 'alorbach_demo_chat', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_chat' ) );
 add_shortcode( 'alorbach_demo_image', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_image' ) );
 add_shortcode( 'alorbach_demo_transcribe', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_transcribe' ) );
+add_shortcode( 'alorbach_demo_video', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_video' ) );
 
 add_action( 'plugins_loaded', 'alorbach_register_woocommerce_hooks' );
 function alorbach_register_woocommerce_hooks() {

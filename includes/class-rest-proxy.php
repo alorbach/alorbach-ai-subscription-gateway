@@ -88,9 +88,10 @@ class REST_Proxy {
 				return is_user_logged_in();
 			},
 			'args'                => array(
-				'prompt' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
-				'size'   => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
-				'n'      => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
+				'prompt'  => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'size'    => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
+				'n'       => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
+				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -105,6 +106,18 @@ class REST_Proxy {
 				'duration_seconds' => array( 'required' => false, 'sanitize_callback' => 'absint' ),
 				'model'            => array( 'default' => 'whisper-1', 'sanitize_callback' => 'sanitize_text_field' ),
 				'prompt'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/video', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'video_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args'                => array(
+				'prompt' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'model'  => array( 'default' => 'sora-2', 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -310,30 +323,47 @@ class REST_Proxy {
 		$text_options  = $admin::get_text_models();
 		$image_options = $admin::get_image_sizes();
 		$audio_options = $admin::get_audio_models();
+		$video_options = $admin::get_video_models();
 
 		$default_chat  = get_option( 'alorbach_demo_default_chat_model', $text_options[0] ?? 'gpt-4.1-mini' );
 		$default_image = get_option( 'alorbach_demo_default_image_model', $image_options[0] ?? '1024x1024' );
 		$default_audio = get_option( 'alorbach_demo_default_audio_model', $audio_options[0] ?? 'whisper-1' );
+		$default_video = get_option( 'alorbach_demo_default_video_model', $video_options[0] ?? 'sora-2' );
 
-		$allow_chat  = (bool) get_option( 'alorbach_demo_allow_chat_model_select', false );
-		$allow_image = (bool) get_option( 'alorbach_demo_allow_image_model_select', false );
-		$allow_audio = (bool) get_option( 'alorbach_demo_allow_audio_model_select', false );
+		$allow_chat         = (bool) get_option( 'alorbach_demo_allow_chat_model_select', false );
+		$allow_image        = (bool) get_option( 'alorbach_demo_allow_image_model_select', false );
+		$allow_image_quality = (bool) get_option( 'alorbach_demo_allow_image_quality_select', false );
+		$allow_audio        = (bool) get_option( 'alorbach_demo_allow_audio_model_select', false );
+		$allow_video        = (bool) get_option( 'alorbach_demo_allow_video_model_select', false );
+
+		$default_quality = get_option( 'alorbach_image_default_quality', 'medium' );
+		$quality_options = array( 'low', 'medium', 'high' );
 
 		return rest_ensure_response( array(
 			'text'  => array(
-				'default'     => in_array( $default_chat, $text_options, true ) ? $default_chat : ( $text_options[0] ?? 'gpt-4.1-mini' ),
+				'default'      => in_array( $default_chat, $text_options, true ) ? $default_chat : ( $text_options[0] ?? 'gpt-4.1-mini' ),
 				'allow_select' => $allow_chat,
-				'options'     => $text_options,
+				'options'      => $text_options,
 			),
 			'image' => array(
-				'default'     => in_array( $default_image, $image_options, true ) ? $default_image : ( $image_options[0] ?? '1024x1024' ),
+				'default'      => in_array( $default_image, $image_options, true ) ? $default_image : ( $image_options[0] ?? '1024x1024' ),
 				'allow_select' => $allow_image,
-				'options'     => $image_options,
+				'options'      => $image_options,
+				'quality'      => array(
+					'default'      => in_array( $default_quality, $quality_options, true ) ? $default_quality : 'medium',
+					'allow_select' => $allow_image_quality,
+					'options'      => $quality_options,
+				),
 			),
 			'audio' => array(
-				'default'     => in_array( $default_audio, $audio_options, true ) ? $default_audio : ( $audio_options[0] ?? 'whisper-1' ),
+				'default'      => in_array( $default_audio, $audio_options, true ) ? $default_audio : ( $audio_options[0] ?? 'whisper-1' ),
 				'allow_select' => $allow_audio,
-				'options'     => $audio_options,
+				'options'      => $audio_options,
+			),
+			'video' => array(
+				'default'      => in_array( $default_video, $video_options, true ) ? $default_video : ( $video_options[0] ?? 'sora-2' ),
+				'allow_select' => $allow_video,
+				'options'      => $video_options,
 			),
 		) );
 	}
@@ -431,19 +461,24 @@ class REST_Proxy {
 		$size    = $request->get_param( 'size' );
 		$n       = (int) $request->get_param( 'n' );
 		$n       = min( 10, max( 1, $n ) );
+		$quality = $request->get_param( 'quality' );
+		$model   = get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$quality = ( $quality && in_array( $quality, array( 'low', 'medium', 'high' ), true ) )
+			? $quality
+			: get_option( 'alorbach_image_default_quality', 'medium' );
 
-		$cost = Cost_Matrix::get_image_cost( $size ) * $n;
+		$cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
 		$balance = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
-		$response = API_Client::images( $prompt, $size, $n );
+		$response = API_Client::images( $prompt, $size, $n, $model, $quality );
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'image_deduction', 'dall-e-3', -$cost );
+		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		return rest_ensure_response( $response );
@@ -500,6 +535,34 @@ class REST_Proxy {
 		$response['cost_uc']           = $cost;
 		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
 		$response['duration_seconds']  = $duration;
+		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Video generation handler (Sora).
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function video_handler( $request ) {
+		$user_id = get_current_user_id();
+		$prompt  = $request->get_param( 'prompt' );
+		$model   = $request->get_param( 'model' ) ?: 'sora-2';
+
+		$cost = Cost_Matrix::get_video_cost( $model );
+		$balance = Ledger::get_balance( $user_id );
+		if ( $balance < $cost ) {
+			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
+		}
+
+		$response = API_Client::video( $prompt, $model );
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost );
+		$response['cost_uc']      = $cost;
+		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		return rest_ensure_response( $response );
 	}
 

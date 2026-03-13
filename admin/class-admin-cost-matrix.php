@@ -33,8 +33,15 @@ class Admin_Cost_Matrix {
 	public static function render() {
 		$cost_matrix = get_option( 'alorbach_cost_matrix', array() );
 		$cost_matrix = is_array( $cost_matrix ) ? $cost_matrix : array();
-		$image_costs = get_option( 'alorbach_image_costs', array() );
-		$image_costs = is_array( $image_costs ) ? $image_costs : array();
+		$image_costs      = get_option( 'alorbach_image_costs', array() );
+		$image_costs      = is_array( $image_costs ) ? $image_costs : array();
+		$image_models     = get_option( 'alorbach_image_models', array() );
+		$image_models     = is_array( $image_models ) ? $image_models : array( 'dall-e-3', 'gpt-image-1.5' );
+		$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
+		$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
+		$image_default_model   = get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$image_default_quality = get_option( 'alorbach_image_default_quality', 'medium' );
+		$image_default_format  = get_option( 'alorbach_image_default_output_format', 'png' );
 		$video_costs = get_option( 'alorbach_video_costs', array() );
 		$video_costs = is_array( $video_costs ) ? $video_costs : array();
 		$audio_costs = get_option( 'alorbach_audio_costs', array() );
@@ -165,6 +172,42 @@ class Admin_Cost_Matrix {
 						$image_costs[ $size ] = absint( $cost );
 					}
 				}
+			}
+			if ( isset( $_POST['alorbach_image_default_model'] ) ) {
+				$image_default_model = sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_model'] ) );
+				update_option( 'alorbach_image_default_model', $image_default_model );
+			}
+			if ( isset( $_POST['alorbach_image_default_quality'] ) ) {
+				$image_default_quality = sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_quality'] ) );
+				update_option( 'alorbach_image_default_quality', $image_default_quality );
+			}
+			if ( isset( $_POST['alorbach_image_default_output_format'] ) ) {
+				$image_default_format = sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_output_format'] ) );
+				update_option( 'alorbach_image_default_output_format', $image_default_format );
+			}
+			if ( isset( $_POST['image_model_costs'] ) && is_array( $_POST['image_model_costs'] ) ) {
+				$image_model_costs = array();
+				foreach ( wp_unslash( $_POST['image_model_costs'] ) as $model => $qualities ) {
+					$model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( $model ) );
+					if ( empty( $model ) || ! is_array( $qualities ) ) {
+						continue;
+					}
+					$image_model_costs[ $model ] = array();
+					foreach ( $qualities as $quality => $sizes ) {
+						$quality = sanitize_text_field( $quality );
+						if ( ! in_array( $quality, array( 'low', 'medium', 'high' ), true ) || ! is_array( $sizes ) ) {
+							continue;
+						}
+						$image_model_costs[ $model ][ $quality ] = array();
+						foreach ( $sizes as $size => $cost ) {
+							$size = preg_replace( '/[^a-zA-Z0-9\-_x]/', '', sanitize_text_field( $size ) );
+							if ( ! empty( $size ) ) {
+								$image_model_costs[ $model ][ $quality ][ $size ] = absint( $cost );
+							}
+						}
+					}
+				}
+				update_option( 'alorbach_image_model_costs', $image_model_costs );
 			}
 			if ( isset( $_POST['video_costs'] ) && is_array( $_POST['video_costs'] ) ) {
 				$video_costs = array();
@@ -376,8 +419,42 @@ class Admin_Cost_Matrix {
 					</table>
 				</div>
 
-				<h2><?php esc_html_e( 'Image (DALL-E)', 'alorbach-ai-gateway' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Cost per image by size. Add custom sizes as needed.', 'alorbach-ai-gateway' ); ?> <?php esc_html_e( 'Test generates 1 image (costs credits on OpenAI).', 'alorbach-ai-gateway' ); ?></p>
+				<h2><?php esc_html_e( 'Image', 'alorbach-ai-gateway' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Default model, quality, and output format (admin only). Quality and format apply to GPT Image models.', 'alorbach-ai-gateway' ); ?></p>
+				<table class="form-table" style="max-width: 500px;">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Default image model', 'alorbach-ai-gateway' ); ?></th>
+						<td>
+							<select name="alorbach_image_default_model" id="alorbach_image_default_model">
+								<?php foreach ( array_unique( array_merge( $image_models, array( 'dall-e-3', 'gpt-image-1.5' ) ) ) as $m ) : ?>
+									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $image_default_model, $m ); ?>><?php echo esc_html( $m ); ?></option>
+								<?php endforeach; ?>
+							</select>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Default quality', 'alorbach-ai-gateway' ); ?></th>
+						<td>
+							<select name="alorbach_image_default_quality" id="alorbach_image_default_quality">
+								<option value="low" <?php selected( $image_default_quality, 'low' ); ?>><?php esc_html_e( 'Low', 'alorbach-ai-gateway' ); ?></option>
+								<option value="medium" <?php selected( $image_default_quality, 'medium' ); ?>><?php esc_html_e( 'Medium', 'alorbach-ai-gateway' ); ?></option>
+								<option value="high" <?php selected( $image_default_quality, 'high' ); ?>><?php esc_html_e( 'High', 'alorbach-ai-gateway' ); ?></option>
+							</select>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Output format', 'alorbach-ai-gateway' ); ?></th>
+						<td>
+							<select name="alorbach_image_default_output_format" id="alorbach_image_default_output_format">
+								<option value="png" <?php selected( $image_default_format, 'png' ); ?>><?php esc_html_e( 'PNG', 'alorbach-ai-gateway' ); ?></option>
+								<option value="jpeg" <?php selected( $image_default_format, 'jpeg' ); ?>><?php esc_html_e( 'JPEG', 'alorbach-ai-gateway' ); ?></option>
+							</select>
+						</td>
+					</tr>
+				</table>
+
+				<h3><?php esc_html_e( 'DALL-E: Cost per image by size', 'alorbach-ai-gateway' ); ?></h3>
+				<p class="description"><?php esc_html_e( 'Flat cost per size for DALL-E. Add custom sizes as needed.', 'alorbach-ai-gateway' ); ?> <?php esc_html_e( 'Test generates 1 image (costs credits on OpenAI).', 'alorbach-ai-gateway' ); ?></p>
 				<div class="alorbach-cost-grid-wrapper">
 					<table class="alorbach-cost-grid form-table">
 						<thead>
@@ -418,6 +495,54 @@ class Admin_Cost_Matrix {
 						</tbody>
 					</table>
 				</div>
+
+				<?php
+				$gpt_sizes = array( '1024x1024', '1024x1536', '1536x1024' );
+				$gpt_qualities = array( 'low', 'medium', 'high' );
+				if ( ! empty( $image_model_costs ) ) :
+					?>
+				<h3><?php esc_html_e( 'GPT Image: Cost per image by quality and size', 'alorbach-ai-gateway' ); ?></h3>
+				<p class="description"><?php esc_html_e( 'Cost varies by quality (low/medium/high) and resolution. Values in UC; USD shown next to each field.', 'alorbach-ai-gateway' ); ?></p>
+				<?php foreach ( $image_model_costs as $img_model => $qualities ) :
+					if ( strpos( $img_model, 'gpt-image' ) !== 0 ) {
+						continue;
+					}
+					?>
+				<div class="alorbach-cost-grid-wrapper" style="margin-bottom: 1.5rem;">
+					<h4><?php echo esc_html( $img_model ); ?></h4>
+					<table class="alorbach-cost-grid form-table">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Quality', 'alorbach-ai-gateway' ); ?></th>
+								<?php foreach ( $gpt_sizes as $s ) : ?>
+									<th class="alorbach-cost-num"><?php echo esc_html( $s ); ?> (UC / USD)</th>
+								<?php endforeach; ?>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $gpt_qualities as $q ) :
+								$row = isset( $qualities[ $q ] ) ? $qualities[ $q ] : array();
+								?>
+								<tr>
+									<td><?php echo esc_html( ucfirst( $q ) ); ?></td>
+									<?php foreach ( $gpt_sizes as $s ) :
+										$val = isset( $row[ $s ] ) ? (int) $row[ $s ] : '';
+										$val_int = (int) $val;
+										?>
+										<td class="alorbach-cost-num">
+											<div class="alorbach-cost-cell">
+												<input type="number" name="image_model_costs[<?php echo esc_attr( $img_model ); ?>][<?php echo esc_attr( $q ); ?>][<?php echo esc_attr( $s ); ?>]" class="alorbach-uc-input" value="<?php echo esc_attr( $val ); ?>" placeholder="<?php echo esc_attr( $q === 'medium' && $s === '1024x1024' ? '34000' : '' ); ?>" style="width: 90px;" data-alorbach-usd />
+												<span class="alorbach-usd"><?php echo esc_html( $format_usd( $val_int ) ); ?></span>
+											</div>
+										</td>
+									<?php endforeach; ?>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+				<?php endforeach; ?>
+				<?php endif; ?>
 
 				<h2><?php esc_html_e( 'Video (Sora)', 'alorbach-ai-gateway' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Cost per video by model. Add custom models as needed.', 'alorbach-ai-gateway' ); ?></p>

@@ -20,7 +20,7 @@ Alorbach AI Subscription Gateway is a billing and API access plugin for WordPres
 * Immutable SQL transaction ledger
 * Admin panel: API keys, cost matrix, plans, user balance, usage, demo defaults
 * User-facing: balance/usage display, shortcodes, hooks
-* Demo pages: Chat, Image Generator, Audio Transcription (shortcodes)
+* Demo pages: Chat, Image Generator, Audio Transcription, Video Generator (shortcodes)
 * WooCommerce Subscriptions and Stripe webhook support
 
 == Installation ==
@@ -39,7 +39,7 @@ Alorbach AI Subscription Gateway is a billing and API access plugin for WordPres
 OpenAI, Azure OpenAI, Google (Gemini). API keys are configured in the admin.
 
 = How do I create demo pages for testing? =
-Go to AI Gateway > Demo Defaults. Set default models and optionally allow users to select models. Click "Create sample pages" to create three demo pages: AI Chat Demo, Image Generator, and Audio Transcription. You can also add shortcodes manually: `[alorbach_demo_chat]`, `[alorbach_demo_image]`, `[alorbach_demo_transcribe]`.
+Go to AI Gateway > Demo Defaults. Set default models and optionally allow users to select models. Click "Create sample pages" to create demo pages: AI Chat Demo, Image Generator, Audio Transcription, and Video Generator. You can also add shortcodes manually: `[alorbach_demo_chat]`, `[alorbach_demo_image]`, `[alorbach_demo_transcribe]`, `[alorbach_demo_video]`.
 
 == Changelog ==
 

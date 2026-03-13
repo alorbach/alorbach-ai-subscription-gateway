@@ -73,10 +73,25 @@ class Cost_Matrix {
 	/**
 	 * Get image generation cost (UC).
 	 *
-	 * @param string $size Size (e.g. 1024x1024).
+	 * For gpt-image models: uses alorbach_image_model_costs[model][quality][size].
+	 * For DALL-E: uses flat alorbach_image_costs[size].
+	 *
+	 * @param string $size    Size/dimensions (e.g. 1024x1024).
+	 * @param string $model   Model ID (e.g. gpt-image-1.5, dall-e-3). Default from options.
+	 * @param string $quality Quality (low, medium, high). Default from options.
 	 * @return int UC cost.
 	 */
-	public static function get_image_cost( $size = '1024x1024' ) {
+	public static function get_image_cost( $size = '1024x1024', $model = null, $quality = null ) {
+		$model   = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$quality = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
+
+		$model_costs = get_option( 'alorbach_image_model_costs', array() );
+		$model_costs = is_array( $model_costs ) ? $model_costs : array();
+		$model_costs = apply_filters( 'alorbach_image_model_costs', $model_costs );
+		if ( isset( $model_costs[ $model ][ $quality ][ $size ] ) ) {
+			return (int) $model_costs[ $model ][ $quality ][ $size ];
+		}
+
 		$costs = get_option( 'alorbach_image_costs', array() );
 		$costs = is_array( $costs ) ? $costs : array();
 		$costs = apply_filters( 'alorbach_image_costs', $costs );
