@@ -38,3 +38,5 @@ delete_option( 'alorbach_demo_allow_image_model_select' );
 delete_option( 'alorbach_demo_allow_audio_model_select' );
 delete_option( 'alorbach_demo_allow_video_model_select' );
 delete_option( 'alorbach_demo_page_ids' );
+delete_option( 'alorbach_selling_enabled' );
+delete_option( 'alorbach_selling_multiplier' );

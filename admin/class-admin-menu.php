@@ -31,6 +31,7 @@ class Admin_Menu {
 		);
 
 		add_submenu_page( 'alorbach-ai-gateway', __( 'API Keys', 'alorbach-ai-gateway' ), __( 'API Keys', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-ai-gateway', array( Admin_API_Keys::class, 'render' ) );
+		add_submenu_page( 'alorbach-ai-gateway', __( 'Settings', 'alorbach-ai-gateway' ), __( 'Settings', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-settings', array( Admin_Settings::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Models', 'alorbach-ai-gateway' ), __( 'Models', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-cost-matrix', array( Admin_Cost_Matrix::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Demo Defaults', 'alorbach-ai-gateway' ), __( 'Demo Defaults', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-demo-defaults', array( Admin_Demo_Defaults::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Plans', 'alorbach-ai-gateway' ), __( 'Plans', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-plans', array( Admin_Plans::class, 'render' ) );

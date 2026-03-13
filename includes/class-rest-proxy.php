@@ -234,7 +234,7 @@ class REST_Proxy {
 		$output_estimate = $max_tokens;
 		$input_cost  = (int) ( ( $input_tokens * Cost_Matrix::get_input_cost_per_token( $model ) ) / 1000000 );
 		$output_cost = (int) ( ( $output_estimate * Cost_Matrix::get_output_cost_per_token( $model ) ) / 1000000 );
-		$auth_hold   = $input_cost + $output_cost;
+		$auth_hold   = Cost_Matrix::apply_user_cost( $input_cost + $output_cost );
 
 		$balance = Ledger::get_balance( $user_id );
 		if ( $balance < $auth_hold ) {
@@ -262,7 +262,8 @@ class REST_Proxy {
 		$completion_tokens = isset( $response['usage']['completion_tokens'] ) ? (int) $response['usage']['completion_tokens'] : 0;
 		$cached_tokens   = isset( $response['usage']['prompt_tokens_details']['cached_tokens'] ) ? (int) $response['usage']['prompt_tokens_details']['cached_tokens'] : 0;
 
-		$uc_cost = Cost_Matrix::calculate_chat_cost( $model, $prompt_tokens, $completion_tokens, $cached_tokens );
+		$api_cost = Cost_Matrix::calculate_chat_cost( $model, $prompt_tokens, $completion_tokens, $cached_tokens );
+		$uc_cost  = Cost_Matrix::apply_user_cost( $api_cost );
 
 		Ledger::insert_transaction(
 			$user_id,
@@ -467,8 +468,9 @@ class REST_Proxy {
 			? $quality
 			: get_option( 'alorbach_image_default_quality', 'medium' );
 
-		$cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
-		$balance = Ledger::get_balance( $user_id );
+		$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
+		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
+		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
@@ -517,8 +519,9 @@ class REST_Proxy {
 			return new \WP_Error( 'invalid_duration', __( 'duration_seconds required when getID3 is not available.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
-		$cost = Cost_Matrix::get_audio_cost( $duration, $model );
-		$balance = Ledger::get_balance( $user_id );
+		$api_cost = Cost_Matrix::get_audio_cost( $duration, $model );
+		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
+		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			@unlink( $tmp );
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
@@ -549,8 +552,9 @@ class REST_Proxy {
 		$prompt  = $request->get_param( 'prompt' );
 		$model   = $request->get_param( 'model' ) ?: 'sora-2';
 
-		$cost = Cost_Matrix::get_video_cost( $model );
-		$balance = Ledger::get_balance( $user_id );
+		$api_cost = Cost_Matrix::get_video_cost( $model );
+		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
+		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}

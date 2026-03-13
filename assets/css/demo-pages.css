@@ -1,0 +1,280 @@
+/**
+ * Demo pages shared styles.
+ *
+ * @package Alorbach\AIGateway
+ */
+
+.alorbach-demo {
+	max-width: 720px;
+	margin: 0 auto;
+	padding: 1.5rem 0;
+}
+
+.alorbach-demo-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 1.5rem;
+	padding-bottom: 1rem;
+	border-bottom: 1px solid #ddd;
+}
+
+.alorbach-demo-title {
+	margin: 0;
+	font-size: 1.5rem;
+}
+
+.alorbach-demo-balance {
+	font-weight: 600;
+	color: #2271b1;
+}
+
+.alorbach-demo-messages {
+	min-height: 200px;
+	max-height: 400px;
+	overflow-y: auto;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 1rem;
+	margin-bottom: 1rem;
+	background: #f6f7f7;
+}
+
+.alorbach-demo-message {
+	margin-bottom: 1rem;
+	padding: 0.75rem;
+	border-radius: 4px;
+}
+
+.alorbach-demo-message.user {
+	background: #f0f6fc;
+	border-left: 4px solid #2271b1;
+}
+
+.alorbach-demo-message.assistant {
+	background: #fff;
+	border-left: 4px solid #00a32a;
+}
+
+.alorbach-demo-message .role {
+	font-size: 0.75rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	color: #646970;
+	margin-bottom: 0.25rem;
+}
+
+.alorbach-demo-input-row {
+	display: flex;
+	gap: 0.5rem;
+	margin-top: 1rem;
+}
+
+.alorbach-demo-input-row textarea {
+	flex: 1;
+	min-height: 80px;
+	resize: vertical;
+}
+
+.alorbach-demo-settings {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	margin-bottom: 1rem;
+	align-items: center;
+}
+
+.alorbach-demo-settings label {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.alorbach-demo-settings select {
+	min-width: 140px;
+}
+
+.alorbach-demo-error {
+	background: #fcf0f1;
+	border: 1px solid #d63638;
+	color: #d63638;
+	padding: 0.75rem 1rem;
+	border-radius: 4px;
+	margin-bottom: 1rem;
+}
+
+.alorbach-demo {
+	position: relative;
+}
+
+.alorbach-demo-loading {
+	opacity: 0.7;
+	pointer-events: none;
+	cursor: wait;
+}
+
+.alorbach-demo-loading .alorbach-demo-spinner {
+	display: block;
+}
+
+.alorbach-demo-spinner {
+	display: none;
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	width: 40px;
+	height: 40px;
+	margin: -20px 0 0 -20px;
+	border: 3px solid #e0e0e0;
+	border-top-color: #2271b1;
+	border-radius: 50%;
+	animation: alorbach-spin 0.8s linear infinite;
+	z-index: 10;
+}
+
+@keyframes alorbach-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.alorbach-demo-images {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 1rem;
+	margin-top: 1rem;
+}
+
+.alorbach-demo-image-item {
+	position: relative;
+}
+
+.alorbach-demo-image-item img {
+	max-width: 100%;
+	height: auto;
+	border-radius: 4px;
+	border: 1px solid #c3c4c7;
+	cursor: pointer;
+}
+
+.alorbach-demo-image-actions {
+	margin-top: 0.5rem;
+}
+
+.alorbach-demo-download {
+	display: inline-block;
+	padding: 0.25rem 0.5rem;
+	font-size: 0.85rem;
+	background: #2271b1;
+	color: #fff;
+	border-radius: 4px;
+	text-decoration: none;
+}
+
+.alorbach-demo-download:hover {
+	background: #135e96;
+	color: #fff;
+}
+
+/* Lightbox */
+.alorbach-demo-lightbox {
+	display: none;
+	position: fixed;
+	inset: 0;
+	z-index: 100000;
+	align-items: center;
+	justify-content: center;
+	padding: 2rem;
+	box-sizing: border-box;
+}
+
+.alorbach-demo-lightbox.open {
+	display: flex;
+}
+
+.alorbach-demo-lightbox-backdrop {
+	position: absolute;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.8);
+	cursor: pointer;
+}
+
+.alorbach-demo-lightbox-img {
+	position: relative;
+	max-width: 100%;
+	max-height: 100%;
+	object-fit: contain;
+	border-radius: 4px;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.alorbach-demo-dropzone {
+	border: 2px dashed #c3c4c7;
+	border-radius: 8px;
+	padding: 2rem;
+	text-align: center;
+	background: #f6f7f7;
+}
+
+.alorbach-demo-dropzone.dragover {
+	border-color: #2271b1;
+	background: #f0f6fc;
+}
+
+.alorbach-demo-dropzone input[type="file"] {
+	display: none;
+}
+
+.alorbach-demo-result {
+	margin-top: 1rem;
+	padding: 1rem;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	white-space: pre-wrap;
+	word-wrap: break-word;
+}
+
+.alorbach-demo-login-required {
+	padding: 2rem;
+	text-align: center;
+	background: #f6f7f7;
+	border-radius: 4px;
+	border: 1px solid #c3c4c7;
+}
+
+.alorbach-demo-usage {
+	font-size: 0.8rem;
+	color: #646970;
+	margin-top: 0.5rem;
+}
+
+.alorbach-demo-message .alorbach-demo-usage {
+	margin-top: 0.25rem;
+}
+
+/* Video demo */
+.alorbach-demo-videos {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+	gap: 1rem;
+	margin-top: 1rem;
+}
+
+.alorbach-demo-video-item {
+	position: relative;
+}
+
+.alorbach-demo-video-item video {
+	width: 100%;
+	max-width: 100%;
+	border-radius: 4px;
+	border: 1px solid #c3c4c7;
+	background: #000;
+}
+
+.alorbach-demo-video-actions {
+	margin-top: 0.5rem;
+}

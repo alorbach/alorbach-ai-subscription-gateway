@@ -143,6 +143,79 @@ class Ledger {
 	}
 
 	/**
+	 * Get transactions with pagination.
+	 *
+	 * @param array $args {
+	 *     Optional. Arguments.
+	 *     @type int    $per_page   Rows per page. Default 50.
+	 *     @type int    $page       1-based page number. Default 1.
+	 *     @type int    $user_id    Filter by user ID. Default none.
+	 *     @type string $date_from  Start date (Y-m-d). Default none.
+	 *     @type string $date_to    End date (Y-m-d). Default none.
+	 * }
+	 * @return array{rows: array, total: int}
+	 */
+	public static function get_transactions( $args = array() ) {
+		global $wpdb;
+		$table = self::get_table_name();
+
+		$per_page  = isset( $args['per_page'] ) ? max( 1, (int) $args['per_page'] ) : 50;
+		$page      = isset( $args['page'] ) ? max( 1, (int) $args['page'] ) : 1;
+		$offset    = ( $page - 1 ) * $per_page;
+		$user_id   = isset( $args['user_id'] ) ? (int) $args['user_id'] : null;
+		$date_from = isset( $args['date_from'] ) ? sanitize_text_field( $args['date_from'] ) : null;
+		$date_to   = isset( $args['date_to'] ) ? sanitize_text_field( $args['date_to'] ) : null;
+
+		$where = array( '1=1' );
+		$values = array();
+
+		if ( $user_id !== null && $user_id > 0 ) {
+			$where[] = 'l.user_id = %d';
+			$values[] = $user_id;
+		}
+		if ( $date_from ) {
+			$where[] = 'l.created_at >= %s';
+			$values[] = $date_from . ' 00:00:00';
+		}
+		if ( $date_to ) {
+			$where[] = 'l.created_at <= %s';
+			$values[] = $date_to . ' 23:59:59';
+		}
+
+		$where_sql = implode( ' AND ', $where );
+
+		$total = 0;
+		if ( ! empty( $values ) ) {
+			$total = (int) $wpdb->get_var( $wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} l WHERE {$where_sql}",
+				...$values
+			) );
+		} else {
+			$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
+		}
+
+		$rows = array();
+		if ( $total > 0 ) {
+			$values[] = $per_page;
+			$values[] = $offset;
+			if ( count( $values ) > 2 ) {
+				$rows = $wpdb->get_results( $wpdb->prepare(
+					"SELECT l.transaction_id, l.user_id, l.transaction_type, l.model_used, l.uc_amount, l.raw_input_tokens, l.cached_tokens, l.raw_output_tokens, l.created_at FROM {$table} l WHERE {$where_sql} ORDER BY l.created_at DESC LIMIT %d OFFSET %d",
+					...$values
+				), ARRAY_A );
+			} else {
+				$rows = $wpdb->get_results( $wpdb->prepare(
+					"SELECT transaction_id, user_id, transaction_type, model_used, uc_amount, raw_input_tokens, cached_tokens, raw_output_tokens, created_at FROM {$table} ORDER BY created_at DESC LIMIT %d OFFSET %d",
+					$per_page,
+					$offset
+				), ARRAY_A );
+			}
+		}
+
+		return array( 'rows' => $rows ? $rows : array(), 'total' => $total );
+	}
+
+	/**
 	 * Check if request signature already exists (idempotency).
 	 *
 	 * @param string $signature Request signature.
