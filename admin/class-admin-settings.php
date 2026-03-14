@@ -21,17 +21,20 @@ class Admin_Settings {
 	 */
 	public static function render() {
 		if ( isset( $_POST['alorbach_settings_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_settings_nonce'] ) ), 'alorbach_settings' ) ) {
-			$selling_enabled  = isset( $_POST['alorbach_selling_enabled'] );
+			$selling_enabled   = isset( $_POST['alorbach_selling_enabled'] );
 			$selling_multiplier = isset( $_POST['alorbach_selling_multiplier'] ) ? (float) $_POST['alorbach_selling_multiplier'] : 2.0;
 			$selling_multiplier = max( 1.0, $selling_multiplier );
+			$debug_enabled     = isset( $_POST['alorbach_debug_enabled'] );
 
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
 			update_option( 'alorbach_selling_multiplier', $selling_multiplier );
+			update_option( 'alorbach_debug_enabled', $debug_enabled );
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Settings saved.', 'alorbach-ai-gateway' ) . '</p></div>';
 		}
 
-		$selling_enabled  = (bool) get_option( 'alorbach_selling_enabled', false );
+		$selling_enabled   = (bool) get_option( 'alorbach_selling_enabled', false );
 		$selling_multiplier = (float) get_option( 'alorbach_selling_multiplier', 2.0 );
+		$debug_enabled     = (bool) get_option( 'alorbach_debug_enabled', false );
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Settings', 'alorbach-ai-gateway' ); ?></h1>
@@ -56,6 +59,20 @@ class Admin_Settings {
 						<td>
 							<input type="number" name="alorbach_selling_multiplier" id="alorbach_selling_multiplier" value="<?php echo esc_attr( $selling_multiplier ); ?>" min="1" max="100" step="0.1" class="small-text" />
 							<p class="description"><?php esc_html_e( '2.0 = 100% profit (user pays 2× API cost).', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'Debug', 'alorbach-ai-gateway' ); ?></h2>
+				<table class="form-table">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Debug mode', 'alorbach-ai-gateway' ); ?></th>
+						<td>
+							<label for="alorbach_debug_enabled">
+								<input type="checkbox" name="alorbach_debug_enabled" id="alorbach_debug_enabled" value="1" <?php checked( $debug_enabled ); ?> />
+								<?php esc_html_e( 'Enable debug output for model import', 'alorbach-ai-gateway' ); ?>
+							</label>
+							<p class="description"><?php esc_html_e( 'When enabled, import API responses include a _debug object and the browser console logs payload and response details.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 				</table>

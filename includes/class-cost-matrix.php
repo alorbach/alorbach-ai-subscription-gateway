@@ -166,10 +166,85 @@ class Cost_Matrix {
 	 * @return array
 	 */
 	private static function get_costs_for_model( $model ) {
-		$saved   = get_option( 'alorbach_cost_matrix', array() );
-		$saved   = is_array( $saved ) ? $saved : array();
-		$all     = apply_filters( 'alorbach_cost_matrix', $saved );
+		$all     = self::get_cost_matrix();
 		$default = isset( $all['default'] ) ? $all['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
-		return isset( $all[ $model ] ) ? $all[ $model ] : $default;
+		$models  = isset( $all['models'] ) && is_array( $all['models'] ) ? $all['models'] : array();
+		foreach ( $models as $row ) {
+			if ( isset( $row['model'] ) && $row['model'] === $model ) {
+				return array(
+					'input'  => isset( $row['input'] ) ? (int) $row['input'] : 400000,
+					'output' => isset( $row['output'] ) ? (int) $row['output'] : 1600000,
+					'cached' => isset( $row['cached'] ) ? (int) $row['cached'] : 40000,
+				);
+			}
+		}
+		return $default;
+	}
+
+	/**
+	 * Get cost matrix (normalized). Runs migration if legacy format detected.
+	 *
+	 * @return array{default: array, models: array}
+	 */
+	public static function get_cost_matrix() {
+		$saved = get_option( 'alorbach_cost_matrix', array() );
+		$saved = is_array( $saved ) ? $saved : array();
+
+		if ( isset( $saved['models'] ) && is_array( $saved['models'] ) ) {
+			return apply_filters( 'alorbach_cost_matrix', $saved );
+		}
+
+		// Legacy format: flat model_id => costs. Migrate to new structure.
+		$migrated = self::migrate_cost_matrix( $saved );
+		if ( $migrated !== $saved ) {
+			update_option( 'alorbach_cost_matrix', $migrated );
+		}
+		return apply_filters( 'alorbach_cost_matrix', $migrated );
+	}
+
+	/**
+	 * Migrate legacy flat cost matrix to new models array format.
+	 *
+	 * @param array $saved Raw option value.
+	 * @return array Migrated structure.
+	 */
+	public static function migrate_cost_matrix( $saved ) {
+		$default = isset( $saved['default'] ) ? $saved['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
+		$models  = array();
+		foreach ( $saved as $key => $val ) {
+			if ( $key === 'default' || ! is_array( $val ) ) {
+				continue;
+			}
+			$provider = \Alorbach\AIGateway\API_Client::get_provider_for_model( $key );
+			$entry    = API_Keys_Helper::get_entry_by_type( $provider );
+			$entry_id = $entry ? ( $entry['id'] ?? '' ) : '';
+			if ( empty( $entry_id ) ) {
+				$entry_id = 'legacy';
+			}
+			$models[] = array(
+				'model'    => $key,
+				'entry_id' => $entry_id,
+				'input'    => isset( $val['input'] ) ? $val['input'] : '',
+				'output'   => isset( $val['output'] ) ? $val['output'] : '',
+				'cached'   => isset( $val['cached'] ) ? $val['cached'] : '',
+			);
+		}
+		return array(
+			'default' => $default,
+			'models'  => $models,
+		);
+	}
+
+	/**
+	 * Save cost matrix. Expects structure with default and models.
+	 *
+	 * @param array $data Array with default and models keys.
+	 */
+	public static function save_cost_matrix( $data ) {
+		$normalized = array(
+			'default' => isset( $data['default'] ) ? $data['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 ),
+			'models'  => isset( $data['models'] ) && is_array( $data['models'] ) ? $data['models'] : array(),
+		);
+		update_option( 'alorbach_cost_matrix', $normalized );
 	}
 }

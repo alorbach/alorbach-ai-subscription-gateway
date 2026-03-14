@@ -24,6 +24,16 @@ define( 'ALORBACH_UC_TO_CREDIT', 1000 );
 
 require_once ALORBACH_PLUGIN_DIR . 'vendor/autoload.php';
 
+// Explicitly load Provider classes (in case autoload classmap is stale).
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-api-keys-helper.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Interface.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Base.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/OpenAI_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Azure_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Google_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/GitHub_Models_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Registry.php';
+
 add_action( 'init', 'alorbach_load_textdomain' );
 function alorbach_load_textdomain() {
 	load_plugin_textdomain( 'alorbach-ai-gateway', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );

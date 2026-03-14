@@ -7,6 +7,8 @@
 
 namespace Alorbach\AIGateway;
 
+use Alorbach\AIGateway\Providers\Provider_Registry;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -17,133 +19,77 @@ if ( ! defined( 'ABSPATH' ) ) {
 class API_Validator {
 
 	/**
-	 * Verify OpenAI API key via GET /v1/models.
+	 * Verify API key for a provider.
+	 *
+	 * @param string $provider openai, azure, google, github_models.
+	 * @return array{success: bool, message?: string}
+	 */
+	public static function verify_key( $provider ) {
+		$prov = Provider_Registry::get( $provider );
+		if ( ! $prov ) {
+			return array( 'success' => false, 'message' => __( 'Unknown provider.', 'alorbach-ai-gateway' ) );
+		}
+		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		if ( ! $creds ) {
+			return array( 'success' => false, 'message' => __( 'API key not configured for this provider.', 'alorbach-ai-gateway' ) );
+		}
+		return $prov->verify_key( $creds );
+	}
+
+	/**
+	 * Verify OpenAI API key (backward compat).
 	 *
 	 * @return array{success: bool, message?: string}
 	 */
 	public static function verify_openai_key() {
-		$keys = get_option( 'alorbach_api_keys', array() );
-		$keys = is_array( $keys ) ? $keys : array();
-		$api_key = isset( $keys['openai'] ) ? $keys['openai'] : '';
-		if ( empty( $api_key ) ) {
-			return array( 'success' => false, 'message' => __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
-		}
-
-		$response = wp_remote_get(
-			'https://api.openai.com/v1/models',
-			array(
-				'headers' => array( 'Authorization' => 'Bearer ' . $api_key ),
-				'timeout' => 15,
-			)
-		);
-
-		if ( is_wp_error( $response ) ) {
-			return array( 'success' => false, 'message' => $response->get_error_message() );
-		}
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code >= 400 ) {
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg  = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid API key.', 'alorbach-ai-gateway' );
-			return array( 'success' => false, 'message' => $msg );
-		}
-		return array( 'success' => true );
+		return self::verify_key( 'openai' );
 	}
 
 	/**
-	 * Verify Azure OpenAI key via GET models.
-	 * Supports both traditional (*.openai.azure.com) and Foundry (*.services.ai.azure.com) endpoints.
+	 * Verify Azure OpenAI key (backward compat).
 	 *
 	 * @return array{success: bool, message?: string}
 	 */
 	public static function verify_azure_key() {
-		$keys = get_option( 'alorbach_api_keys', array() );
-		$keys = is_array( $keys ) ? $keys : array();
-		$endpoint = isset( $keys['azure_endpoint'] ) ? trim( $keys['azure_endpoint'] ) : '';
-		$api_key  = isset( $keys['azure'] ) ? $keys['azure'] : '';
-		if ( empty( $endpoint ) || empty( $api_key ) ) {
-			return array( 'success' => false, 'message' => __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
-		}
-		$endpoint = rtrim( $endpoint, '/' );
-		if ( strpos( $endpoint, '.azure.com' ) === false ) {
-			return array( 'success' => false, 'message' => __( 'Endpoint must end with .azure.com (e.g. https://xxx.services.ai.azure.com)', 'alorbach-ai-gateway' ) );
-		}
-
-		$is_foundry = ( strpos( $endpoint, 'services.ai.azure.com' ) !== false );
-		$urls       = $is_foundry
-			? array(
-				$endpoint . '/openai/v1/models',
-				$endpoint . '/openai/models?api-version=2024-10-21',
-			)
-			: array( $endpoint . '/openai/models?api-version=2024-10-21' );
-
-		$last_error = '';
-		foreach ( $urls as $url ) {
-			$response = wp_remote_get(
-				$url,
-				array(
-					'headers' => array( 'api-key' => $api_key ),
-					'timeout' => 15,
-				)
-			);
-			if ( is_wp_error( $response ) ) {
-				$last_error = $response->get_error_message();
-				continue;
-			}
-			$code = wp_remote_retrieve_response_code( $response );
-			if ( $code < 400 ) {
-				return array( 'success' => true );
-			}
-			$body      = json_decode( wp_remote_retrieve_body( $response ), true );
-			$last_error = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid Azure configuration.', 'alorbach-ai-gateway' );
-		}
-		return array( 'success' => false, 'message' => $last_error );
+		return self::verify_key( 'azure' );
 	}
 
 	/**
-	 * Verify Google API key via GET /v1beta/models.
+	 * Verify Google API key (backward compat).
 	 *
 	 * @return array{success: bool, message?: string}
 	 */
 	public static function verify_google_key() {
-		$keys = get_option( 'alorbach_api_keys', array() );
-		$keys = is_array( $keys ) ? $keys : array();
-		$api_key = isset( $keys['google'] ) ? $keys['google'] : '';
-		if ( empty( $api_key ) ) {
-			return array( 'success' => false, 'message' => __( 'Google API key not configured.', 'alorbach-ai-gateway' ) );
-		}
+		return self::verify_key( 'google' );
+	}
 
-		$url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' . $api_key;
-		$response = wp_remote_get( $url, array( 'timeout' => 15 ) );
-
-		if ( is_wp_error( $response ) ) {
-			return array( 'success' => false, 'message' => $response->get_error_message() );
-		}
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code >= 400 ) {
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg  = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid API key.', 'alorbach-ai-gateway' );
-			return array( 'success' => false, 'message' => $msg );
-		}
-		return array( 'success' => true );
+	/**
+	 * Verify GitHub Models token (backward compat).
+	 *
+	 * @return array{success: bool, message?: string}
+	 */
+	public static function verify_github_models_key() {
+		return self::verify_key( 'github_models' );
 	}
 
 	/**
 	 * Verify text model via minimal chat completion.
 	 *
-	 * @param string $provider openai, azure, google.
-	 * @param string $model    Model ID.
-	 * @return array{success: bool, message?: string}
+	 * @param string $provider  openai, azure, google, github_models.
+	 * @param string $model     Model ID.
+	 * @param string $entry_id  Optional. When set, use credentials for this specific entry.
+	 * @return array{success: bool, message?: string, result?: string}
 	 */
-	public static function verify_text_model( $provider, $model ) {
+	public static function verify_text_model( $provider, $model, $entry_id = '' ) {
 		if ( strpos( strtolower( $model ), 'sora' ) === 0 ) {
 			return array( 'success' => false, 'message' => __( 'Sora is a video model. Use video generation to verify; the Test button uses the chat API.', 'alorbach-ai-gateway' ) );
 		}
 		$body = array(
-			'model'       => $model,
-			'messages'    => array( array( 'role' => 'user', 'content' => 'Hi' ) ),
-			'max_tokens'  => 16,
+			'model'      => $model,
+			'messages'   => array( array( 'role' => 'user', 'content' => 'Hi' ) ),
+			'max_tokens' => 16,
 		);
-		$response = API_Client::chat( $provider, $body );
+		$response = API_Client::chat( $provider, $body, $entry_id );
 		if ( is_wp_error( $response ) ) {
 			return array( 'success' => false, 'message' => $response->get_error_message() );
 		}
@@ -152,13 +98,15 @@ class API_Validator {
 	}
 
 	/**
-	 * Verify image model via minimal DALL-E generation.
+	 * Verify image model via minimal image generation.
 	 *
-	 * @param string $size Image size (e.g. 1024x1024).
-	 * @return array{success: bool, message?: string}
+	 * @param string $size  Image size (e.g. 1024x1024).
+	 * @param string $model Optional. Model ID (e.g. dall-e-3, gpt-image-1.5, imagen-4.0-generate-001). Uses default if empty.
+	 * @return array{success: bool, message?: string, result?: string}
 	 */
-	public static function verify_image_model( $size ) {
-		$response = API_Client::images( 'test', $size, 1 );
+	public static function verify_image_model( $size, $model = '' ) {
+		$model = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$response = API_Client::images( 'test', $size, 1, $model );
 		if ( is_wp_error( $response ) ) {
 			return array( 'success' => false, 'message' => $response->get_error_message() );
 		}
@@ -178,7 +126,7 @@ class API_Validator {
 	 * Verify audio model via minimal Whisper transcription.
 	 *
 	 * @param string $model Model (e.g. whisper-1, gpt-4o-transcribe).
-	 * @return array{success: bool, message?: string}
+	 * @return array{success: bool, message?: string, result?: string}
 	 */
 	public static function verify_audio_model( $model = 'whisper-1' ) {
 		$tmp = self::create_minimal_wav();
@@ -195,6 +143,22 @@ class API_Validator {
 	}
 
 	/**
+	 * Verify video model via quick create (submits job, returns when API accepts).
+	 * Does not wait for video completion (which can take minutes).
+	 *
+	 * @param string $model Model ID (e.g. sora-2).
+	 * @return array{success: bool, message?: string, result?: string}
+	 */
+	public static function verify_video_model( $model = 'sora-2' ) {
+		$response = API_Client::create_video( 'A simple test', $model );
+		if ( is_wp_error( $response ) ) {
+			return array( 'success' => false, 'message' => $response->get_error_message() );
+		}
+		$video_id = isset( $response['id'] ) ? $response['id'] : '';
+		return array( 'success' => true, 'result' => sprintf( __( 'Video job created (ID: %s). Generation may take 2–5 minutes.', 'alorbach-ai-gateway' ), $video_id ) );
+	}
+
+	/**
 	 * Create minimal 1-second silent WAV file.
 	 *
 	 * @return string|false Temp file path or false.
@@ -203,7 +167,7 @@ class API_Validator {
 		$sample_rate = 8000;
 		$duration    = 1;
 		$num_samples = $sample_rate * $duration;
-		$data_size   = $num_samples * 2; // 16-bit mono
+		$data_size   = $num_samples * 2;
 		$file_size   = 36 + $data_size;
 
 		$header  = pack( 'A4V', 'RIFF', $file_size - 8 );

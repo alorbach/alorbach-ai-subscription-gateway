@@ -7,6 +7,8 @@
 
 namespace Alorbach\AIGateway;
 
+use Alorbach\AIGateway\Providers\Provider_Registry;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -22,9 +24,10 @@ class Model_Importer {
 	 * @var array
 	 */
 	private static $text_prefixes = array(
-		'openai' => array( 'gpt-', 'o1', 'o3', 'o4' ),
-		'google' => array( 'gemini-' ),
-		'azure'  => array(), // Azure returns base model IDs; we accept all from the list.
+		'openai'        => array( 'gpt-', 'o1', 'o3', 'o4' ),
+		'google'        => array( 'gemini-' ),
+		'azure'         => array(), // Azure returns base model IDs; we accept all from the list.
+		'github_models' => array(), // GitHub uses publisher/model format; accept all.
 	);
 
 	/**
@@ -105,128 +108,131 @@ class Model_Importer {
 	);
 
 	/**
-	 * Fetch importable models from all configured providers with capabilities.
-	 * Does not import; returns a list for the user to select from.
+	 * Fetch importable models from all configured providers, grouped by entry.
 	 *
-	 * @return array{text: array, image: array, audio: array, errors: array}
+	 * @return array{entries: array, capability_labels: array, errors: array}
 	 */
 	public static function fetch_importable_models() {
 		$result = array(
-			'text'   => array(),
-			'image'  => array(),
-			'video'  => array(),
-			'audio'  => array(),
-			'errors' => array(),
+			'entries'            => array(),
+			'capability_labels'  => self::$capability_labels,
+			'errors'             => array(),
 		);
 
-		$keys = get_option( 'alorbach_api_keys', array() );
-		$keys = is_array( $keys ) ? $keys : array();
+		$entries = API_Keys_Helper::get_entries();
+		$type_labels = array(
+			'openai'        => 'OpenAI',
+			'azure'         => 'Azure OpenAI / Foundry',
+			'google'        => 'Google (Gemini)',
+			'github_models' => 'GitHub Models',
+		);
 
-		// OpenAI: text models + infer capabilities.
-		if ( ! empty( $keys['openai'] ) ) {
-			$openai = self::fetch_openai_models_detailed( $keys['openai'] );
-			if ( is_wp_error( $openai ) ) {
-				$result['errors'][] = 'OpenAI: ' . $openai->get_error_message();
-			} elseif ( is_array( $openai ) ) {
-				foreach ( $openai as $item ) {
-					if ( $item['type'] === 'text' ) {
-						$result['text'][] = $item;
-					} elseif ( $item['type'] === 'image' ) {
-						$result['image'][] = $item;
-					} elseif ( $item['type'] === 'video' ) {
-						$result['video'][] = $item;
-					} elseif ( $item['type'] === 'audio' ) {
-						$result['audio'][] = $item;
+		foreach ( $entries as $entry ) {
+			if ( empty( $entry['enabled'] ) || empty( $entry['api_key'] ) ) {
+				continue;
+			}
+			$type = $entry['type'] ?? '';
+			if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
+				continue;
+			}
+			$prov = Provider_Registry::get( $type );
+			if ( ! $prov ) {
+				continue;
+			}
+			$creds = array( 'api_key' => $entry['api_key'] );
+			if ( ! empty( $entry['endpoint'] ) ) {
+				$creds['endpoint'] = $entry['endpoint'];
+			}
+			if ( isset( $entry['org'] ) ) {
+				$creds['org'] = $entry['org'];
+			}
+			$items = $prov->fetch_models( $creds );
+			if ( is_wp_error( $items ) ) {
+				$result['errors'][] = ucfirst( $type ) . ': ' . $items->get_error_message();
+				continue;
+			}
+
+			$entry_data = array(
+				'entry_id' => $entry['id'] ?? '',
+				'type'     => $type,
+				'name'     => $entry['name'] ?? '',
+				'label'    => ( $type_labels[ $type ] ?? $type ) . ( ! empty( $entry['name'] ) ? ' / ' . $entry['name'] : '' ),
+				'text'     => array(),
+				'image'    => array(),
+				'video'    => array(),
+				'audio'    => array(),
+			);
+
+			foreach ( (array) $items as $item ) {
+				$t = $item['type'] ?? 'text';
+				$item['entry_id'] = $entry_data['entry_id'];
+				$item['provider'] = $type;
+				if ( $t === 'text' ) {
+					$entry_data['text'][] = $item;
+				} elseif ( $t === 'image' ) {
+					$entry_data['image'][] = $item;
+				} elseif ( $t === 'video' ) {
+					$entry_data['video'][] = $item;
+				} elseif ( $t === 'audio' ) {
+					$entry_data['audio'][] = $item;
+				}
+			}
+
+			// Add OpenAI DALL-E sizes for OpenAI entries.
+			if ( $type === 'openai' ) {
+				$image_ids = array_column( $entry_data['image'], 'id' );
+				foreach ( self::$image_sizes as $size ) {
+					if ( ! in_array( $size, $image_ids, true ) ) {
+						$entry_data['image'][] = array(
+							'id'           => $size,
+							'provider'     => 'openai',
+							'type'         => 'image',
+							'capabilities' => array( 'text_to_image' ),
+							'entry_id'     => $entry_data['entry_id'],
+						);
 					}
 				}
 			}
-		}
 
-		// Azure: text models with capabilities from API.
-		if ( ! empty( $keys['azure_endpoint'] ) && ! empty( $keys['azure'] ) ) {
-			$azure = self::fetch_azure_models_detailed( $keys['azure_endpoint'], $keys['azure'] );
-			if ( is_wp_error( $azure ) ) {
-				$result['errors'][] = 'Azure: ' . $azure->get_error_message();
-			} elseif ( is_array( $azure ) ) {
-				foreach ( $azure as $item ) {
-					if ( $item['type'] === 'text' ) {
-						$result['text'][] = $item;
-					} elseif ( $item['type'] === 'image' ) {
-						$result['image'][] = $item;
-					} elseif ( $item['type'] === 'video' ) {
-						$result['video'][] = $item;
-					} elseif ( $item['type'] === 'audio' ) {
-						$result['audio'][] = $item;
+			// Add known OpenAI video/audio models for OpenAI entries.
+			if ( $type === 'openai' ) {
+				$video_ids = array_column( $entry_data['video'], 'id' );
+				foreach ( array_keys( self::$video_models ) as $model ) {
+					if ( ! in_array( $model, $video_ids, true ) ) {
+						$entry_data['video'][] = array(
+							'id'           => $model,
+							'provider'     => 'openai',
+							'type'         => 'video',
+							'capabilities' => array( 'text_to_video' ),
+							'entry_id'     => $entry_data['entry_id'],
+						);
+					}
+				}
+				$audio_ids = array_column( $entry_data['audio'], 'id' );
+				foreach ( self::$audio_models as $model => $rate ) {
+					if ( ! in_array( $model, $audio_ids, true ) ) {
+						$entry_data['audio'][] = array(
+							'id'           => $model,
+							'provider'     => 'openai',
+							'type'         => 'audio',
+							'capabilities' => array( 'audio_to_text' ),
+							'entry_id'     => $entry_data['entry_id'],
+						);
 					}
 				}
 			}
-		}
 
-		// Google: text models with supportedGenerationMethods.
-		if ( ! empty( $keys['google'] ) ) {
-			$google = self::fetch_google_models_detailed( $keys['google'] );
-			if ( is_wp_error( $google ) ) {
-				$result['errors'][] = 'Google: ' . $google->get_error_message();
-			} elseif ( is_array( $google ) ) {
-				foreach ( $google as $item ) {
-					$result['text'][] = $item;
+			// Add base and version for display.
+			foreach ( array( 'text', 'image', 'video', 'audio' ) as $cap_type ) {
+				foreach ( $entry_data[ $cap_type ] as $i => $item ) {
+					$id = isset( $item['id'] ) ? $item['id'] : '';
+					list( $base, $version ) = self::parse_model_display( $id );
+					$entry_data[ $cap_type ][ $i ]['base']    = $base;
+					$entry_data[ $cap_type ][ $i ]['version'] = $version;
 				}
 			}
-		}
 
-		// Add OpenAI DALL-E sizes if we have OpenAI key (API returns dall-e-3, we use sizes).
-		$image_ids = array_column( $result['image'], 'id' );
-		if ( ! empty( $keys['openai'] ) ) {
-			foreach ( self::$image_sizes as $size ) {
-				if ( ! in_array( $size, $image_ids, true ) ) {
-					$result['image'][] = array(
-						'id'           => $size,
-						'provider'     => 'openai',
-						'type'         => 'image',
-						'capabilities' => array( 'text_to_image' ),
-					);
-				}
-			}
-		}
-
-		// Add known OpenAI video models not returned by API (fallback).
-		$video_ids = array_column( $result['video'], 'id' );
-		if ( ! empty( $keys['openai'] ) ) {
-			foreach ( array_keys( self::$video_models ) as $model ) {
-				if ( ! in_array( $model, $video_ids, true ) ) {
-					$result['video'][] = array(
-						'id'           => $model,
-						'provider'     => 'openai',
-						'type'         => 'video',
-						'capabilities' => array( 'text_to_video' ),
-					);
-				}
-			}
-		}
-
-		// Add known OpenAI audio models not returned by API (fallback).
-		$audio_ids = array_column( $result['audio'], 'id' );
-		if ( ! empty( $keys['openai'] ) ) {
-			foreach ( self::$audio_models as $model => $rate ) {
-				if ( ! in_array( $model, $audio_ids, true ) ) {
-					$result['audio'][] = array(
-						'id'           => $model,
-						'provider'     => 'openai',
-						'type'         => 'audio',
-						'capabilities' => array( 'audio_to_text' ),
-					);
-				}
-			}
-		}
-
-		// Add base and version for display (model name vs version separated).
-		foreach ( array( 'text', 'image', 'video', 'audio' ) as $type ) {
-			foreach ( $result[ $type ] as $i => $item ) {
-				$id = isset( $item['id'] ) ? $item['id'] : '';
-				list( $base, $version ) = self::parse_model_display( $id );
-				$result[ $type ][ $i ]['base']    = $base;
-				$result[ $type ][ $i ]['version'] = $version;
-			}
+			$result['entries'][] = $entry_data;
 		}
 
 		return $result;
@@ -235,14 +241,15 @@ class Model_Importer {
 	/**
 	 * Reset models and re-import from configured API providers.
 	 *
-	 * @param array|null $selected Optional. Keys: text, image, audio. Each value is array of IDs to import.
-	 *                             If null, imports all available.
+	 * @param array|null $selected Optional. Keys: entries (entry_id => {text, image, video, audio}). If null, imports all.
 	 *
 	 * @return array{added: array, skipped: array, errors: array}
 	 */
 	public static function reset_and_import( $selected = null ) {
-		$default_tier = array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
-		update_option( 'alorbach_cost_matrix', array( 'default' => $default_tier ) );
+		Cost_Matrix::save_cost_matrix( array(
+			'default' => array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 ),
+			'models'  => array(),
+		) );
 		update_option( 'alorbach_image_costs', array() );
 		update_option( 'alorbach_image_models', array() );
 		update_option( 'alorbach_image_model_costs', array() );
@@ -255,7 +262,7 @@ class Model_Importer {
 	 * Fetch models from configured providers and merge into options.
 	 *
 	 * @param bool        $overwrite If true, overwrite existing models (used by reset).
-	 * @param array|null  $selected  Optional. Keys: text, image, audio. Each value is array of IDs to import.
+	 * @param array|null  $selected  Optional. Keys: entries (entry_id => {text, image, video, audio}). Legacy: text, image, video, audio (flat).
 	 *
 	 * @return array{added: array, skipped: array, errors: array}
 	 */
@@ -266,11 +273,11 @@ class Model_Importer {
 			'errors'  => array(),
 		);
 
-		$keys = get_option( 'alorbach_api_keys', array() );
-		$keys = is_array( $keys ) ? $keys : array();
+		$entries = API_Keys_Helper::get_entries();
+		$cost_data = Cost_Matrix::get_cost_matrix();
+		$models_array = isset( $cost_data['models'] ) && is_array( $cost_data['models'] ) ? $cost_data['models'] : array();
+		$default_tier = isset( $cost_data['default'] ) ? $cost_data['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
 
-		$cost_matrix = get_option( 'alorbach_cost_matrix', array() );
-		$cost_matrix = is_array( $cost_matrix ) ? $cost_matrix : array();
 		$image_costs      = get_option( 'alorbach_image_costs', array() );
 		$image_costs      = is_array( $image_costs ) ? $image_costs : array();
 		$image_models     = get_option( 'alorbach_image_models', array() );
@@ -282,101 +289,135 @@ class Model_Importer {
 		$audio_costs = get_option( 'alorbach_audio_costs', array() );
 		$audio_costs = is_array( $audio_costs ) ? $audio_costs : array();
 
-		$text_models = array();
-
+		$selected_entries = ( is_array( $selected ) && isset( $selected['entries'] ) ) ? $selected['entries'] : null;
 		$selected_text  = ( is_array( $selected ) && isset( $selected['text'] ) ) ? $selected['text'] : null;
 		$selected_image = ( is_array( $selected ) && isset( $selected['image'] ) ) ? $selected['image'] : null;
 		$selected_video = ( is_array( $selected ) && isset( $selected['video'] ) ) ? $selected['video'] : null;
 		$selected_audio = ( is_array( $selected ) && isset( $selected['audio'] ) ) ? $selected['audio'] : null;
 
-		// OpenAI: fetches enabled models for the API key.
-		if ( ! empty( $keys['openai'] ) ) {
-			$openai = self::fetch_openai_models( $keys['openai'] );
-			if ( is_wp_error( $openai ) ) {
-				$result['errors'][] = 'OpenAI: ' . $openai->get_error_message();
-			} elseif ( is_array( $openai ) ) {
-				foreach ( $openai as $id ) {
-					if ( self::matches_prefix( $id, self::$text_prefixes['openai'] ) ) {
-						$text_models[ $id ] = 'openai';
+		$azure_prices = API_Keys_Helper::has_provider( 'azure' ) ? Azure_Retail_Prices::fetch_text_costs( '', 'USD' ) : array();
+
+		$existing_by_entry_model = array();
+		foreach ( $models_array as $row ) {
+			$eid = $row['entry_id'] ?? '';
+			$mid = $row['model'] ?? '';
+			if ( $eid && $mid ) {
+				$existing_by_entry_model[ $eid . ':' . $mid ] = true;
+			}
+		}
+
+		if ( $selected_entries !== null ) {
+			foreach ( $entries as $entry ) {
+				if ( empty( $entry['enabled'] ) || empty( $entry['api_key'] ) ) {
+					continue;
+				}
+				$entry_id = $entry['id'] ?? '';
+				if ( empty( $entry_id ) || ! isset( $selected_entries[ $entry_id ] ) ) {
+					continue;
+				}
+				$sel = $selected_entries[ $entry_id ];
+				$type = $entry['type'] ?? '';
+				$text_ids = isset( $sel['text'] ) && is_array( $sel['text'] ) ? $sel['text'] : array();
+				foreach ( $text_ids as $model ) {
+					$model = is_string( $model ) ? $model : (string) $model;
+					if ( empty( $model ) || $model === 'default' ) {
+						continue;
+					}
+					$key = $entry_id . ':' . $model;
+					if ( ! $overwrite && isset( $existing_by_entry_model[ $key ] ) ) {
+						$result['skipped']['text'][] = $model;
+						continue;
+					}
+					$costs = self::resolve_text_costs( $model, $type, $azure_prices );
+					$models_array[] = array(
+						'model'    => $model,
+						'entry_id' => $entry_id,
+						'input'    => $costs['input'],
+						'output'   => $costs['output'],
+						'cached'   => $costs['cached'],
+					);
+					$existing_by_entry_model[ $key ] = true;
+					$result['added']['text'][] = $model;
+				}
+			}
+		} else {
+			$text_models = array();
+			foreach ( $entries as $entry ) {
+				if ( empty( $entry['enabled'] ) || empty( $entry['api_key'] ) ) {
+					continue;
+				}
+				$type = $entry['type'] ?? '';
+				if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
+					continue;
+				}
+				$prov = Provider_Registry::get( $type );
+				if ( ! $prov ) {
+					continue;
+				}
+				$creds = array( 'api_key' => $entry['api_key'] );
+				if ( ! empty( $entry['endpoint'] ) ) {
+					$creds['endpoint'] = $entry['endpoint'];
+				}
+				if ( isset( $entry['org'] ) ) {
+					$creds['org'] = $entry['org'];
+				}
+				$items = $prov->fetch_models( $creds );
+				if ( is_wp_error( $items ) ) {
+					$result['errors'][] = ucfirst( $type ) . ': ' . $items->get_error_message();
+					continue;
+				}
+				$prefixes = isset( self::$text_prefixes[ $type ] ) ? self::$text_prefixes[ $type ] : array();
+				$entry_id = $entry['id'] ?? '';
+				foreach ( (array) $items as $item ) {
+					$t = $item['type'] ?? 'text';
+					if ( $t !== 'text' ) {
+						continue;
+					}
+					$id = $item['id'] ?? '';
+					if ( empty( $id ) ) {
+						continue;
+					}
+					if ( empty( $prefixes ) || self::matches_prefix( $id, $prefixes ) ) {
+						$text_models[ $id ] = array( 'type' => $type, 'entry_id' => $entry_id );
 					}
 				}
 			}
-		}
-
-		// Azure: fetches enabled models (filtered by inference capability).
-		if ( ! empty( $keys['azure_endpoint'] ) && ! empty( $keys['azure'] ) ) {
-			$azure = self::fetch_azure_models( $keys['azure_endpoint'], $keys['azure'] );
-			if ( is_wp_error( $azure ) ) {
-				$result['errors'][] = 'Azure: ' . $azure->get_error_message();
-			} elseif ( is_array( $azure ) ) {
-				foreach ( $azure as $id ) {
-					$text_models[ $id ] = 'azure';
+			foreach ( $text_models as $model => $info ) {
+				if ( $model === 'default' ) {
+					continue;
 				}
-			}
-		}
-
-		// Google: fetches enabled models for the API key.
-		if ( ! empty( $keys['google'] ) ) {
-			$google = self::fetch_google_models( $keys['google'] );
-			if ( is_wp_error( $google ) ) {
-				$result['errors'][] = 'Google: ' . $google->get_error_message();
-			} elseif ( is_array( $google ) ) {
-				foreach ( $google as $id ) {
-					if ( self::matches_prefix( $id, self::$text_prefixes['google'] ) ) {
-						$text_models[ $id ] = 'google';
-					}
+				if ( $selected_text !== null && ! in_array( $model, $selected_text, true ) ) {
+					continue;
 				}
-			}
-		}
-
-		// Azure: fetch live pricing from Retail Prices API when available.
-		$azure_prices = array();
-		$has_azure = ! empty( $keys['azure_endpoint'] ) && ! empty( $keys['azure'] );
-		if ( $has_azure ) {
-			$azure_prices = Azure_Retail_Prices::fetch_text_costs( '', 'USD' );
-		}
-
-		// Merge text models into cost matrix. Use Azure API or known costs when available.
-		$default_tier = array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
-		foreach ( $text_models as $model => $provider ) {
-			if ( $model === 'default' ) {
-				$result['skipped']['text'][] = $model;
-				continue;
-			}
-			if ( $selected_text !== null && ! in_array( $model, $selected_text, true ) ) {
-				continue;
-			}
-			if ( ! $overwrite && isset( $cost_matrix[ $model ] ) ) {
-				$result['skipped']['text'][] = $model;
-				continue;
-			}
-			$costs = $default_tier;
-			if ( $provider === 'azure' && ! empty( $azure_prices ) ) {
-				$base = self::get_model_base_for_pricing( $model );
-				if ( isset( $azure_prices[ $base ] ) && self::tier_valid( $azure_prices[ $base ] ) ) {
-					$costs = $azure_prices[ $base ];
-				} elseif ( isset( self::$known_costs[ $base ] ) ) {
-					$costs = self::$known_costs[ $base ];
-				} elseif ( isset( self::$known_costs[ $model ] ) ) {
-					$costs = self::$known_costs[ $model ];
+				$entry_id = $info['entry_id'] ?: 'legacy';
+				$key = $entry_id . ':' . $model;
+				if ( ! $overwrite && isset( $existing_by_entry_model[ $key ] ) ) {
+					$result['skipped']['text'][] = $model;
+					continue;
 				}
-			} elseif ( isset( self::$known_costs[ $model ] ) ) {
-				$costs = self::$known_costs[ $model ];
-			} else {
-				$base = self::get_model_base_for_pricing( $model );
-				if ( isset( self::$known_costs[ $base ] ) ) {
-					$costs = self::$known_costs[ $base ];
-				}
+				$costs = self::resolve_text_costs( $model, $info['type'], $azure_prices );
+				$models_array[] = array(
+					'model'    => $model,
+					'entry_id' => $entry_id,
+					'input'    => $costs['input'],
+					'output'   => $costs['output'],
+					'cached'   => $costs['cached'],
+				);
+				$existing_by_entry_model[ $key ] = true;
+				$result['added']['text'][] = $model;
 			}
-			$cost_matrix[ $model ] = $costs;
-			$result['added']['text'][] = $model;
 		}
 
-		// Add image models and sizes. Models (gpt-image-*, dall-e-*) go to alorbach_image_models.
-		// Sizes (\d+x\d+) go to alorbach_image_costs. GPT-image models also get alorbach_image_model_costs.
 		$image_to_add = ( $selected_image !== null )
 			? $selected_image
-			: array_merge( array( 'dall-e-3', 'gpt-image-1.5' ), self::$image_sizes );
+			: ( $selected_entries !== null ? array() : array_merge( array( 'dall-e-3', 'gpt-image-1.5' ), self::$image_sizes ) );
+		if ( $selected_entries !== null ) {
+			foreach ( $selected_entries as $entry_id => $sel ) {
+				$ids = isset( $sel['image'] ) && is_array( $sel['image'] ) ? $sel['image'] : array();
+				$image_to_add = array_merge( $image_to_add, $ids );
+			}
+			$image_to_add = array_unique( $image_to_add );
+		}
 		$gpt_image_default_costs = array(
 			'low'    => array( '1024x1024' => 9000, '1024x1536' => 13000, '1536x1024' => 13000 ),
 			'medium' => array( '1024x1024' => 34000, '1024x1536' => 50000, '1536x1024' => 50000 ),
@@ -387,7 +428,7 @@ class Model_Importer {
 			if ( empty( $item ) ) {
 				continue;
 			}
-			$is_model = ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 );
+			$is_model = ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
 			$is_size  = (bool) preg_match( '/^\d+x\d+$/', $item );
 			if ( $is_model ) {
 				if ( ! $overwrite && in_array( $item, $image_models, true ) ) {
@@ -396,10 +437,16 @@ class Model_Importer {
 				}
 				$image_models[] = $item;
 				$result['added']['image'][] = $item;
-				if ( strpos( $item, 'gpt-image' ) === 0 ) {
-					if ( ! isset( $image_model_costs[ $item ] ) ) {
-						$image_model_costs[ $item ] = $gpt_image_default_costs;
-					}
+				if ( strpos( $item, 'gpt-image' ) === 0 && ! isset( $image_model_costs[ $item ] ) ) {
+					$image_model_costs[ $item ] = $gpt_image_default_costs;
+				}
+				// Imagen/Gemini image: use default cost if not set (e.g. 40000 UC per image).
+				if ( ( strpos( $item, 'imagen-' ) === 0 || strpos( $item, 'gemini-' ) === 0 ) && ! isset( $image_model_costs[ $item ] ) ) {
+					$image_model_costs[ $item ] = array(
+						'low'    => array( '1024x1024' => 40000 ),
+						'medium' => array( '1024x1024' => 40000 ),
+						'high'   => array( '1024x1024' => 40000 ),
+					);
 				}
 			} elseif ( $is_size ) {
 				if ( ! $overwrite && isset( $image_costs[ $item ] ) ) {
@@ -413,10 +460,16 @@ class Model_Importer {
 		$image_models = array_unique( array_values( $image_models ) );
 		sort( $image_models );
 
-		// Add video models. When selected provided, use it; else use static models.
 		$video_to_add = ( $selected_video !== null )
 			? $selected_video
-			: array_keys( self::$video_models );
+			: ( $selected_entries !== null ? array() : array_keys( self::$video_models ) );
+		if ( $selected_entries !== null ) {
+			foreach ( $selected_entries as $sel ) {
+				$ids = isset( $sel['video'] ) && is_array( $sel['video'] ) ? $sel['video'] : array();
+				$video_to_add = array_merge( $video_to_add, $ids );
+			}
+			$video_to_add = array_unique( $video_to_add );
+		}
 		foreach ( $video_to_add as $model ) {
 			$model = is_string( $model ) ? $model : (string) $model;
 			if ( empty( $model ) ) {
@@ -426,15 +479,20 @@ class Model_Importer {
 				$result['skipped']['video'][] = $model;
 				continue;
 			}
-			$cost = isset( self::$video_models[ $model ] ) ? self::$video_models[ $model ] : 400000;
-			$video_costs[ $model ] = $cost;
+			$video_costs[ $model ] = isset( self::$video_models[ $model ] ) ? self::$video_models[ $model ] : 400000;
 			$result['added']['video'][] = $model;
 		}
 
-		// Add audio models. When selected provided, use it; else use static models.
 		$audio_to_add = ( $selected_audio !== null )
 			? $selected_audio
-			: array_keys( self::$audio_models );
+			: ( $selected_entries !== null ? array() : array_keys( self::$audio_models ) );
+		if ( $selected_entries !== null ) {
+			foreach ( $selected_entries as $sel ) {
+				$ids = isset( $sel['audio'] ) && is_array( $sel['audio'] ) ? $sel['audio'] : array();
+				$audio_to_add = array_merge( $audio_to_add, $ids );
+			}
+			$audio_to_add = array_unique( $audio_to_add );
+		}
 		foreach ( $audio_to_add as $model ) {
 			$model = is_string( $model ) ? $model : (string) $model;
 			if ( empty( $model ) ) {
@@ -444,12 +502,11 @@ class Model_Importer {
 				$result['skipped']['audio'][] = $model;
 				continue;
 			}
-			$rate = isset( self::$audio_models[ $model ] ) ? self::$audio_models[ $model ] : 100;
-			$audio_costs[ $model ] = $rate;
+			$audio_costs[ $model ] = isset( self::$audio_models[ $model ] ) ? self::$audio_models[ $model ] : 100;
 			$result['added']['audio'][] = $model;
 		}
 
-		update_option( 'alorbach_cost_matrix', $cost_matrix );
+		Cost_Matrix::save_cost_matrix( array( 'default' => $default_tier, 'models' => $models_array ) );
 		update_option( 'alorbach_image_costs', $image_costs );
 		update_option( 'alorbach_image_models', $image_models );
 		update_option( 'alorbach_image_model_costs', $image_model_costs );
@@ -457,6 +514,29 @@ class Model_Importer {
 		update_option( 'alorbach_audio_costs', $audio_costs );
 
 		return $result;
+	}
+
+	/**
+	 * Resolve text model costs from Azure API or known costs.
+	 *
+	 * @param string $model        Model ID.
+	 * @param string $provider     Provider type.
+	 * @param array  $azure_prices Azure Retail Prices data.
+	 * @return array{input: int, output: int, cached: int}
+	 */
+	private static function resolve_text_costs( $model, $provider, $azure_prices ) {
+		$default = array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
+		if ( $provider === 'azure' && ! empty( $azure_prices ) ) {
+			$base = self::get_model_base_for_pricing( $model );
+			if ( isset( $azure_prices[ $base ] ) && self::tier_valid( $azure_prices[ $base ] ) ) {
+				return $azure_prices[ $base ];
+			}
+		}
+		if ( isset( self::$known_costs[ $model ] ) ) {
+			return self::$known_costs[ $model ];
+		}
+		$base = self::get_model_base_for_pricing( $model );
+		return isset( self::$known_costs[ $base ] ) ? self::$known_costs[ $base ] : $default;
 	}
 
 	/**
@@ -1003,6 +1083,11 @@ class Model_Importer {
 	 * @return string Base ID (e.g. gpt-4o).
 	 */
 	private static function get_model_base_for_pricing( $model_id ) {
+		// GitHub Models uses publisher/model format; use model part for cost lookup.
+		if ( strpos( $model_id, '/' ) !== false ) {
+			$parts = explode( '/', $model_id, 2 );
+			$model_id = $parts[1] ?? $model_id;
+		}
 		list( $base, ) = self::parse_model_display( $model_id );
 		return $base ?: $model_id;
 	}

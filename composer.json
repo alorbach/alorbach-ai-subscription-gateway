@@ -18,6 +18,7 @@
     "autoload": {
         "classmap": [
             "includes/",
+            "includes/Providers/",
             "admin/"
         ]
     },

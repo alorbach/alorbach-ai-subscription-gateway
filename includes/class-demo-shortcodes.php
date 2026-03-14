@@ -37,19 +37,21 @@ class Demo_Shortcodes {
 				<span class="alorbach-demo-balance"><?php echo esc_html( $credits ); ?></span>
 			</div>
 			<div class="alorbach-demo-error" style="display:none;"></div>
-			<div class="alorbach-demo-settings">
-				<label class="alorbach-demo-model-wrap" style="display:none;">
-					<?php esc_html_e( 'Model:', 'alorbach-ai-gateway' ); ?>
-					<select class="alorbach-demo-model-select"></select>
-				</label>
-				<label>
-					<?php esc_html_e( 'Max tokens:', 'alorbach-ai-gateway' ); ?>
-					<input type="number" class="alorbach-demo-max-tokens" value="1024" min="1" max="4096" style="width:80px;">
-				</label>
+			<div class="alorbach-demo-form-card">
+				<div class="alorbach-demo-settings">
+					<label class="alorbach-demo-model-wrap" style="display:none;">
+						<?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?>
+						<select class="alorbach-demo-model-select"></select>
+					</label>
+					<label>
+						<?php esc_html_e( 'Max tokens', 'alorbach-ai-gateway' ); ?>
+						<select class="alorbach-demo-max-tokens"></select>
+					</label>
+				</div>
 			</div>
 			<div class="alorbach-demo-messages"></div>
 			<div class="alorbach-demo-input-row">
-				<textarea class="alorbach-demo-input" placeholder="<?php esc_attr_e( 'Type your message...', 'alorbach-ai-gateway' ); ?>"></textarea>
+				<textarea class="alorbach-demo-input" placeholder="<?php esc_attr_e( 'Type your message...', 'alorbach-ai-gateway' ); ?>" rows="3"></textarea>
 				<button type="button" class="button button-primary alorbach-demo-send"><?php esc_html_e( 'Send', 'alorbach-ai-gateway' ); ?></button>
 			</div>
 		</div>
@@ -84,6 +86,10 @@ class Demo_Shortcodes {
 					<textarea id="alorbach-image-prompt" class="alorbach-demo-prompt" rows="3" placeholder="<?php esc_attr_e( 'Describe the image you want to create...', 'alorbach-ai-gateway' ); ?>"></textarea>
 				</div>
 				<div class="alorbach-demo-settings">
+					<label class="alorbach-demo-model-wrap" style="display:none;">
+						<?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?>
+						<select class="alorbach-demo-model-select"></select>
+					</label>
 					<label class="alorbach-demo-size-wrap">
 						<?php esc_html_e( 'Size', 'alorbach-ai-gateway' ); ?>
 						<select class="alorbach-demo-size-select"></select>

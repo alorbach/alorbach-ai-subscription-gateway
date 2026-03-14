@@ -109,7 +109,7 @@
 		var inputEl = container.querySelector('.alorbach-demo-input');
 		var sendBtn = container.querySelector('.alorbach-demo-send');
 		var modelSelect = container.querySelector('.alorbach-demo-model-select');
-		var maxTokensInput = container.querySelector('.alorbach-demo-max-tokens');
+		var maxTokensSelect = container.querySelector('.alorbach-demo-max-tokens');
 
 		getModels(container).then(function (models) {
 			var text = models.text || {};
@@ -126,6 +126,25 @@
 				});
 			}
 			container.dataset.model = text.default || 'gpt-4.1-mini';
+			var mt = text.max_tokens || {};
+			if (maxTokensSelect && mt.options && mt.options.length) {
+				maxTokensSelect.innerHTML = '';
+				mt.options.forEach(function (val) {
+					var o = document.createElement('option');
+					o.value = val;
+					o.textContent = val;
+					if (val === mt.default) o.selected = true;
+					maxTokensSelect.appendChild(o);
+				});
+			} else if (maxTokensSelect && !maxTokensSelect.options.length) {
+				[256, 512, 1024, 2048, 4096, 8192].forEach(function (val) {
+					var o = document.createElement('option');
+					o.value = String(val);
+					o.textContent = String(val);
+					if (val === 1024) o.selected = true;
+					maxTokensSelect.appendChild(o);
+				});
+			}
 		});
 
 			function appendMessage(role, content, usageInfo) {
@@ -143,7 +162,7 @@
 			if (!text) return;
 			clearError(container);
 			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'gpt-4.1-mini';
-			var maxTokens = (maxTokensInput && parseInt(maxTokensInput.value, 10)) || 1024;
+			var maxTokens = (maxTokensSelect && parseInt(maxTokensSelect.value, 10)) || 1024;
 			var messages = [];
 			var msgEls = container.querySelectorAll('.alorbach-demo-message');
 			msgEls.forEach(function (m) {
@@ -204,22 +223,42 @@
 		var qualitySelect = container.querySelector('.alorbach-demo-quality-select');
 		var qualityWrap = container.querySelector('.alorbach-demo-quality-wrap');
 
+		var modelSelect = container.querySelector('.alorbach-demo-model-select');
+		var modelWrap = container.querySelector('.alorbach-demo-model-wrap');
+
 		getModels(container).then(function (models) {
 			var img = models.image || {};
+			var sizeOpts = img.size || {};
+			var modelOpts = img.model || {};
+			var q = img.quality || {};
+
 			var wrap = container.querySelector('.alorbach-demo-size-wrap');
-			if (wrap) wrap.style.display = '';
-			if (img.options && img.options.length && sizeSelect) {
+			if (wrap) wrap.style.display = (sizeOpts.options && sizeOpts.options.length) ? '' : 'none';
+			if (sizeOpts.options && sizeOpts.options.length && sizeSelect) {
 				sizeSelect.innerHTML = '';
-				img.options.forEach(function (opt) {
+				sizeOpts.options.forEach(function (opt) {
 					var o = document.createElement('option');
 					o.value = opt;
 					o.textContent = opt;
-					if (opt === img.default) o.selected = true;
+					if (opt === sizeOpts.default) o.selected = true;
 					sizeSelect.appendChild(o);
 				});
 			}
-			container.dataset.size = img.default || '1024x1024';
-			var q = img.quality || {};
+			container.dataset.size = sizeOpts.default || '1024x1024';
+
+			if (modelWrap) modelWrap.style.display = (modelOpts.allow_select && modelOpts.options && modelOpts.options.length) ? '' : 'none';
+			if (modelOpts.allow_select && modelOpts.options && modelOpts.options.length && modelSelect) {
+				modelSelect.innerHTML = '';
+				modelOpts.options.forEach(function (opt) {
+					var o = document.createElement('option');
+					o.value = opt;
+					o.textContent = opt;
+					if (opt === modelOpts.default) o.selected = true;
+					modelSelect.appendChild(o);
+				});
+			}
+			container.dataset.model = modelOpts.default || 'dall-e-3';
+
 			if (qualityWrap) qualityWrap.style.display = q.allow_select ? '' : 'none';
 			if (q.allow_select && q.options && q.options.length && qualitySelect) {
 				qualitySelect.innerHTML = '';
@@ -238,12 +277,14 @@
 		function refreshImageCost() {
 			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1024x1024';
 			var quality = (qualitySelect && qualitySelect.value) || container.dataset.quality || 'medium';
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'dall-e-3';
 			var n = (nInput && parseInt(nInput.value, 10)) || 1;
 			n = Math.min(10, Math.max(1, n));
-			updateCostEstimate(container, 'image', { type: 'image', size: size, quality: quality, n: n }, container.querySelector('.alorbach-demo-cost'));
+			updateCostEstimate(container, 'image', { type: 'image', size: size, quality: quality, model: model, n: n }, container.querySelector('.alorbach-demo-cost'));
 		}
 
 		if (sizeSelect) sizeSelect.addEventListener('change', refreshImageCost);
+		if (modelSelect) modelSelect.addEventListener('change', refreshImageCost);
 		if (qualitySelect) qualitySelect.addEventListener('change', refreshImageCost);
 		if (nInput) nInput.addEventListener('change', refreshImageCost);
 		if (nInput) nInput.addEventListener('input', refreshImageCost);
@@ -254,6 +295,7 @@
 			clearError(container);
 			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1024x1024';
 			var quality = (qualitySelect && qualitySelect.value) || container.dataset.quality || 'medium';
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'dall-e-3';
 			var n = (nInput && parseInt(nInput.value, 10)) || 1;
 			n = Math.min(10, Math.max(1, n));
 			container.classList.add('alorbach-demo-loading');
@@ -263,6 +305,7 @@
 			if (usageEl) { usageEl.textContent = ''; usageEl.style.display = 'none'; }
 
 			var body = { prompt: prompt, size: size, n: n };
+			if (modelWrap && modelWrap.style.display !== 'none') body.model = model;
 			if (qualityWrap && qualityWrap.style.display !== 'none') body.quality = quality;
 
 			apiFetch('/images', {

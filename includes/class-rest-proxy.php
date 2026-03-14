@@ -113,6 +113,7 @@ class REST_Proxy {
 				'size'    => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'       => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -154,7 +155,7 @@ class REST_Proxy {
 				'provider' => array(
 					'required'          => true,
 					'type'              => 'string',
-					'enum'              => array( 'openai', 'azure', 'google' ),
+					'enum'              => array( 'openai', 'azure', 'google', 'github_models' ),
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 			),
@@ -165,12 +166,16 @@ class REST_Proxy {
 			'callback'            => array( __CLASS__, 'admin_verify_text' ),
 			'permission_callback' => $admin_permission,
 			'args'                => array(
-				'provider' => array(
+				'provider'  => array(
 					'required'          => true,
 					'sanitize_callback' => 'sanitize_text_field',
 				),
-				'model'    => array(
+				'model'     => array(
 					'required'          => true,
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'entry_id'  => array(
+					'default'           => '',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 			),
@@ -181,8 +186,12 @@ class REST_Proxy {
 			'callback'            => array( __CLASS__, 'admin_verify_image' ),
 			'permission_callback' => $admin_permission,
 			'args'                => array(
-				'size' => array(
+				'size'   => array(
 					'default'           => '1024x1024',
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'model'  => array(
+					'default'           => '',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 			),
@@ -200,6 +209,18 @@ class REST_Proxy {
 			),
 		) );
 
+		register_rest_route( 'alorbach/v1', '/admin/verify-video', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_verify_video' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'model' => array(
+					'default'           => 'sora-2',
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+			),
+		) );
+
 		register_rest_route( 'alorbach/v1', '/admin/fetch-importable-models', array(
 			'methods'             => 'GET',
 			'callback'            => array( __CLASS__, 'admin_fetch_importable_models' ),
@@ -210,26 +231,12 @@ class REST_Proxy {
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'admin_import_models' ),
 			'permission_callback' => $admin_permission,
-			'args'                => array(
-				'selected' => array(
-					'required' => false,
-					'type'     => 'object',
-					'description' => 'Selected model IDs: { text: [], image: [], audio: [] }',
-				),
-			),
 		) );
 
 		register_rest_route( 'alorbach/v1', '/admin/reset-models', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'admin_reset_models' ),
 			'permission_callback' => $admin_permission,
-			'args'                => array(
-				'selected' => array(
-					'required' => false,
-					'type'     => 'object',
-					'description' => 'Selected model IDs: { text: [], image: [], audio: [] }',
-				),
-			),
 		) );
 
 		register_rest_route( 'alorbach/v1', '/admin/refresh-azure-prices', array(
@@ -251,35 +258,47 @@ class REST_Proxy {
 		$model    = $request->get_param( 'model' );
 		$max_tokens = $request->get_param( 'max_tokens' );
 
-		$input_tokens = Tokenizer::count_messages_tokens( $messages, $model );
-		$output_estimate = $max_tokens;
-		$input_cost  = (int) ( ( $input_tokens * Cost_Matrix::get_input_cost_per_token( $model ) ) / 1000000 );
-		$output_cost = (int) ( ( $output_estimate * Cost_Matrix::get_output_cost_per_token( $model ) ) / 1000000 );
-		$auth_hold   = Cost_Matrix::apply_user_cost( $input_cost + $output_cost );
-
-		$balance = Ledger::get_balance( $user_id );
-		if ( $balance < $auth_hold ) {
-			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
-		}
-
 		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model, time() ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 
+		$provider = API_Client::get_provider_for_model( $model );
+		$creds    = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$free_pass_through = ! empty( $creds['free_pass_through'] );
+
+		if ( ! $free_pass_through ) {
+			$input_tokens   = Tokenizer::count_messages_tokens( $messages, $model );
+			$output_estimate = $max_tokens;
+			$input_cost     = (int) ( ( $input_tokens * Cost_Matrix::get_input_cost_per_token( $model ) ) / 1000000 );
+			$output_cost    = (int) ( ( $output_estimate * Cost_Matrix::get_output_cost_per_token( $model ) ) / 1000000 );
+			$auth_hold      = Cost_Matrix::apply_user_cost( $input_cost + $output_cost );
+
+			$balance = Ledger::get_balance( $user_id );
+			if ( $balance < $auth_hold ) {
+				return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
+			}
+		}
+
 		$body = array(
-			'model'       => $model,
-			'messages'    => $messages,
-			'max_tokens'  => $max_tokens,
+			'model'      => $model,
+			'messages'   => $messages,
+			'max_tokens' => $max_tokens,
 		);
 
-		$provider = API_Client::get_provider_for_model( $model );
 		$response = API_Client::chat( $provider, $body );
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
 
-		$prompt_tokens    = isset( $response['usage']['prompt_tokens'] ) ? (int) $response['usage']['prompt_tokens'] : $input_tokens;
+		if ( $free_pass_through ) {
+			$response['cost_uc']      = 0;
+			$response['cost_credits'] = User_Display::uc_to_credits( 0 );
+			$response['cost_usd']     = User_Display::uc_to_usd( 0 );
+			return rest_ensure_response( $response );
+		}
+
+		$prompt_tokens    = isset( $response['usage']['prompt_tokens'] ) ? (int) $response['usage']['prompt_tokens'] : Tokenizer::count_messages_tokens( $messages, $model );
 		$completion_tokens = isset( $response['usage']['completion_tokens'] ) ? (int) $response['usage']['completion_tokens'] : 0;
 		$cached_tokens   = isset( $response['usage']['prompt_tokens_details']['cached_tokens'] ) ? (int) $response['usage']['prompt_tokens_details']['cached_tokens'] : 0;
 
@@ -299,7 +318,7 @@ class REST_Proxy {
 		);
 
 		$response['cost_uc']      = $uc_cost;
-		$response['cost_credits']  = User_Display::uc_to_credits( $uc_cost );
+		$response['cost_credits'] = User_Display::uc_to_credits( $uc_cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $uc_cost );
 		return rest_ensure_response( $response );
 	}
@@ -356,25 +375,43 @@ class REST_Proxy {
 		$default_video = get_option( 'alorbach_demo_default_video_model', $video_options[0] ?? 'sora-2' );
 
 		$allow_chat         = (bool) get_option( 'alorbach_demo_allow_chat_model_select', false );
-		$allow_image        = (bool) get_option( 'alorbach_demo_allow_image_model_select', false );
+		$allow_image_size   = (bool) get_option( 'alorbach_demo_allow_image_size_select', false );
+		$allow_image_model  = (bool) get_option( 'alorbach_demo_allow_image_model_select', false );
 		$allow_image_quality = (bool) get_option( 'alorbach_demo_allow_image_quality_select', false );
 		$allow_audio        = (bool) get_option( 'alorbach_demo_allow_audio_model_select', false );
 		$allow_video        = (bool) get_option( 'alorbach_demo_allow_video_model_select', false );
 
 		$default_quality = get_option( 'alorbach_image_default_quality', 'medium' );
 		$quality_options = array( 'low', 'medium', 'high' );
+		$image_model_options = $admin::get_image_models();
+		$default_image_model = get_option( 'alorbach_image_default_model', $image_model_options[0] ?? 'dall-e-3' );
+
+		$max_tokens_options = $admin::get_max_tokens_options();
+		$default_max_tokens  = get_option( 'alorbach_demo_default_max_tokens', '1024' );
+		$default_max_tokens = in_array( $default_max_tokens, $max_tokens_options, true ) ? $default_max_tokens : ( $max_tokens_options[0] ?? '1024' );
 
 		return rest_ensure_response( array(
 			'text'  => array(
 				'default'      => in_array( $default_chat, $text_options, true ) ? $default_chat : ( $text_options[0] ?? 'gpt-4.1-mini' ),
 				'allow_select' => $allow_chat,
 				'options'      => $text_options,
+				'max_tokens'   => array(
+					'default' => $default_max_tokens,
+					'options' => $max_tokens_options,
+				),
 			),
 			'image' => array(
-				'default'      => in_array( $default_image, $image_options, true ) ? $default_image : ( $image_options[0] ?? '1024x1024' ),
-				'allow_select' => $allow_image,
-				'options'      => $image_options,
-				'quality'      => array(
+				'size'    => array(
+					'default'      => in_array( $default_image, $image_options, true ) ? $default_image : ( $image_options[0] ?? '1024x1024' ),
+					'allow_select' => $allow_image_size,
+					'options'      => $image_options,
+				),
+				'model'   => array(
+					'default'      => in_array( $default_image_model, $image_model_options, true ) ? $default_image_model : ( $image_model_options[0] ?? 'dall-e-3' ),
+					'allow_select' => $allow_image_model,
+					'options'      => $image_model_options,
+				),
+				'quality' => array(
 					'default'      => in_array( $default_quality, $quality_options, true ) ? $default_quality : 'medium',
 					'allow_select' => $allow_image_quality,
 					'options'      => $quality_options,
@@ -407,7 +444,7 @@ class REST_Proxy {
 			$size    = $request->get_param( 'size' ) ?: '1024x1024';
 			$quality = $request->get_param( 'quality' ) ?: 'medium';
 			$n       = max( 1, min( 10, (int) $request->get_param( 'n' ) ) );
-			$model   = get_option( 'alorbach_image_default_model', 'dall-e-3' );
+			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 			$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
 			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
 		} elseif ( $type === 'video' ) {
@@ -522,7 +559,7 @@ class REST_Proxy {
 		$n       = (int) $request->get_param( 'n' );
 		$n       = min( 10, max( 1, $n ) );
 		$quality = $request->get_param( 'quality' );
-		$model   = get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality = ( $quality && in_array( $quality, array( 'low', 'medium', 'high' ), true ) )
 			? $quality
 			: get_option( 'alorbach_image_default_quality', 'medium' );
@@ -640,11 +677,14 @@ class REST_Proxy {
 	 */
 	public static function admin_verify_api_key( $request ) {
 		$provider = $request->get_param( 'provider' );
-		$method   = 'verify_' . $provider . '_key';
-		if ( ! method_exists( API_Validator::class, $method ) ) {
-			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Unknown provider.', 'alorbach-ai-gateway' ) ) );
+		if ( empty( $provider ) ) {
+			$json = $request->get_json_params();
+			$provider = isset( $json['provider'] ) ? sanitize_text_field( $json['provider'] ) : '';
 		}
-		$result = API_Validator::$method();
+		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'github_models' ), true ) ) {
+			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
+		}
+		$result = API_Validator::verify_key( $provider );
 		return rest_ensure_response( $result );
 	}
 
@@ -655,9 +695,17 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_text( $request ) {
-		$provider = $request->get_param( 'provider' );
-		$model    = $request->get_param( 'model' );
-		$result   = API_Validator::verify_text_model( $provider, $model );
+		$params = $request->get_json_params();
+		if ( is_array( $params ) ) {
+			$provider = isset( $params['provider'] ) ? sanitize_text_field( $params['provider'] ) : '';
+			$model    = isset( $params['model'] ) ? sanitize_text_field( $params['model'] ) : '';
+			$entry_id = isset( $params['entry_id'] ) ? sanitize_text_field( $params['entry_id'] ) : '';
+		} else {
+			$provider = $request->get_param( 'provider' ) ?: '';
+			$model    = $request->get_param( 'model' ) ?: '';
+			$entry_id = $request->get_param( 'entry_id' ) ?: '';
+		}
+		$result = API_Validator::verify_text_model( $provider, $model, $entry_id );
 		return rest_ensure_response( $result );
 	}
 
@@ -668,8 +716,15 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_image( $request ) {
-		$size   = $request->get_param( 'size' );
-		$result = API_Validator::verify_image_model( $size );
+		$params = $request->get_json_params();
+		if ( is_array( $params ) ) {
+			$size  = isset( $params['size'] ) ? sanitize_text_field( $params['size'] ) : '1024x1024';
+			$model = isset( $params['model'] ) ? sanitize_text_field( $params['model'] ) : '';
+		} else {
+			$size  = $request->get_param( 'size' ) ?: '1024x1024';
+			$model = $request->get_param( 'model' ) ?: '';
+		}
+		$result = API_Validator::verify_image_model( $size, $model );
 		return rest_ensure_response( $result );
 	}
 
@@ -680,8 +735,22 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_audio( $request ) {
-		$model  = $request->get_param( 'model' ) ?: 'whisper-1';
+		$params = $request->get_json_params();
+		$model  = ( is_array( $params ) && isset( $params['model'] ) ) ? sanitize_text_field( $params['model'] ) : ( $request->get_param( 'model' ) ?: 'whisper-1' );
 		$result = API_Validator::verify_audio_model( $model );
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Admin: Verify video model (quick create, no polling).
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_verify_video( $request ) {
+		$params = $request->get_json_params();
+		$model  = ( is_array( $params ) && isset( $params['model'] ) ) ? sanitize_text_field( $params['model'] ) : ( $request->get_param( 'model' ) ?: 'sora-2' );
+		$result = API_Validator::verify_video_model( $model );
 		return rest_ensure_response( $result );
 	}
 
@@ -693,7 +762,6 @@ class REST_Proxy {
 	 */
 	public static function admin_fetch_importable_models( $request ) {
 		$result = Model_Importer::fetch_importable_models();
-		$result['capability_labels'] = Model_Importer::$capability_labels;
 		return rest_ensure_response( $result );
 	}
 
@@ -704,10 +772,67 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_import_models( $request ) {
-		$selected = $request->get_param( 'selected' );
-		$selected = is_array( $selected ) ? $selected : null;
-		$result = Model_Importer::import_from_providers( false, $selected );
+		$selected = self::parse_import_selected( $request );
+		$result   = Model_Importer::import_from_providers( false, $selected );
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) ) {
+			$entries = API_Keys_Helper::get_entries();
+			$result['_debug'] = array(
+				'body_empty'         => empty( $request->get_body() ),
+				'selected_null'      => $selected === null,
+				'entry_ids_received' => $selected && isset( $selected['entries'] ) ? array_keys( $selected['entries'] ) : array(),
+				'entry_ids_backend'  => array_map( function ( $e ) { return ( $e['type'] ?? '' ) . ':' . ( $e['id'] ?? '' ); }, $entries ),
+				'models_per_entry'   => $selected && isset( $selected['entries'] ) ? array_map( function ( $e ) { return array( 'text' => count( $e['text'] ?? array() ), 'image' => count( $e['image'] ?? array() ), 'video' => count( $e['video'] ?? array() ) ); }, $selected['entries'] ) : array(),
+			);
+		}
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Parse selected models from request body (avoids REST sanitization of nested entries).
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return array|null Selected: { entries: { entry_id => { text, image, video, audio } } } or null.
+	 */
+	private static function parse_import_selected( $request ) {
+		$body = $request->get_body();
+		if ( ! empty( $body ) ) {
+			$json = json_decode( $body, true );
+			if ( is_array( $json ) && isset( $json['selected'] ) && is_array( $json['selected'] ) ) {
+				return self::normalize_selected( $json['selected'] );
+			}
+		}
+		$json = $request->get_json_params();
+		if ( is_array( $json ) && isset( $json['selected'] ) && is_array( $json['selected'] ) ) {
+			return self::normalize_selected( $json['selected'] );
+		}
+		return null;
+	}
+
+	/**
+	 * Normalize selected structure: ensure entries is object with string keys.
+	 *
+	 * @param array $selected Raw from JSON.
+	 * @return array Normalized selected.
+	 */
+	private static function normalize_selected( $selected ) {
+		if ( ! isset( $selected['entries'] ) || ! is_array( $selected['entries'] ) ) {
+			return $selected;
+		}
+		$entries = array();
+		foreach ( $selected['entries'] as $k => $v ) {
+			$key = is_string( $k ) ? $k : (string) $k;
+			if ( $key === '' ) {
+				continue;
+			}
+			$entries[ $key ] = is_array( $v ) ? array(
+				'text'  => isset( $v['text'] ) && is_array( $v['text'] ) ? $v['text'] : array(),
+				'image' => isset( $v['image'] ) && is_array( $v['image'] ) ? $v['image'] : array(),
+				'video' => isset( $v['video'] ) && is_array( $v['video'] ) ? $v['video'] : array(),
+				'audio' => isset( $v['audio'] ) && is_array( $v['audio'] ) ? $v['audio'] : array(),
+			) : array( 'text' => array(), 'image' => array(), 'video' => array(), 'audio' => array() );
+		}
+		$selected['entries'] = $entries;
+		return $selected;
 	}
 
 	/**
@@ -717,9 +842,18 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_reset_models( $request ) {
-		$selected = $request->get_param( 'selected' );
-		$selected = is_array( $selected ) ? $selected : null;
-		$result = Model_Importer::reset_and_import( $selected );
+		$selected = self::parse_import_selected( $request );
+		$result   = Model_Importer::reset_and_import( $selected );
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) ) {
+			$entries = API_Keys_Helper::get_entries();
+			$result['_debug'] = array(
+				'body_empty'         => empty( $request->get_body() ),
+				'selected_null'      => $selected === null,
+				'entry_ids_received' => $selected && isset( $selected['entries'] ) ? array_keys( $selected['entries'] ) : array(),
+				'entry_ids_backend'  => array_map( function ( $e ) { return ( $e['type'] ?? '' ) . ':' . ( $e['id'] ?? '' ); }, $entries ),
+				'models_per_entry'   => $selected && isset( $selected['entries'] ) ? array_map( function ( $e ) { return array( 'text' => count( $e['text'] ?? array() ), 'image' => count( $e['image'] ?? array() ), 'video' => count( $e['video'] ?? array() ) ); }, $selected['entries'] ) : array(),
+			);
+		}
 		return rest_ensure_response( $result );
 	}
 
