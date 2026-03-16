@@ -160,16 +160,20 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_video_request( $prompt, $model, $credentials ) {
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
 		}
+		$seconds = max( 4, min( 12, (int) $duration_seconds ) );
+		if ( ! in_array( $seconds, array( 4, 8, 12 ), true ) ) {
+			$seconds = 8;
+		}
 		$body = array(
 			'prompt'   => $prompt,
 			'model'    => $model,
-			'size'     => '1280x720',
-			'seconds'  => '8',
+			'size'     => $size ?: '1280x720',
+			'seconds'  => (string) $seconds,
 		);
 		return array(
 			'url'     => 'https://api.openai.com/v1/videos',

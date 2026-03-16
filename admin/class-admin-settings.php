@@ -79,7 +79,7 @@ class Admin_Settings {
 								<input type="checkbox" name="alorbach_debug_enabled" id="alorbach_debug_enabled" value="1" <?php checked( $debug_enabled ); ?> />
 								<?php esc_html_e( 'Enable debug output for model import', 'alorbach-ai-gateway' ); ?>
 							</label>
-							<p class="description"><?php esc_html_e( 'When enabled, import API responses include a _debug object and the browser console logs payload and response details.', 'alorbach-ai-gateway' ); ?></p>
+							<p class="description"><?php esc_html_e( 'When enabled, import API responses include a _debug object and the browser console logs payload and response details. Video errors also include debug info (API response code, headers, body preview) in the console.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 				</table>

@@ -615,13 +615,13 @@ class Admin_Cost_Matrix {
 				<?php endif; ?>
 
 				<h2><?php esc_html_e( 'Video (Sora)', 'alorbach-ai-gateway' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Cost per video by model. Add custom models as needed.', 'alorbach-ai-gateway' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Cost for 8 seconds per model (scales by duration: 4s = ½, 12s = 1.5×). Add custom models as needed.', 'alorbach-ai-gateway' ); ?></p>
 				<div class="alorbach-cost-grid-wrapper">
 					<table class="alorbach-cost-grid form-table">
 						<thead>
 							<tr>
 								<th><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
-								<th class="alorbach-cost-num"><?php esc_html_e( 'UC per video (USD)', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'UC for 8s (USD)', 'alorbach-ai-gateway' ); ?></th>
 								<th><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
 							</tr>
 						</thead>

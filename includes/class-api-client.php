@@ -299,11 +299,13 @@ class API_Client {
 	 * Create video job via Sora (OpenAI or Azure) or Veo (Google). Returns job ID immediately without polling.
 	 * Use for quick verification that the API accepts the request.
 	 *
-	 * @param string $prompt Text prompt.
-	 * @param string $model  Model ID (e.g. sora-2, veo-3.1-generate-preview).
+	 * @param string $prompt           Text prompt.
+	 * @param string $model           Model ID (e.g. sora-2, veo-3.1-generate-preview).
+	 * @param string $size            Size (e.g. 1280x720). Default 1280x720.
+	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
 	 * @return array|WP_Error Array with 'id' => job_id, 'provider' => provider, or WP_Error.
 	 */
-	public static function create_video( $prompt, $model = 'sora-2' ) {
+	public static function create_video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
 		$provider = self::get_provider_for_model( $model );
 		$prov     = Provider_Registry::get( $provider );
 		if ( ! $prov || ! $prov->supports_video() ) {
@@ -321,7 +323,7 @@ class API_Client {
 				$provider === 'openai' ? 'OpenAI' : ( $provider === 'azure' ? 'Azure' : ( $provider === 'google' ? 'Google' : $provider ) )
 			) );
 		}
-		$request = $prov->build_video_request( $prompt, $model, $creds );
+		$request = $prov->build_video_request( $prompt, $model, $size, $duration_seconds, $creds );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_api_key', __( 'Video generation not configured for this provider.', 'alorbach-ai-gateway' ) );
 		}
@@ -350,12 +352,14 @@ class API_Client {
 	/**
 	 * Generate video via Sora (OpenAI or Azure) or Veo (Google).
 	 *
-	 * @param string $prompt Text prompt.
-	 * @param string $model  Model ID (e.g. sora-2).
+	 * @param string $prompt           Text prompt.
+	 * @param string $model            Model ID (e.g. sora-2).
+	 * @param string $size             Size (e.g. 1280x720). Default 1280x720.
+	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
 	 * @return array|WP_Error Response with data[url] or error.
 	 */
-	public static function video( $prompt, $model = 'sora-2' ) {
-		$create_result = self::create_video( $prompt, $model );
+	public static function video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
+		$create_result = self::create_video( $prompt, $model, $size, $duration_seconds );
 		if ( is_wp_error( $create_result ) ) {
 			return $create_result;
 		}
@@ -365,18 +369,22 @@ class API_Client {
 		$max_polls = 60;
 		$poll_interval = 5;
 
-		if ( $provider === 'azure' ) {
-			return self::poll_azure_video( $video_id, $creds, $max_polls, $poll_interval );
-		}
+		// Azure Sora 2 and OpenAI both use /v1/videos endpoint; Azure uses endpoint + api-key.
+		$base_url = ( $provider === 'azure' && ! empty( $creds['endpoint'] ) )
+			? rtrim( $creds['endpoint'], '/' ) . '/openai/v1/videos'
+			: 'https://api.openai.com/v1/videos';
+		$auth_header = ( $provider === 'azure' )
+			? array( 'api-key' => $creds['api_key'] ?? '' )
+			: array( 'Authorization' => 'Bearer ' . ( $creds['api_key'] ?? '' ) );
 
-		// OpenAI.
-		$api_key = $creds ? $creds['api_key'] : '';
+		$debug_enabled = (bool) get_option( 'alorbach_debug_enabled', false );
+
 		for ( $i = 0; $i < $max_polls; $i++ ) {
 			sleep( $poll_interval );
 			$get_response = wp_remote_get(
-				'https://api.openai.com/v1/videos/' . $video_id,
+				$base_url . '/' . $video_id,
 				array(
-					'headers' => array( 'Authorization' => 'Bearer ' . $api_key ),
+					'headers' => $auth_header,
 					'timeout' => 30,
 				)
 			);
@@ -385,15 +393,16 @@ class API_Client {
 			}
 			$get_body = json_decode( wp_remote_retrieve_body( $get_response ), true );
 			$status = $get_body['status'] ?? '';
+			// Azure Sora 1 uses "succeeded"; Sora 2 / OpenAI use "completed".
 			if ( $status === 'failed' ) {
 				$err_msg = $get_body['error']['message'] ?? __( 'Video generation failed.', 'alorbach-ai-gateway' );
 				return new \WP_Error( 'api_error', $err_msg );
 			}
-			if ( $status === 'completed' ) {
+			if ( $status === 'completed' || $status === 'succeeded' ) {
 				$content_response = wp_remote_get(
-					'https://api.openai.com/v1/videos/' . $video_id . '/content',
+					$base_url . '/' . $video_id . '/content',
 					array(
-						'headers'     => array( 'Authorization' => 'Bearer ' . $api_key ),
+						'headers'     => $auth_header,
 						'timeout'     => 60,
 						'redirection' => 0,
 					)
@@ -401,81 +410,54 @@ class API_Client {
 				if ( is_wp_error( $content_response ) ) {
 					return $content_response;
 				}
-				$content_code = wp_remote_retrieve_response_code( $content_response );
-				$location = wp_remote_retrieve_header( $content_response, 'location' );
+				$content_code   = wp_remote_retrieve_response_code( $content_response );
+				$content_body   = wp_remote_retrieve_body( $content_response );
+				$location       = wp_remote_retrieve_header( $content_response, 'location' );
+				$content_type   = wp_remote_retrieve_header( $content_response, 'content-type' );
+
+				// Redirect (301/302) with Location header.
 				if ( ( $content_code === 301 || $content_code === 302 ) && ! empty( $location ) ) {
 					return array( 'data' => array( array( 'url' => $location ) ) );
 				}
-				return new \WP_Error( 'api_error', __( 'Could not retrieve video content URL from API.', 'alorbach-ai-gateway' ) );
+
+				// 200 with video stream (OpenAI/Azure Sora 2 return binary directly).
+				if ( $content_code === 200 && ! empty( $content_body ) ) {
+					$is_json = strpos( (string) $content_type, 'application/json' ) !== false;
+					$is_video = ! $is_json && ( strpos( (string) $content_type, 'video/' ) === 0 || strlen( $content_body ) > 1000 );
+					if ( $is_video ) {
+						$upload = wp_upload_bits( 'alorbach-video-' . wp_unique_id() . '.mp4', false, $content_body );
+						if ( empty( $upload['error'] ) && ! empty( $upload['url'] ) ) {
+							return array( 'data' => array( array( 'url' => $upload['url'] ) ) );
+						}
+					}
+				}
+
+				// Failure: attach debug info when enabled.
+				$err_data = array( 'status' => 500 );
+				if ( $debug_enabled ) {
+					$body_preview = is_string( $content_body ) ? substr( $content_body, 0, 500 ) : '';
+					if ( function_exists( 'mb_substr' ) && mb_strlen( $body_preview ) > 200 ) {
+						$body_preview = mb_substr( $body_preview, 0, 200 ) . '...';
+					} elseif ( strlen( $body_preview ) > 200 ) {
+						$body_preview = substr( $body_preview, 0, 200 ) . '...';
+					}
+					$err_data['debug'] = array(
+						'provider'       => $provider,
+						'video_id'       => $video_id,
+						'content_code'   => $content_code,
+						'content_type'   => $content_type,
+						'has_location'   => ! empty( $location ),
+						'location'       => $location ?: null,
+						'body_length'    => is_string( $content_body ) ? strlen( $content_body ) : 0,
+						'body_preview'   => $body_preview,
+						'poll_status'    => $status,
+						'poll_response'  => $get_body,
+					);
+				}
+				return new \WP_Error( 'api_error', __( 'Could not retrieve video content URL from API.', 'alorbach-ai-gateway' ), $err_data );
 			}
 		}
 		return new \WP_Error( 'timeout', __( 'Video generation timed out. The video may still be processing.', 'alorbach-ai-gateway' ) );
 	}
 
-	/**
-	 * Poll Azure video job until complete and return video URL.
-	 *
-	 * @param string   $job_id        Job ID from create.
-	 * @param array    $creds         Azure credentials (endpoint, api_key).
-	 * @param int      $max_polls     Max poll attempts.
-	 * @param int      $poll_interval Seconds between polls.
-	 * @return array|WP_Error
-	 */
-	private static function poll_azure_video( $job_id, $creds, $max_polls, $poll_interval ) {
-		$endpoint = isset( $creds['endpoint'] ) ? rtrim( trim( $creds['endpoint'] ), '/' ) : '';
-		$api_key  = $creds['api_key'] ?? '';
-		if ( empty( $endpoint ) || empty( $api_key ) ) {
-			return new \WP_Error( 'no_api_key', __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
-		}
-		$status_url = $endpoint . '/openai/v1/video/generations/jobs/' . $job_id . '?api-version=preview';
-		$headers    = array( 'api-key' => $api_key, 'Content-Type' => 'application/json' );
-
-		for ( $i = 0; $i < $max_polls; $i++ ) {
-			sleep( $poll_interval );
-			$status_response = wp_remote_get( $status_url, array( 'headers' => $headers, 'timeout' => 30 ) );
-			if ( is_wp_error( $status_response ) ) {
-				return $status_response;
-			}
-			$code = wp_remote_retrieve_response_code( $status_response );
-			$body = json_decode( wp_remote_retrieve_body( $status_response ), true );
-			if ( $code >= 400 ) {
-				$msg = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Video generation failed.', 'alorbach-ai-gateway' );
-				return new \WP_Error( 'api_error', $msg );
-			}
-			$status = $body['status'] ?? '';
-			if ( $status === 'failed' || $status === 'cancelled' ) {
-				$msg = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Video generation failed.', 'alorbach-ai-gateway' );
-				return new \WP_Error( 'api_error', $msg );
-			}
-			if ( $status === 'succeeded' ) {
-				$generations = $body['generations'] ?? array();
-				if ( empty( $generations ) ) {
-					return new \WP_Error( 'api_error', __( 'No generations in job result.', 'alorbach-ai-gateway' ) );
-				}
-				$generation_id = $generations[0]['id'] ?? '';
-				if ( empty( $generation_id ) ) {
-					return new \WP_Error( 'api_error', __( 'No generation ID in job result.', 'alorbach-ai-gateway' ) );
-				}
-				$content_url = $endpoint . '/openai/v1/video/generations/' . $generation_id . '/content/video?api-version=preview';
-				$content_response = wp_remote_get( $content_url, array( 'headers' => $headers, 'timeout' => 60 ) );
-				if ( is_wp_error( $content_response ) ) {
-					return $content_response;
-				}
-				$content_code = wp_remote_retrieve_response_code( $content_response );
-				if ( $content_code >= 400 ) {
-					return new \WP_Error( 'api_error', __( 'Could not retrieve video content from Azure.', 'alorbach-ai-gateway' ) );
-				}
-				$location = wp_remote_retrieve_header( $content_response, 'location' );
-				if ( ! empty( $location ) ) {
-					return array( 'data' => array( array( 'url' => $location ) ) );
-				}
-				$body_content = wp_remote_retrieve_body( $content_response );
-				if ( ! empty( $body_content ) && preg_match( '#https?://[^\s"\'<>]+#', $body_content, $m ) ) {
-					return array( 'data' => array( array( 'url' => $m[0] ) ) );
-				}
-				return new \WP_Error( 'api_error', __( 'Could not retrieve video content URL from Azure.', 'alorbach-ai-gateway' ) );
-			}
-		}
-		return new \WP_Error( 'timeout', __( 'Video generation timed out. The video may still be processing.', 'alorbach-ai-gateway' ) );
-	}
 }

@@ -12,7 +12,12 @@
 	var nonce = config.nonce || '';
 
 	function apiFetch(endpoint, options) {
-		var url = restUrl.replace(/\/$/, '') + endpoint;
+		var base = restUrl.replace(/\/$/, '');
+		// When using index.php?rest_route=..., endpoint query params must use & not ?
+		// Otherwise rest_route value gets corrupted (e.g. /me/estimate?type=image)
+		var url = base + (base.indexOf('?') !== -1 && endpoint.indexOf('?') !== -1
+			? endpoint.replace('?', '&')
+			: endpoint);
 		var opts = Object.assign({
 			headers: {
 				'Content-Type': 'application/json',
@@ -67,6 +72,9 @@
 		if (el) {
 			el.textContent = msg;
 			el.style.display = 'block';
+		}
+		if (err.data && err.data.debug) {
+			console.log('[alorbach-video] Debug:', err.data.debug);
 		}
 	}
 
@@ -530,8 +538,33 @@
 		getBalance(container);
 		var promptEl = container.querySelector('.alorbach-demo-prompt');
 		var modelSelect = container.querySelector('.alorbach-demo-model-select');
+		var sizeSelect = container.querySelector('.alorbach-demo-size-select');
+		var durationSelect = container.querySelector('.alorbach-demo-duration-select');
 		var genBtn = container.querySelector('.alorbach-demo-generate');
 		var resultEl = container.querySelector('.alorbach-demo-videos');
+
+		// sora-2 supports 720p only; sora-2-pro supports all
+		function getSizeOptionsForModel(model) {
+			var all = ['1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024'];
+			if (!model || model.indexOf('sora-2-pro') !== -1) return all;
+			return ['1280x720', '720x1280'];
+		}
+
+		function updateSizeOptions() {
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
+			var opts = getSizeOptionsForModel(model);
+			var current = (sizeSelect && sizeSelect.value) || container.dataset.size || '1280x720';
+			if (sizeSelect) {
+				sizeSelect.innerHTML = '';
+				opts.forEach(function (opt) {
+					var o = document.createElement('option');
+					o.value = opt;
+					o.textContent = opt;
+					if (opt === current || (opts.indexOf(current) === -1 && opt === opts[0])) o.selected = true;
+					sizeSelect.appendChild(o);
+				});
+			}
+		}
 
 		getModels(container).then(function (models) {
 			var video = models.video || {};
@@ -548,21 +581,55 @@
 				});
 			}
 			container.dataset.model = video.default || 'sora-2';
+
+			var sizeOpts = video.size || {};
+			if (sizeOpts.options && sizeOpts.options.length && sizeSelect) {
+				sizeSelect.innerHTML = '';
+				sizeOpts.options.forEach(function (opt) {
+					var o = document.createElement('option');
+					o.value = opt;
+					o.textContent = opt;
+					if (opt === (sizeOpts.default || '1280x720')) o.selected = true;
+					sizeSelect.appendChild(o);
+				});
+			}
+			container.dataset.size = sizeOpts.default || '1280x720';
+
+			var durOpts = video.duration || {};
+			if (durOpts.options && durOpts.options.length && durationSelect) {
+				durationSelect.innerHTML = '';
+				durOpts.options.forEach(function (opt) {
+					var o = document.createElement('option');
+					o.value = opt;
+					o.textContent = opt + 's';
+					if (opt === (durOpts.default || '8')) o.selected = true;
+					durationSelect.appendChild(o);
+				});
+			}
+			container.dataset.duration = durOpts.default || '8';
+
+			updateSizeOptions();
 			refreshVideoCost();
 		});
 
 		function refreshVideoCost() {
 			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
-			updateCostEstimate(container, 'video', { type: 'video', model: model }, container.querySelector('.alorbach-demo-cost'));
+			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1280x720';
+			var duration = (durationSelect && durationSelect.value) || container.dataset.duration || '8';
+			updateCostEstimate(container, 'video', { type: 'video', model: model, size: size, duration_seconds: parseInt(duration, 10) }, container.querySelector('.alorbach-demo-cost'));
 		}
 
-		if (modelSelect) modelSelect.addEventListener('change', refreshVideoCost);
+		if (modelSelect) modelSelect.addEventListener('change', function () { updateSizeOptions(); refreshVideoCost(); });
+		if (sizeSelect) sizeSelect.addEventListener('change', refreshVideoCost);
+		if (durationSelect) durationSelect.addEventListener('change', refreshVideoCost);
 
 		function generate() {
 			var prompt = (promptEl && promptEl.value || '').trim();
 			if (!prompt) return;
 			clearError(container);
 			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
+			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1280x720';
+			var duration = parseInt((durationSelect && durationSelect.value) || container.dataset.duration || '8', 10);
 			container.classList.add('alorbach-demo-loading');
 			if (genBtn) genBtn.disabled = true;
 			if (resultEl) resultEl.innerHTML = '';
@@ -571,7 +638,7 @@
 
 			apiFetch('/video', {
 				method: 'POST',
-				body: { prompt: prompt, model: model },
+				body: { prompt: prompt, model: model, size: size, duration_seconds: duration },
 			}).then(function (r) {
 				if (!r.ok) return r.json().then(function (d) { throw d; });
 				return r.json();

@@ -54,19 +54,24 @@ class Azure_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_video_request( $prompt, $model, $credentials ) {
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$url  = $endpoint . '/openai/v1/video/generations/jobs?api-version=preview';
+		$seconds = max( 4, min( 12, (int) $duration_seconds ) );
+		if ( ! in_array( $seconds, array( 4, 8, 12 ), true ) ) {
+			$seconds = 8;
+		}
+		// Sora 2 uses OpenAI-style API: /openai/v1/videos with model, prompt, size, seconds.
+		// Per Azure docs: Sora 2 aligns with OpenAI's native Sora 2 schema.
+		$url  = $endpoint . '/openai/v1/videos';
 		$body = array(
-			'prompt'    => $prompt,
-			'width'     => 1280,
-			'height'    => 720,
-			'n_seconds' => 8,
-			'model'     => $model,
+			'model'    => $model,
+			'prompt'   => $prompt,
+			'size'     => $size ?: '1280x720',
+			'seconds'  => (string) $seconds,
 		);
 		return array(
 			'url'     => $url,

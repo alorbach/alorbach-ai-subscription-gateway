@@ -150,6 +150,122 @@
 	flex-shrink: 0;
 }
 
+/* Image demo: options layout below prompt */
+.alorbach-demo-image-options {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 1rem 1.5rem;
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid #e5e7eb;
+}
+
+.alorbach-demo-image-options .alorbach-demo-settings {
+	flex: 1;
+	min-width: 0;
+	gap: 1rem 1.25rem;
+}
+
+.alorbach-demo-image-options .alorbach-demo-cost-wrap {
+	margin: 0;
+	flex-shrink: 0;
+	align-self: center;
+	font-size: 0.9rem;
+}
+
+.alorbach-demo-image-options .alorbach-demo-cost {
+	display: inline-block;
+	padding: 0.35rem 0.75rem;
+	background: #f0f6fc;
+	border-radius: 6px;
+	border: 1px solid #c5d9ed;
+}
+
+@media (max-width: 520px) {
+	.alorbach-demo-image-options {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	.alorbach-demo-image-options .alorbach-demo-cost-wrap {
+		text-align: center;
+	}
+	.alorbach-demo-video-options {
+		grid-template-columns: 1fr;
+	}
+	.alorbach-demo-video-options .alorbach-demo-cost-wrap {
+		grid-column: 1;
+		text-align: center;
+	}
+}
+
+/* Video demo: options layout */
+.alorbach-demo-video-options {
+	display: grid;
+	grid-template-columns: 1fr auto;
+	align-items: center;
+	gap: 1rem 1.5rem;
+	margin-top: 1rem;
+	padding: 1rem 1.25rem;
+	background: #fff;
+	border: 1px solid #e5e7eb;
+	border-radius: 8px;
+}
+
+.alorbach-demo-video-options .alorbach-demo-settings {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 1rem 1.5rem;
+}
+
+.alorbach-demo-video-options .alorbach-demo-settings label {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.35rem;
+	font-size: 0.8rem;
+	font-weight: 600;
+	color: #374151;
+}
+
+.alorbach-demo-video-options .alorbach-demo-settings select {
+	display: block;
+	padding: 0.4rem 1.75rem 0.4rem 0.6rem;
+	min-width: 0;
+}
+
+.alorbach-demo-video-options .alorbach-demo-cost-wrap {
+	margin: 0;
+	grid-column: 2;
+	grid-row: 1;
+	text-align: right;
+	font-size: 0.9rem;
+}
+
+.alorbach-demo-video-options .alorbach-demo-cost {
+	display: inline-block;
+	padding: 0.5rem 1rem;
+	background: #eff6ff;
+	border-radius: 8px;
+	border: 1px solid #bfdbfe;
+	font-weight: 600;
+	color: #1e40af;
+}
+
+.alorbach-demo-video-options .alorbach-demo-duration-select {
+	min-width: 5.5rem;
+}
+
+.alorbach-demo-video-options .alorbach-demo-size-select {
+	min-width: 8rem;
+}
+
+.alorbach-demo-video .alorbach-demo-action-row {
+	margin-top: 1.25rem;
+}
+
 .alorbach-demo-error {
 	background: #fcf0f1;
 	border: 1px solid #d63638;

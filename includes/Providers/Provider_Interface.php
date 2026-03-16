@@ -88,12 +88,14 @@ interface Provider_Interface {
 	/**
 	 * Build video generation request. Return null if not supported.
 	 *
-	 * @param string $prompt      Prompt.
-	 * @param string $model       Model (e.g. sora-2).
-	 * @param array  $credentials Credentials.
+	 * @param string $prompt           Prompt.
+	 * @param string $model            Model (e.g. sora-2).
+	 * @param string $size             Size (e.g. 1280x720).
+	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12).
+	 * @param array  $credentials      Credentials.
 	 * @return array{url: string, headers: array, body: string}|WP_Error|null
 	 */
-	public function build_video_request( $prompt, $model, $credentials );
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials );
 
 	/**
 	 * Verify API key/credentials.

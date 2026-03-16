@@ -73,9 +73,14 @@ abstract class Provider_Base implements Provider_Interface {
 	/**
 	 * Default: no video support.
 	 *
+	 * @param string $prompt           Prompt.
+	 * @param string $model            Model (e.g. sora-2).
+	 * @param string $size             Size (e.g. 1280x720).
+	 * @param int    $duration_seconds Duration in seconds.
+	 * @param array  $credentials      Credentials.
 	 * @return null
 	 */
-	public function build_video_request( $prompt, $model, $credentials ) {
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
 		return null;
 	}
 

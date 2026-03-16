@@ -99,16 +99,23 @@ class Cost_Matrix {
 	}
 
 	/**
-	 * Get video generation cost (UC) per video.
+	 * Get video generation cost (UC) for given model and duration.
+	 * Stored cost is treated as cost for 8 seconds; scales linearly by duration.
 	 *
-	 * @param string $model Model ID (e.g. sora-2).
-	 * @return int UC cost per video.
+	 * @param string $model            Model ID (e.g. sora-2).
+	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
+	 * @return int UC cost.
 	 */
-	public static function get_video_cost( $model = 'sora-2' ) {
+	public static function get_video_cost( $model = 'sora-2', $duration_seconds = 8 ) {
 		$costs = get_option( 'alorbach_video_costs', array() );
 		$costs = is_array( $costs ) ? $costs : array();
 		$costs = apply_filters( 'alorbach_video_costs', $costs );
-		return isset( $costs[ $model ] ) ? (int) $costs[ $model ] : 400000;
+		$base  = isset( $costs[ $model ] ) ? (int) $costs[ $model ] : 400000;
+		$duration = max( 4, min( 12, (int) $duration_seconds ) );
+		if ( ! in_array( $duration, array( 4, 8, 12 ), true ) ) {
+			$duration = 8;
+		}
+		return (int) round( $base * ( $duration / 8 ) );
 	}
 
 	/**

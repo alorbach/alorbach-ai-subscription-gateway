@@ -138,8 +138,10 @@ class REST_Proxy {
 				return is_user_logged_in();
 			},
 			'args'                => array(
-				'prompt' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
-				'model'  => array( 'default' => 'sora-2', 'sanitize_callback' => 'sanitize_text_field' ),
+				'prompt'            => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'model'             => array( 'default' => 'sora-2', 'sanitize_callback' => 'sanitize_text_field' ),
+				'size'              => array( 'default' => '1280x720', 'sanitize_callback' => 'sanitize_text_field' ),
+				'duration_seconds'  => array( 'default' => 8, 'sanitize_callback' => 'absint' ),
 			),
 		) );
 
@@ -432,6 +434,16 @@ class REST_Proxy {
 				'default'      => in_array( $default_video, $video_options, true ) ? $default_video : ( $video_options[0] ?? 'sora-2' ),
 				'allow_select' => $allow_video,
 				'options'      => $video_options,
+				'size'         => array(
+					'default'      => '1280x720',
+					'allow_select'  => true,
+					'options'       => array( '1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024' ),
+				),
+				'duration'      => array(
+					'default'      => '8',
+					'allow_select'  => true,
+					'options'       => array( '4', '8', '12' ),
+				),
 			),
 		) );
 	}
@@ -454,8 +466,12 @@ class REST_Proxy {
 			$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
 			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
 		} elseif ( $type === 'video' ) {
-			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_video_model', 'sora-2' );
-			$api_cost = Cost_Matrix::get_video_cost( $model );
+			$model    = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_video_model', 'sora-2' );
+			$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
+			if ( ! in_array( $duration, array( 4, 8, 12 ), true ) ) {
+				$duration = 8;
+			}
+			$api_cost = Cost_Matrix::get_video_cost( $model, $duration );
 			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
 		} elseif ( $type === 'audio' ) {
 			$duration = max( 1, (int) $request->get_param( 'duration_seconds' ) );
@@ -655,15 +671,20 @@ class REST_Proxy {
 		$user_id = get_current_user_id();
 		$prompt  = $request->get_param( 'prompt' );
 		$model   = $request->get_param( 'model' ) ?: 'sora-2';
+		$size    = $request->get_param( 'size' ) ?: '1280x720';
+		$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
+		if ( ! in_array( (string) $duration, array( '4', '8', '12' ), true ) ) {
+			$duration = 8;
+		}
 
-		$api_cost = Cost_Matrix::get_video_cost( $model );
+		$api_cost = Cost_Matrix::get_video_cost( $model, $duration );
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
-		$response = API_Client::video( $prompt, $model );
+		$response = API_Client::video( $prompt, $model, $size, $duration );
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
