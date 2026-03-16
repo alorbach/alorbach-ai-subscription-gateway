@@ -135,6 +135,10 @@ class OpenAI_Provider extends Provider_Base {
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
 		}
+		// OpenAI expects whisper-1, not whisper.
+		if ( $model === 'whisper' ) {
+			$model = 'whisper-1';
+		}
 		$boundary = wp_generate_password( 24, false );
 		$body     = '--' . $boundary . "\r\n";
 		$body    .= 'Content-Disposition: form-data; name="model"' . "\r\n\r\n" . $model . "\r\n";

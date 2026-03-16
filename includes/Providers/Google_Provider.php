@@ -238,6 +238,7 @@ class Google_Provider extends Provider_Base {
 						'provider'     => 'google',
 						'type'         => 'text',
 						'capabilities' => $this->map_google_capabilities( $methods ),
+						'max_tokens'   => isset( $m['outputTokenLimit'] ) ? (int) $m['outputTokenLimit'] : 0,
 					);
 				}
 			}

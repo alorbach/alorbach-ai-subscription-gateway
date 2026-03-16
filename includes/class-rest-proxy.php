@@ -17,6 +17,65 @@ if ( ! defined( 'ABSPATH' ) ) {
 class REST_Proxy {
 
 	/**
+	 * Transient-based per-user rate limiter. Limits are read from plugin settings.
+	 *
+	 * @param int    $user_id  WordPress user ID.
+	 * @param string $endpoint Short endpoint key: chat, images, transcribe, video.
+	 * @return \WP_Error|null WP_Error (HTTP 429) when limit exceeded, null when allowed.
+	 */
+	private static function check_rate_limit( $user_id, $endpoint ) {
+		$window = max( 10, (int) get_option( 'alorbach_rate_limit_window', 60 ) );
+		$option_map = array(
+			'chat'       => array( 'alorbach_rate_limit_chat', 100 ),
+			'images'     => array( 'alorbach_rate_limit_images', 30 ),
+			'transcribe' => array( 'alorbach_rate_limit_images', 30 ),
+			'video'      => array( 'alorbach_rate_limit_video', 10 ),
+		);
+		list( $option_key, $default ) = isset( $option_map[ $endpoint ] ) ? $option_map[ $endpoint ] : array( '', 60 );
+		$limit = $option_key ? max( 1, (int) get_option( $option_key, $default ) ) : $default;
+
+		$key   = 'alorbach_rl_' . $user_id . '_' . $endpoint;
+		$count = (int) get_transient( $key );
+		if ( $count >= $limit ) {
+			return new \WP_Error(
+				'rate_limit_exceeded',
+				/* translators: %d: rate limit window in seconds */
+				sprintf( __( 'Too many requests. Please wait %d seconds before trying again.', 'alorbach-ai-gateway' ), $window ),
+				array( 'status' => 429 )
+			);
+		}
+		if ( $count === 0 ) {
+			set_transient( $key, 1, $window );
+		} else {
+			set_transient( $key, $count + 1, $window );
+		}
+		return null;
+	}
+
+	/**
+	 * Check per-user monthly UC quota. Returns WP_Error if the user has exceeded
+	 * their monthly allowance (0 = unlimited).
+	 *
+	 * @param int $user_id WordPress user ID.
+	 * @return \WP_Error|null WP_Error (HTTP 429) when quota exceeded, null when allowed.
+	 */
+	private static function check_monthly_quota( $user_id ) {
+		$quota = (int) get_option( 'alorbach_monthly_quota_uc', 0 );
+		if ( $quota <= 0 ) {
+			return null; // 0 = unlimited.
+		}
+		$used = Ledger::get_usage_this_month( $user_id );
+		if ( $used >= $quota ) {
+			return new \WP_Error(
+				'monthly_quota_exceeded',
+				__( 'Monthly usage quota exceeded. Please upgrade your plan or wait until next month.', 'alorbach-ai-gateway' ),
+				array( 'status' => 429 )
+			);
+		}
+		return null;
+	}
+
+	/**
 	 * Register REST routes.
 	 */
 	public static function register_routes() {
@@ -262,11 +321,45 @@ class REST_Proxy {
 	 */
 	public static function chat_handler( $request ) {
 		$user_id  = get_current_user_id();
+
+		$rate_error = self::check_rate_limit( $user_id, 'chat' );
+		if ( $rate_error ) {
+			return $rate_error;
+		}
+
+		$quota_error = self::check_monthly_quota( $user_id );
+		if ( $quota_error ) {
+			return $quota_error;
+		}
+
 		$messages = $request->get_param( 'messages' );
 		$model    = $request->get_param( 'model' );
 		$max_tokens = $request->get_param( 'max_tokens' );
 
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model, time() ) ) );
+		// Validate messages structure.
+		if ( ! is_array( $messages ) || empty( $messages ) ) {
+			return new \WP_Error( 'invalid_messages', __( 'messages must be a non-empty array.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		$valid_roles = array( 'system', 'user', 'assistant' );
+		foreach ( $messages as $msg ) {
+			if ( ! is_array( $msg ) || ! isset( $msg['role'] ) || ! array_key_exists( 'content', $msg ) ) {
+				return new \WP_Error( 'invalid_messages', __( 'Each message must have a role and content.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			if ( ! in_array( $msg['role'], $valid_roles, true ) ) {
+				return new \WP_Error( 'invalid_messages', __( 'Invalid message role.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			if ( ! is_string( $msg['content'] ) && ! is_array( $msg['content'] ) ) {
+				return new \WP_Error( 'invalid_messages', __( 'Message content must be a string or array.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+		}
+
+		// Clamp max_tokens to the model's maximum supported output length.
+		$model_max = Cost_Matrix::get_max_tokens( $model );
+		if ( (int) $max_tokens > $model_max ) {
+			$max_tokens = $model_max;
+		}
+
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model, microtime( true ) ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -515,8 +608,8 @@ class REST_Proxy {
 		if ( ! $timestamp || ! $signature ) {
 			return new \WP_Error( 'invalid_signature', __( 'Invalid Stripe signature format.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
-		// Replay protection: reject if older than 5 minutes.
-		if ( abs( time() - (int) $timestamp ) > 300 ) {
+		// Replay protection: reject if older than 2 minutes.
+		if ( abs( time() - (int) $timestamp ) > 120 ) {
 			return new \WP_Error( 'replay_attack', __( 'Stripe webhook timestamp too old.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		$signed_content = $timestamp . '.' . $payload;
@@ -555,7 +648,11 @@ class REST_Proxy {
 					$credits = isset( $plans[ $plan_slug ]['credits_per_month'] ) ? (int) $plans[ $plan_slug ]['credits_per_month'] : 0;
 				}
 				if ( $credits > 0 ) {
-					Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
+					$inserted = Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
+					if ( ! $inserted ) {
+						// Signal failure so Stripe automatically retries the webhook.
+						return new \WP_Error( 'db_error', __( 'Failed to record transaction. Please retry.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+					}
 					do_action( 'alorbach_credits_added', $user_id, $credits, 'stripe' );
 				}
 			}
@@ -576,6 +673,17 @@ class REST_Proxy {
 	 */
 	public static function images_handler( $request ) {
 		$user_id = get_current_user_id();
+
+		$rate_error = self::check_rate_limit( $user_id, 'images' );
+		if ( $rate_error ) {
+			return $rate_error;
+		}
+
+		$quota_error = self::check_monthly_quota( $user_id );
+		if ( $quota_error ) {
+			return $quota_error;
+		}
+
 		$prompt  = $request->get_param( 'prompt' );
 		$size    = $request->get_param( 'size' );
 		$n       = (int) $request->get_param( 'n' );
@@ -613,17 +721,36 @@ class REST_Proxy {
 	 */
 	public static function transcribe_handler( $request ) {
 		$user_id   = get_current_user_id();
+
+		$rate_error = self::check_rate_limit( $user_id, 'transcribe' );
+		if ( $rate_error ) {
+			return $rate_error;
+		}
+
+		$quota_error = self::check_monthly_quota( $user_id );
+		if ( $quota_error ) {
+			return $quota_error;
+		}
+
 		$audio_b64 = $request->get_param( 'audio_base64' );
 		$duration  = (int) $request->get_param( 'duration_seconds' );
 		$model     = $request->get_param( 'model' ) ?: 'whisper-1';
 		$prompt    = $request->get_param( 'prompt' ) ?: '';
+
+		// Limit encoded size to ~48 MB decoded to prevent DoS via memory exhaustion.
+		if ( ! is_string( $audio_b64 ) || strlen( $audio_b64 ) > 67108864 ) {
+			return new \WP_Error( 'audio_too_large', __( 'Audio file exceeds the 48 MB limit.', 'alorbach-ai-gateway' ), array( 'status' => 413 ) );
+		}
 
 		$decoded = base64_decode( $audio_b64, true );
 		if ( false === $decoded ) {
 			return new \WP_Error( 'invalid_audio', __( 'Invalid base64 audio.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
-		$tmp = wp_tempnam( 'alorbach-whisper-' );
+		if ( ! function_exists( 'wp_tempnam' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		$tmp = \wp_tempnam( 'alorbach-whisper-' );
 		if ( ! $tmp || false === file_put_contents( $tmp, $decoded ) ) {
 			return new \WP_Error( 'upload_error', __( 'Could not save audio.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
 		}
@@ -669,6 +796,17 @@ class REST_Proxy {
 	 */
 	public static function video_handler( $request ) {
 		$user_id = get_current_user_id();
+
+		$rate_error = self::check_rate_limit( $user_id, 'video' );
+		if ( $rate_error ) {
+			return $rate_error;
+		}
+
+		$quota_error = self::check_monthly_quota( $user_id );
+		if ( $quota_error ) {
+			return $quota_error;
+		}
+
 		$prompt  = $request->get_param( 'prompt' );
 		$model   = $request->get_param( 'model' ) ?: 'sora-2';
 		$size    = $request->get_param( 'size' ) ?: '1280x720';
@@ -733,7 +871,7 @@ class REST_Proxy {
 			$entry_id = $request->get_param( 'entry_id' ) ?: '';
 		}
 		$result = API_Validator::verify_text_model( $provider, $model, $entry_id );
-		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && is_array( $result ) ) {
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' ) && is_array( $result ) ) {
 			$result['_debug'] = array(
 				'provider' => $provider,
 				'model'    => $model,
@@ -769,10 +907,17 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_audio( $request ) {
-		$params = $request->get_json_params();
-		$model  = ( is_array( $params ) && isset( $params['model'] ) ) ? sanitize_text_field( $params['model'] ) : ( $request->get_param( 'model' ) ?: 'whisper-1' );
-		$result = API_Validator::verify_audio_model( $model );
-		return rest_ensure_response( $result );
+		try {
+			$params = $request->get_json_params();
+			$model  = ( is_array( $params ) && isset( $params['model'] ) ) ? sanitize_text_field( $params['model'] ) : ( $request->get_param( 'model' ) ?: 'whisper-1' );
+			$result = API_Validator::verify_audio_model( $model );
+			return rest_ensure_response( $result );
+		} catch ( \Throwable $e ) {
+			return rest_ensure_response( array(
+				'success' => false,
+				'message' => $e->getMessage(),
+			) );
+		}
 	}
 
 	/**
@@ -808,7 +953,7 @@ class REST_Proxy {
 	public static function admin_import_models( $request ) {
 		$selected = self::parse_import_selected( $request );
 		$result   = Model_Importer::import_from_providers( false, $selected );
-		if ( (bool) get_option( 'alorbach_debug_enabled', false ) ) {
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' ) ) {
 			$entries = API_Keys_Helper::get_entries();
 			$result['_debug'] = array(
 				'body_empty'         => empty( $request->get_body() ),
@@ -878,7 +1023,7 @@ class REST_Proxy {
 	public static function admin_reset_models( $request ) {
 		$selected = self::parse_import_selected( $request );
 		$result   = Model_Importer::reset_and_import( $selected );
-		if ( (bool) get_option( 'alorbach_debug_enabled', false ) ) {
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' ) ) {
 			$entries = API_Keys_Helper::get_entries();
 			$result['_debug'] = array(
 				'body_empty'         => empty( $request->get_body() ),

@@ -136,3 +136,111 @@ function alorbach_get_user_usage_this_month( $user_id = null ) {
 function alorbach_format_credits( $uc_amount ) {
 	return Alorbach\AIGateway\User_Display::format_credits( $uc_amount );
 }
+
+// ---------------------------------------------------------------------------
+// GDPR: Personal data export
+// ---------------------------------------------------------------------------
+add_filter( 'wp_privacy_personal_data_exporters', 'alorbach_register_personal_data_exporters' );
+function alorbach_register_personal_data_exporters( $exporters ) {
+	$exporters['alorbach-ai-gateway'] = array(
+		'exporter_friendly_name' => __( 'AI Gateway Usage', 'alorbach-ai-gateway' ),
+		'callback'               => 'alorbach_export_personal_data',
+	);
+	return $exporters;
+}
+function alorbach_export_personal_data( $email, $page = 1 ) {
+	$user = get_user_by( 'email', $email );
+	if ( ! $user ) {
+		return array( 'data' => array(), 'done' => true );
+	}
+	$per_page = 100;
+	$result   = Alorbach\AIGateway\Ledger::get_transactions( array(
+		'user_id'  => $user->ID,
+		'per_page' => $per_page,
+		'page'     => (int) $page,
+	) );
+	$data = array();
+	foreach ( $result['rows'] as $row ) {
+		$data[] = array(
+			'group_id'    => 'alorbach_ledger',
+			'group_label' => __( 'AI Usage Ledger', 'alorbach-ai-gateway' ),
+			'item_id'     => 'ledger-' . $row['transaction_id'],
+			'data'        => array(
+				array( 'name' => __( 'Date', 'alorbach-ai-gateway' ),       'value' => $row['created_at'] ),
+				array( 'name' => __( 'Type', 'alorbach-ai-gateway' ),       'value' => $row['transaction_type'] ),
+				array( 'name' => __( 'Model', 'alorbach-ai-gateway' ),      'value' => $row['model_used'] ?? '' ),
+				array( 'name' => __( 'Amount (UC)', 'alorbach-ai-gateway' ), 'value' => $row['uc_amount'] ),
+			),
+		);
+	}
+	return array(
+		'data' => $data,
+		'done' => count( $result['rows'] ) < $per_page,
+	);
+}
+
+// ---------------------------------------------------------------------------
+// GDPR: Personal data erasure (anonymise ledger rows — records are retained
+// for accounting integrity but user identity is removed).
+// ---------------------------------------------------------------------------
+add_filter( 'wp_privacy_personal_data_erasers', 'alorbach_register_personal_data_erasers' );
+function alorbach_register_personal_data_erasers( $erasers ) {
+	$erasers['alorbach-ai-gateway'] = array(
+		'eraser_friendly_name' => __( 'AI Gateway Usage', 'alorbach-ai-gateway' ),
+		'callback'             => 'alorbach_erase_personal_data',
+	);
+	return $erasers;
+}
+function alorbach_erase_personal_data( $email, $page = 1 ) {
+	$user = get_user_by( 'email', $email );
+	if ( ! $user ) {
+		return array( 'items_removed' => false, 'items_retained' => false, 'messages' => array(), 'done' => true );
+	}
+	global $wpdb;
+	$table   = Alorbach\AIGateway\Ledger::get_table_name();
+	$removed = (int) $wpdb->update(
+		$table,
+		array( 'user_id' => 0 ),
+		array( 'user_id' => $user->ID ),
+		array( '%d' ),
+		array( '%d' )
+	);
+	return array(
+		'items_removed'  => $removed > 0,
+		'items_retained' => false,
+		'messages'       => array( __( 'AI usage records anonymized.', 'alorbach-ai-gateway' ) ),
+		'done'           => true,
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Admin notification: WooCommerce payment failure
+// ---------------------------------------------------------------------------
+add_action( 'alorbach_subscription_payment_failed', 'alorbach_admin_notify_payment_failed', 10, 2 );
+function alorbach_admin_notify_payment_failed( $subscription, $last_order ) {
+	$admin_email = get_option( 'admin_email' );
+	$user_id     = is_object( $subscription ) && method_exists( $subscription, 'get_user_id' ) ? $subscription->get_user_id() : 0;
+	$user        = $user_id ? get_user_by( 'id', $user_id ) : null;
+	$user_info   = $user ? $user->user_login . ' <' . $user->user_email . '>' : __( 'Unknown user', 'alorbach-ai-gateway' );
+	$site_name   = get_bloginfo( 'name' );
+	wp_mail(
+		$admin_email,
+		sprintf( __( '[%s] Subscription payment failed', 'alorbach-ai-gateway' ), $site_name ),
+		sprintf(
+			__( "A WooCommerce subscription payment has failed.\n\nUser: %s\n\nPlease review WooCommerce subscriptions for details: %s", 'alorbach-ai-gateway' ),
+			$user_info,
+			admin_url( 'admin.php?page=wc-subscriptions' )
+		)
+	);
+}
+
+// ---------------------------------------------------------------------------
+// WooCommerce renewal retry: scheduled event handler
+// ---------------------------------------------------------------------------
+add_action( 'alorbach_retry_wc_renewal', 'alorbach_handle_retry_wc_renewal', 10, 2 );
+function alorbach_handle_retry_wc_renewal( $user_id, $credits_uc ) {
+	$result = Alorbach\AIGateway\Ledger::insert_transaction( (int) $user_id, 'subscription_credit', null, (int) $credits_uc );
+	if ( $result ) {
+		do_action( 'alorbach_credits_added', (int) $user_id, (int) $credits_uc, 'woocommerce_retry' );
+	}
+}

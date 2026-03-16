@@ -143,11 +143,24 @@ class GitHub_Models_Provider extends Provider_Base {
 			if ( in_array( 'image', $input_mods, true ) ) {
 				$caps[] = 'image_to_text';
 			}
+			// Extract max output tokens from catalog response — GitHub Models catalog
+			// may return this under several field names depending on API version.
+			$limits     = is_array( $m['model_limits'] ?? null ) ? $m['model_limits'] : array();
+			$max_tokens = (int) (
+				$limits['max_output_tokens']   ??
+				$limits['output_token_limit']  ??
+				$m['max_output_tokens']        ??
+				$m['output_token_limit']       ??
+				$m['context_window']           ??
+				$m['context_length']           ??
+				0
+			);
 			$items[] = array(
 				'id'           => $id,
 				'provider'     => 'github_models',
 				'type'         => 'text',
 				'capabilities' => $caps,
+				'max_tokens'   => $max_tokens,
 			);
 		}
 		return $items;

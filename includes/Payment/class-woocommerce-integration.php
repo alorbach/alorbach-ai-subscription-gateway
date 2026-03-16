@@ -33,8 +33,13 @@ class WooCommerce_Integration {
 
 		$credits = self::get_credits_for_subscription( $subscription );
 		if ( $credits > 0 ) {
-			\Alorbach\AIGateway\Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
-			do_action( 'alorbach_credits_added', $user_id, $credits, 'woocommerce' );
+			$result = \Alorbach\AIGateway\Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
+			if ( $result ) {
+				do_action( 'alorbach_credits_added', $user_id, $credits, 'woocommerce' );
+			} else {
+				// DB write failed — schedule a single retry in 5 minutes.
+				wp_schedule_single_event( time() + 300, 'alorbach_retry_wc_renewal', array( $user_id, $credits ) );
+			}
 		}
 	}
 

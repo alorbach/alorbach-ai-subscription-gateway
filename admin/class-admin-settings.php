@@ -29,19 +29,35 @@ class Admin_Settings {
 			$google_import_default = in_array( $google_import_default, array( 'all', 'none' ), true ) ? $google_import_default : 'all';
 			$google_model_whitelist = isset( $_POST['alorbach_google_model_whitelist'] ) ? sanitize_textarea_field( wp_unslash( $_POST['alorbach_google_model_whitelist'] ) ) : '';
 
+			$rate_limit_window    = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) $_POST['alorbach_rate_limit_window'] ) ) : 60;
+			$rate_limit_chat      = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_chat'] ) ) : 100;
+			$rate_limit_images    = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_images'] ) ) : 30;
+			$rate_limit_video     = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_video'] ) ) : 10;
+
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
 			update_option( 'alorbach_selling_multiplier', $selling_multiplier );
 			update_option( 'alorbach_debug_enabled', $debug_enabled );
 			update_option( 'alorbach_google_import_default', $google_import_default );
 			update_option( 'alorbach_google_model_whitelist', $google_model_whitelist );
+			update_option( 'alorbach_rate_limit_window', $rate_limit_window );
+			update_option( 'alorbach_rate_limit_chat', $rate_limit_chat );
+			update_option( 'alorbach_rate_limit_images', $rate_limit_images );
+			update_option( 'alorbach_rate_limit_video', $rate_limit_video );
+			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) $_POST['alorbach_monthly_quota_uc'] ) : 0;
+			update_option( 'alorbach_monthly_quota_uc', $monthly_quota_uc );
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Settings saved.', 'alorbach-ai-gateway' ) . '</p></div>';
 		}
 
-		$selling_enabled   = (bool) get_option( 'alorbach_selling_enabled', false );
-		$selling_multiplier = (float) get_option( 'alorbach_selling_multiplier', 2.0 );
-		$debug_enabled     = (bool) get_option( 'alorbach_debug_enabled', false );
-		$google_import_default = get_option( 'alorbach_google_import_default', 'all' );
+		$selling_enabled        = (bool) get_option( 'alorbach_selling_enabled', false );
+		$selling_multiplier     = (float) get_option( 'alorbach_selling_multiplier', 2.0 );
+		$debug_enabled          = (bool) get_option( 'alorbach_debug_enabled', false );
+		$google_import_default  = get_option( 'alorbach_google_import_default', 'all' );
 		$google_model_whitelist = get_option( 'alorbach_google_model_whitelist', \Alorbach\AIGateway\Model_Importer::GOOGLE_MODEL_WHITELIST_DEFAULT );
+		$rate_limit_window      = (int) get_option( 'alorbach_rate_limit_window', 60 );
+		$rate_limit_chat        = (int) get_option( 'alorbach_rate_limit_chat', 100 );
+		$rate_limit_images      = (int) get_option( 'alorbach_rate_limit_images', 30 );
+		$rate_limit_video       = (int) get_option( 'alorbach_rate_limit_video', 10 );
+		$monthly_quota_uc       = (int) get_option( 'alorbach_monthly_quota_uc', 0 );
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Settings', 'alorbach-ai-gateway' ); ?></h1>
@@ -101,6 +117,46 @@ class Admin_Settings {
 						<td>
 							<textarea name="alorbach_google_model_whitelist" id="alorbach_google_model_whitelist" rows="4" class="large-text code"><?php echo esc_textarea( $google_model_whitelist ); ?></textarea>
 							<p class="description"><?php esc_html_e( 'Optional. Comma-separated model IDs (e.g. gemini-2.5-flash, gemini-2.5-flash-lite). When set, only these models are shown in the import modal.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'Rate Limiting', 'alorbach-ai-gateway' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Limit how many requests each logged-in user can make per time window. Set to a high number to effectively disable limiting for a specific endpoint.', 'alorbach-ai-gateway' ); ?></p>
+				<table class="form-table">
+					<tr>
+						<th scope="row"><label for="alorbach_rate_limit_window"><?php esc_html_e( 'Window (seconds)', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_rate_limit_window" id="alorbach_rate_limit_window" value="<?php echo esc_attr( $rate_limit_window ); ?>" min="10" max="3600" step="1" class="small-text" />
+							<p class="description"><?php esc_html_e( 'Rolling time window in seconds (10–3600). Default: 60.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_rate_limit_chat"><?php esc_html_e( 'Chat requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_rate_limit_chat" id="alorbach_rate_limit_chat" value="<?php echo esc_attr( $rate_limit_chat ); ?>" min="1" max="9999" step="1" class="small-text" />
+							<p class="description"><?php esc_html_e( 'Max chat completions per user per window. Default: 100.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_rate_limit_images"><?php esc_html_e( 'Image &amp; Transcribe requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_rate_limit_images" id="alorbach_rate_limit_images" value="<?php echo esc_attr( $rate_limit_images ); ?>" min="1" max="9999" step="1" class="small-text" />
+							<p class="description"><?php esc_html_e( 'Max image generation and audio transcription requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_rate_limit_video"><?php esc_html_e( 'Video requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_rate_limit_video" id="alorbach_rate_limit_video" value="<?php echo esc_attr( $rate_limit_video ); ?>" min="1" max="9999" step="1" class="small-text" />
+							<p class="description"><?php esc_html_e( 'Max video generation requests per user per window. Default: 10.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_monthly_quota_uc"><?php esc_html_e( 'Monthly quota per user (UC)', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_monthly_quota_uc" id="alorbach_monthly_quota_uc" value="<?php echo esc_attr( $monthly_quota_uc ); ?>" min="0" step="1000" class="regular-text" />
+							<p class="description"><?php esc_html_e( 'Maximum UC each user may spend per calendar month across all endpoints. 0 = unlimited. 1 Credit = 1,000 UC.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 				</table>

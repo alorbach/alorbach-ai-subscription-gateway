@@ -99,6 +99,23 @@ class API_Keys_Helper {
 	}
 
 	/**
+	 * Get all enabled entries for a given provider type.
+	 *
+	 * @param string $type Provider type: openai, azure, google, github_models.
+	 * @return array<int, array> All enabled entries with a non-empty api_key.
+	 */
+	public static function get_all_entries_for_type( $type ) {
+		$entries = self::get_entries();
+		$result  = array();
+		foreach ( $entries as $entry ) {
+			if ( ( $entry['type'] ?? '' ) === $type && ! empty( $entry['enabled'] ) && ! empty( $entry['api_key'] ) ) {
+				$result[] = $entry;
+			}
+		}
+		return $result;
+	}
+
+	/**
 	 * Get credentials for a provider (first enabled entry of that type).
 	 *
 	 * @param string $type Provider type: openai, azure, google, github_models.

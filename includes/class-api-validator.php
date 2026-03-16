@@ -129,17 +129,21 @@ class API_Validator {
 	 * @return array{success: bool, message?: string, result?: string}
 	 */
 	public static function verify_audio_model( $model = 'whisper-1' ) {
-		$tmp = self::create_minimal_wav();
-		if ( ! $tmp ) {
-			return array( 'success' => false, 'message' => __( 'Could not create test audio.', 'alorbach-ai-gateway' ) );
+		try {
+			$tmp = self::create_minimal_wav();
+			if ( ! $tmp ) {
+				return array( 'success' => false, 'message' => __( 'Could not create test audio.', 'alorbach-ai-gateway' ) );
+			}
+			$response = API_Client::transcribe( $tmp, $model );
+			@unlink( $tmp );
+			if ( is_wp_error( $response ) ) {
+				return array( 'success' => false, 'message' => $response->get_error_message() );
+			}
+			$text = isset( $response['text'] ) ? $response['text'] : '';
+			return array( 'success' => true, 'result' => $text );
+		} catch ( \Throwable $e ) {
+			return array( 'success' => false, 'message' => $e->getMessage() );
 		}
-		$response = API_Client::transcribe( $tmp, $model );
-		@unlink( $tmp );
-		if ( is_wp_error( $response ) ) {
-			return array( 'success' => false, 'message' => $response->get_error_message() );
-		}
-		$text = isset( $response['text'] ) ? $response['text'] : '';
-		return array( 'success' => true, 'result' => $text );
 	}
 
 	/**
@@ -177,13 +181,22 @@ class API_Validator {
 		$samples = str_repeat( "\x00\x00", $num_samples );
 		$wav     = $header . $samples;
 
-		$tmp = wp_tempnam( 'alorbach-wav-' );
-		if ( $tmp && false !== file_put_contents( $tmp, $wav ) ) {
-			return $tmp;
+		if ( ! function_exists( 'wp_tempnam' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
 		}
-		if ( $tmp ) {
-			@unlink( $tmp );
+		$tmp = \wp_tempnam( 'alorbach-wav-' );
+		if ( ! $tmp || false === file_put_contents( $tmp, $wav ) ) {
+			if ( $tmp ) {
+				@unlink( $tmp );
+			}
+			return false;
 		}
+		// API detects format by extension; wp_tempnam uses .tmp, so rename to .wav.
+		$tmp_wav = preg_replace( '/\.tmp$/i', '.wav', $tmp );
+		if ( $tmp_wav !== $tmp && rename( $tmp, $tmp_wav ) ) {
+			return $tmp_wav;
+		}
+		@unlink( $tmp );
 		return false;
 	}
 }

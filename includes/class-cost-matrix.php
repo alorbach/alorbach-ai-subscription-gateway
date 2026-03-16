@@ -52,6 +52,90 @@ class Cost_Matrix {
 	}
 
 	/**
+	 * Get the maximum output tokens supported by a model.
+	 * Ordered from most specific to least specific to avoid prefix collisions.
+	 *
+	 * @param string $model Model name.
+	 * @return int Max tokens (4096 if unknown).
+	 */
+	public static function get_max_tokens( $model ) {
+		// 1. Check values fetched live from provider APIs at import time.
+		$stored = get_option( 'alorbach_model_max_tokens', array() );
+		if ( is_array( $stored ) ) {
+			// Exact match first.
+			if ( isset( $stored[ $model ] ) && (int) $stored[ $model ] > 0 ) {
+				return (int) $stored[ $model ];
+			}
+			// Substring match for namespaced IDs like "openai/gpt-5.3" or "anthropic/claude-4.6".
+			$model_lower = strtolower( $model );
+			foreach ( $stored as $stored_id => $stored_cap ) {
+				if ( (int) $stored_cap > 0 && strpos( $model_lower, strtolower( $stored_id ) ) !== false ) {
+					return (int) $stored_cap;
+				}
+			}
+		}
+
+		// 2. Fall back to the static table (covers OpenAI, Azure, and any provider
+		//    whose API doesn't return output-token limits).
+		$model_lower = strtolower( $model );
+		// IMPORTANT: more-specific keys MUST come before less-specific prefixes they contain,
+		// e.g. 'gpt-4.1-mini' before 'gpt-4.1' before 'gpt-4', 'o4-mini' before 'o4' etc.
+		// Matching via strpos() means GitHub Models publisher/model slugs like
+		// 'openai/gpt-5.3' or 'anthropic/claude-4.6' are covered automatically.
+		$caps = array(
+			// --- Google Gemini (current as of early 2026) ---
+			'gemini-2.5-pro'         => 65536,
+			'gemini-2.5-flash-lite'  => 8192,
+			'gemini-2.5-flash'       => 65536,
+			'gemini-2.0-flash-lite'  => 8192,
+			'gemini-2.0-flash'       => 8192,
+			'gemini-1.5-pro'         => 8192,
+			'gemini-1.5-flash'       => 8192,
+			'gemini-1.0-pro'         => 2048,
+			// --- Anthropic Claude (via GitHub Models or direct API) ---
+			// claude-3-7-sonnet has 64k output; 3-5 variants 8k; claude-4.x family 32k+.
+			// Matches 'claude-4.6', 'claude-4-opus', 'anthropic/claude-4.5' etc.
+			'claude-3-7-sonnet'      => 64000,
+			'claude-3-5-sonnet'      => 8192,
+			'claude-3-5-haiku'       => 8192,
+			'claude-3-opus'          => 4096,
+			'claude-3-haiku'         => 4096,
+			'claude-4'               => 32768,  // covers claude-4.0, claude-4.5, claude-4.6, claude-4-opus …
+			// --- OpenAI o-series reasoning models ---
+			'o4-mini'                => 100000,
+			'o3-mini'                => 100000,
+			'o1-mini'                => 65536,
+			'o4'                     => 100000,
+			'o3'                     => 100000,
+			'o1'                     => 32768,
+			// --- GPT-5 family — covers gpt-5.0, gpt-5.3, gpt-5.4 etc. ---
+			'gpt-5'                  => 32768,
+			// --- GPT-4o variants (before plain gpt-4 to avoid prefix collision) ---
+			'gpt-4o-mini'            => 16384,
+			'gpt-4o'                 => 16384,
+			// --- GPT-4.1 series (April 2025, 32k output) ---
+			'gpt-4.1-nano'           => 32768,
+			'gpt-4.1-mini'           => 32768,
+			'gpt-4.1'                => 32768,
+			// --- GPT-4.5 ---
+			'gpt-4.5'                => 16384,
+			// --- GPT-4 legacy ---
+			'gpt-4-turbo'            => 4096,
+			'gpt-4'                  => 8192,
+			// --- GPT-3.5 ---
+			'gpt-3.5-turbo'          => 4096,
+		);
+		foreach ( $caps as $key => $cap ) {
+			if ( strpos( $model_lower, $key ) !== false ) {
+				return $cap;
+			}
+		}
+		// Unknown / future models: assume 32k output as a safe modern baseline.
+		// Update this table when a new model family ships.
+		return 32768;
+	}
+
+	/**
 	 * Calculate chat cost from usage.
 	 *
 	 * @param string $model            Model name.

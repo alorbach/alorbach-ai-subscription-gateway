@@ -89,12 +89,52 @@ class API_Client {
 		if ( ! $prov || ! $prov->supports_chat() ) {
 			return new \WP_Error( 'invalid_provider', __( 'Invalid or unsupported provider.', 'alorbach-ai-gateway' ) );
 		}
-		$creds = ! empty( $entry_id )
-			? API_Keys_Helper::get_credentials_for_entry( $entry_id )
-			: API_Keys_Helper::get_credentials_for_provider( $provider );
-		if ( ! $creds ) {
+
+		// When a specific entry is requested, use only that entry (no fallback).
+		if ( ! empty( $entry_id ) ) {
+			$creds = API_Keys_Helper::get_credentials_for_entry( $entry_id );
+			if ( ! $creds ) {
+				return new \WP_Error( 'no_api_key', __( 'API key not configured for this entry.', 'alorbach-ai-gateway' ) );
+			}
+			return self::execute_chat_request( $prov, $body, $creds, $provider );
+		}
+
+		// Try each enabled entry in order; fall back on retryable errors.
+		$entries = API_Keys_Helper::get_all_entries_for_type( $provider );
+		if ( empty( $entries ) ) {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured for this provider.', 'alorbach-ai-gateway' ) );
 		}
+		$last_error = null;
+		foreach ( $entries as $entry ) {
+			$creds = API_Keys_Helper::get_credentials_for_entry( $entry['id'] );
+			if ( ! $creds ) {
+				continue;
+			}
+			$result = self::execute_chat_request( $prov, $body, $creds, $provider );
+			if ( ! is_wp_error( $result ) ) {
+				return $result;
+			}
+			$last_error = $result;
+			// Stop fallback on auth errors — the key is definitively invalid.
+			$data   = $result->get_error_data();
+			$status = is_array( $data ) && isset( $data['status'] ) ? (int) $data['status'] : 0;
+			if ( $status === 401 || $status === 403 ) {
+				break;
+			}
+		}
+		return $last_error ?: new \WP_Error( 'no_api_key', __( 'No working API key found.', 'alorbach-ai-gateway' ) );
+	}
+
+	/**
+	 * Execute a single chat completion HTTP request.
+	 *
+	 * @param \Alorbach\AIGateway\Providers\Provider_Interface $prov     Provider instance.
+	 * @param array  $body     Request body.
+	 * @param array  $creds    Credentials array.
+	 * @param string $provider Provider type identifier.
+	 * @return array|\WP_Error Response or error.
+	 */
+	private static function execute_chat_request( $prov, $body, $creds, $provider ) {
 		$request = $prov->build_chat_request( $body, $creds );
 		if ( is_wp_error( $request ) ) {
 			return $request;
@@ -107,8 +147,8 @@ class API_Client {
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
-		$code = wp_remote_retrieve_response_code( $response );
-		$raw_body = wp_remote_retrieve_body( $response );
+		$code          = wp_remote_retrieve_response_code( $response );
+		$raw_body      = wp_remote_retrieve_body( $response );
 		$body_response = json_decode( $raw_body, true );
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
@@ -119,7 +159,7 @@ class API_Client {
 			$feedback = $body_response['promptFeedback'] ?? null;
 			if ( is_array( $feedback ) && ! empty( $feedback['blockReason'] ) ) {
 				$reason = $feedback['blockReason'] ?? 'BLOCKED';
-				$msg = isset( $feedback['blockReasonMessage'] ) ? $feedback['blockReasonMessage'] : sprintf( __( 'Prompt blocked (%s)', 'alorbach-ai-gateway' ), $reason );
+				$msg    = isset( $feedback['blockReasonMessage'] ) ? $feedback['blockReasonMessage'] : sprintf( __( 'Prompt blocked (%s)', 'alorbach-ai-gateway' ), $reason );
 				return new \WP_Error( 'api_error', $msg, array( 'status' => 400 ) );
 			}
 			$body_response = self::normalize_gemini_response( $body_response );
@@ -136,6 +176,10 @@ class API_Client {
 	 * @return string Error message.
 	 */
 	private static function extract_api_error_message( $body, $raw_body, $code ) {
+		// Never leak auth error details to callers.
+		if ( $code === 401 || $code === 403 ) {
+			return __( 'Authentication failed. Please check the API key configuration.', 'alorbach-ai-gateway' );
+		}
 		if ( is_array( $body ) ) {
 			if ( ! empty( $body['error']['message'] ) ) {
 				return (string) $body['error']['message'];
@@ -377,7 +421,7 @@ class API_Client {
 			? array( 'api-key' => $creds['api_key'] ?? '' )
 			: array( 'Authorization' => 'Bearer ' . ( $creds['api_key'] ?? '' ) );
 
-		$debug_enabled = (bool) get_option( 'alorbach_debug_enabled', false );
+		$debug_enabled = (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' );
 
 		for ( $i = 0; $i < $max_polls; $i++ ) {
 			sleep( $poll_interval );

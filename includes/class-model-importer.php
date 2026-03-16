@@ -268,6 +268,27 @@ class Model_Importer {
 			$result['entries'][] = $entry_data;
 		}
 
+		// Opportunistically persist any max_tokens values returned by providers
+		// so Cost_Matrix::get_max_tokens() can serve them without a static table lookup.
+		$stored_max = get_option( 'alorbach_model_max_tokens', array() );
+		if ( ! is_array( $stored_max ) ) {
+			$stored_max = array();
+		}
+		$changed = false;
+		foreach ( $result['entries'] as $entry_data ) {
+			foreach ( $entry_data['text'] as $item ) {
+				$id  = $item['id'] ?? '';
+				$mt  = isset( $item['max_tokens'] ) ? (int) $item['max_tokens'] : 0;
+				if ( $id !== '' && $mt > 0 ) {
+					$stored_max[ $id ] = $mt;
+					$changed = true;
+				}
+			}
+		}
+		if ( $changed ) {
+			update_option( 'alorbach_model_max_tokens', $stored_max, false );
+		}
+
 		return $result;
 	}
 
@@ -288,6 +309,7 @@ class Model_Importer {
 		update_option( 'alorbach_image_model_costs', array() );
 		update_option( 'alorbach_video_costs', array() );
 		update_option( 'alorbach_audio_costs', array() );
+		update_option( 'alorbach_model_max_tokens', array() );
 		return self::import_from_providers( true, $selected );
 	}
 

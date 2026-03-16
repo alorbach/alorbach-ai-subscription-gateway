@@ -50,6 +50,8 @@ class Admin_Cost_Matrix {
 		$video_costs = is_array( $video_costs ) ? $video_costs : array();
 		$audio_costs = get_option( 'alorbach_audio_costs', array() );
 		$audio_costs = is_array( $audio_costs ) ? $audio_costs : array();
+		$stored_max_tokens = get_option( 'alorbach_model_max_tokens', array() );
+		$stored_max_tokens = is_array( $stored_max_tokens ) ? $stored_max_tokens : array();
 
 		// Add custom text model (GET).
 		if ( isset( $_GET['alorbach_add_model'] ) && isset( $_GET['model'] ) ) {
@@ -412,6 +414,7 @@ class Admin_Cost_Matrix {
 										<span class="alorbach-usd"><?php echo esc_html( $format_usd( $default['cached'] ?? 0 ) ); ?></span>
 									</div>
 								</td>
+								<td class="alorbach-cost-num">—</td>
 								<td class="alorbach-actions">—</td>
 							</tr>
 							<?php foreach ( $models_by_entry as $entry_id => $group ) : ?>
@@ -449,6 +452,16 @@ class Admin_Cost_Matrix {
 												<span class="alorbach-usd"><?php echo esc_html( $format_usd( $cached_uc ) ); ?></span>
 											</div>
 										</td>
+										<?php
+											$cap          = \Alorbach\AIGateway\Cost_Matrix::get_max_tokens( $model );
+											$cap_from_api = isset( $stored_max_tokens[ $model ] ) && (int) $stored_max_tokens[ $model ] > 0;
+										?>
+										<td class="alorbach-cost-num">
+											<span title="<?php echo $cap_from_api ? esc_attr__( 'Fetched from provider API', 'alorbach-ai-gateway' ) : esc_attr__( 'Static fallback table', 'alorbach-ai-gateway' ); ?>">
+												<?php echo esc_html( number_format( $cap ) ); ?>
+												<?php if ( $cap_from_api ) : ?><span style="color:#2271b1;font-size:10px;"> &#9679;</span><?php endif; ?>
+											</span>
+										</td>
 										<td class="alorbach-actions">
 											<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_model' => '1', 'model' => $model, 'entry_id' => $entry_id ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_model', '_wpnonce' ) ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
 											<button type="button" class="button alorbach-test-text" data-provider="<?php echo esc_attr( $provider ); ?>" data-model="<?php echo esc_attr( $model ); ?>" data-entry-id="<?php echo esc_attr( $entry_id ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
@@ -458,7 +471,7 @@ class Admin_Cost_Matrix {
 								<?php endforeach; ?>
 							<?php endforeach; ?>
 							<tr>
-								<td colspan="5">
+								<td colspan="6">
 									<label for="alorbach_new_model" class="screen-reader-text"><?php esc_html_e( 'Add custom model', 'alorbach-ai-gateway' ); ?></label>
 									<input type="text" id="alorbach_new_model" placeholder="<?php esc_attr_e( 'e.g. gpt-4o, o1-mini, gpt-5-mini', 'alorbach-ai-gateway' ); ?>" style="width: 220px;" />
 									<?php
@@ -894,7 +907,17 @@ class Admin_Cost_Matrix {
 						if (resultEl) resultEl.textContent = '...';
 						setLoading(1);
 						fetch(restVerifyAudio, { method: 'POST', headers: headers, body: JSON.stringify({ model: model }) })
-							.then(function(r) { return r.json(); })
+							.then(function(r) {
+								return r.text().then(function(txt) {
+									var data;
+									try { data = txt ? JSON.parse(txt) : {}; } catch (e) {
+										var msg = r.ok ? errText : (r.status + ': ' + (txt ? txt.replace(/<[^>]+>/g, ' ').substring(0, 200).trim() : errText));
+										return { success: false, message: msg };
+									}
+									if (!r.ok && !data.message) data.message = r.status + (txt ? ': ' + txt.replace(/<[^>]+>/g, ' ').substring(0, 150).trim() : '');
+									return data;
+								});
+							})
 							.then(function(data) {
 								if (resultEl) setResult(resultEl, data.success, data.message);
 								showTestResultPopup('audio', model, data);
