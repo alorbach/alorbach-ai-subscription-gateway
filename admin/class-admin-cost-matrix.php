@@ -346,8 +346,11 @@ class Admin_Cost_Matrix {
 			.alorbach-cost-grid .alorbach-cost-cell input[type="number"] { width: 100px; }
 			.alorbach-cost-grid .alorbach-cost-cell input[type="number"].alorbach-uc-input { width: 110px; }
 			.alorbach-cost-grid .alorbach-actions { white-space: normal; }
-			.alorbach-cost-grid .alorbach-test-result { display: block; white-space: normal; word-break: break-word; }
+			.alorbach-cost-grid .alorbach-test-result { display: block; white-space: normal; }
 			.alorbach-cost-grid .alorbach-test-result:not(:empty) { margin-top: 4px; }
+			.alorbach-cost-grid .alorbach-test-result.alorbach-has-tooltip { cursor: help; position: relative; }
+			.alorbach-cost-grid .alorbach-test-result .alorbach-tooltip-content { display: none; position: absolute; bottom: 100%; left: 0; margin-bottom: 6px; background: #fff; border: 1px solid #c00; color: #c00; padding: 8px 12px; white-space: normal; word-break: break-word; max-width: 420px; max-height: 200px; overflow-y: auto; z-index: 10000; box-shadow: 0 2px 12px rgba(0,0,0,0.2); font-size: 12px; }
+			.alorbach-cost-grid .alorbach-test-result:hover .alorbach-tooltip-content { display: block; }
 			.alorbach-cost-grid-wrapper { overflow-x: auto; }
 			body.alorbach-admin-loading { cursor: wait !important; }
 			</style>
@@ -768,8 +771,17 @@ class Admin_Cost_Matrix {
 				}
 
 				function setResult(el, success, msg) {
-					el.textContent = msg || (success ? okText : errText);
-					el.style.color = success ? 'green' : 'red';
+					var display = msg || (success ? okText : errText);
+					if (success) {
+						el.textContent = display;
+						el.style.color = 'green';
+						el.classList.remove('alorbach-has-tooltip');
+					} else {
+						var safeMsg = (display || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/\n/g, '<br>');
+						el.innerHTML = '<span class="alorbach-grid-error">' + (errText.replace(/</g, '&lt;')) + '</span><span class="alorbach-tooltip-content">' + safeMsg + '</span>';
+						el.style.color = 'red';
+						el.classList.add('alorbach-has-tooltip');
+					}
 				}
 
 				function showTestResultPopup(type, label, data) {
