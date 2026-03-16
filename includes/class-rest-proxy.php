@@ -244,6 +244,12 @@ class REST_Proxy {
 			'callback'            => array( __CLASS__, 'admin_refresh_azure_prices' ),
 			'permission_callback' => $admin_permission,
 		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/save-google-whitelist', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_save_google_whitelist' ),
+			'permission_callback' => $admin_permission,
+		) );
 	}
 
 	/**
@@ -706,6 +712,13 @@ class REST_Proxy {
 			$entry_id = $request->get_param( 'entry_id' ) ?: '';
 		}
 		$result = API_Validator::verify_text_model( $provider, $model, $entry_id );
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && is_array( $result ) ) {
+			$result['_debug'] = array(
+				'provider' => $provider,
+				'model'    => $model,
+				'result_empty' => empty( $result['result'] ),
+			);
+		}
 		return rest_ensure_response( $result );
 	}
 
@@ -866,5 +879,30 @@ class REST_Proxy {
 	public static function admin_refresh_azure_prices( $request ) {
 		Azure_Retail_Prices::clear_cache();
 		return rest_ensure_response( array( 'success' => true, 'message' => __( 'Azure prices cache cleared. Next import will fetch fresh data.', 'alorbach-ai-gateway' ) ) );
+	}
+
+	/**
+	 * Admin: Save Google model whitelist from selected models in import modal.
+	 *
+	 * @param \WP_REST_Request $request Request. Body: { "model_ids": ["gemini-2.5-flash", ...] }.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_save_google_whitelist( $request ) {
+		$body = $request->get_body();
+		$json = ! empty( $body ) ? json_decode( $body, true ) : $request->get_json_params();
+		$model_ids = isset( $json['model_ids'] ) && is_array( $json['model_ids'] ) ? $json['model_ids'] : array();
+		$sanitized = array();
+		foreach ( $model_ids as $id ) {
+			$id = sanitize_text_field( is_string( $id ) ? $id : (string) $id );
+			if ( $id !== '' && $id !== 'default' ) {
+				$sanitized[] = $id;
+			}
+		}
+		$whitelist = implode( ', ', array_unique( $sanitized ) );
+		update_option( 'alorbach_google_model_whitelist', $whitelist );
+		return rest_ensure_response( array(
+			'success' => true,
+			'message' => __( 'Google model whitelist saved. Future imports will only show these models.', 'alorbach-ai-gateway' ),
+		) );
 	}
 }

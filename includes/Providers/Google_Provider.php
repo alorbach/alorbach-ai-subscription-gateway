@@ -146,6 +146,15 @@ class Google_Provider extends Provider_Base {
 			$body['generationConfig']['maxOutputTokens'] = (int) $body['max_completion_tokens'];
 			unset( $body['max_completion_tokens'] );
 		}
+		// Disable thinking for short requests (e.g. model verification) - Gemini 2.5/3 have thinking by default.
+		$model = $body['model'] ?? '';
+		$max_out = isset( $body['generationConfig']['maxOutputTokens'] ) ? (int) $body['generationConfig']['maxOutputTokens'] : 0;
+		if ( ( strpos( $model, 'gemini-2.5' ) === 0 || strpos( $model, 'gemini-3' ) === 0 ) && $max_out > 0 && $max_out <= 128 ) {
+			if ( ! isset( $body['generationConfig'] ) ) {
+				$body['generationConfig'] = array();
+			}
+			$body['generationConfig']['thinkingConfig'] = array( 'thinkingBudget' => 0 );
+		}
 		return $body;
 	}
 

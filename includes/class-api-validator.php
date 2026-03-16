@@ -87,7 +87,7 @@ class API_Validator {
 		$body = array(
 			'model'      => $model,
 			'messages'   => array( array( 'role' => 'user', 'content' => 'Hi' ) ),
-			'max_tokens' => 16,
+			'max_tokens' => 64,
 		);
 		$response = API_Client::chat( $provider, $body, $entry_id );
 		if ( is_wp_error( $response ) ) {

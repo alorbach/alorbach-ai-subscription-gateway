@@ -115,6 +115,13 @@ class API_Client {
 			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
 		}
 		if ( $provider === 'google' ) {
+			// Check for prompt blocking (Gemini returns 200 with promptFeedback when prompt is blocked).
+			$feedback = $body_response['promptFeedback'] ?? null;
+			if ( is_array( $feedback ) && ! empty( $feedback['blockReason'] ) ) {
+				$reason = $feedback['blockReason'] ?? 'BLOCKED';
+				$msg = isset( $feedback['blockReasonMessage'] ) ? $feedback['blockReasonMessage'] : sprintf( __( 'Prompt blocked (%s)', 'alorbach-ai-gateway' ), $reason );
+				return new \WP_Error( 'api_error', $msg, array( 'status' => 400 ) );
+			}
 			$body_response = self::normalize_gemini_response( $body_response );
 		}
 		return $body_response;

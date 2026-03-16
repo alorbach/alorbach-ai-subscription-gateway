@@ -19,6 +19,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Model_Importer {
 
 	/**
+	 * Default Google model whitelist (models with non-zero rate limits on typical free tier).
+	 * Based on AI Studio Rate Limit dashboard. Comma-separated model IDs.
+	 *
+	 * @var string
+	 */
+	const GOOGLE_MODEL_WHITELIST_DEFAULT = 'gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.5-flash-native-audio-dialog, gemini-2.5-flash-tts, gemini-3-flash, gemini-3.1-flash-lite, text-embedding-004, text-embedding-005, gemini-robotics-er-1.5-preview, gemma-3-12b, gemma-3-1b, gemma-3-27b, gemma-3-2b, gemma-3-4b, imagen-4.0-generate-001, imagen-4.0-fast-generate-001, imagen-4.0-ultra-generate-001';
+
+	/**
 	 * Chat model ID prefixes per provider.
 	 *
 	 * @var array
@@ -114,9 +122,10 @@ class Model_Importer {
 	 */
 	public static function fetch_importable_models() {
 		$result = array(
-			'entries'            => array(),
-			'capability_labels'  => self::$capability_labels,
-			'errors'             => array(),
+			'entries'                 => array(),
+			'capability_labels'      => self::$capability_labels,
+			'errors'                  => array(),
+			'google_import_default'   => get_option( 'alorbach_google_import_default', 'all' ),
 		);
 
 		$entries = API_Keys_Helper::get_entries();
@@ -218,6 +227,30 @@ class Model_Importer {
 							'capabilities' => array( 'audio_to_text' ),
 							'entry_id'     => $entry_data['entry_id'],
 						);
+					}
+				}
+			}
+
+			// Filter Google models by whitelist when set.
+			if ( $type === 'google' ) {
+				$whitelist_raw = get_option( 'alorbach_google_model_whitelist', '' );
+				$whitelist_raw = trim( $whitelist_raw );
+				if ( $whitelist_raw !== '' ) {
+					$ids = array_map( 'trim', explode( ',', $whitelist_raw ) );
+					$whitelist = array();
+					foreach ( $ids as $id ) {
+						$id = strtolower( trim( $id ) );
+						if ( $id !== '' ) {
+							$whitelist[ $id ] = true;
+						}
+					}
+					if ( ! empty( $whitelist ) ) {
+						foreach ( array( 'text', 'image', 'video', 'audio' ) as $cap_type ) {
+							$entry_data[ $cap_type ] = array_values( array_filter( $entry_data[ $cap_type ], function ( $item ) use ( $whitelist ) {
+								$id = isset( $item['id'] ) ? $item['id'] : '';
+								return isset( $whitelist[ strtolower( $id ) ] );
+							} ) );
+						}
 					}
 				}
 			}

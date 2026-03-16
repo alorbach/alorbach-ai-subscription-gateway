@@ -290,6 +290,7 @@ class Admin_Cost_Matrix {
 		$rest_import       = rest_url( 'alorbach/v1/admin/import-models' );
 		$rest_reset        = rest_url( 'alorbach/v1/admin/reset-models' );
 		$rest_refresh_azure = rest_url( 'alorbach/v1/admin/refresh-azure-prices' );
+		$rest_save_google_whitelist = rest_url( 'alorbach/v1/admin/save-google-whitelist' );
 		$nonce             = wp_create_nonce( 'wp_rest' );
 		?>
 		<div class="wrap">
@@ -313,6 +314,7 @@ class Admin_Cost_Matrix {
 					<div id="alorbach_import_modal_body"></div>
 					<p class="alorbach-modal-actions">
 						<button type="button" class="button button-primary" id="alorbach_import_modal_confirm"><?php esc_html_e( 'Import selected', 'alorbach-ai-gateway' ); ?></button>
+						<button type="button" class="button" id="alorbach_save_google_whitelist_btn" style="display:none;"><?php esc_html_e( 'Save selected Google models as whitelist', 'alorbach-ai-gateway' ); ?></button>
 						<button type="button" class="button" id="alorbach_import_modal_cancel"><?php esc_html_e( 'Cancel', 'alorbach-ai-gateway' ); ?></button>
 					</p>
 				</div>
@@ -759,6 +761,7 @@ class Admin_Cost_Matrix {
 				var restImport = <?php echo wp_json_encode( $rest_import ); ?>;
 				var restReset = <?php echo wp_json_encode( $rest_reset ); ?>;
 				var restRefreshAzure = <?php echo wp_json_encode( $rest_refresh_azure ); ?>;
+				var restSaveGoogleWhitelist = <?php echo wp_json_encode( $rest_save_google_whitelist ); ?>;
 				var okText = <?php echo wp_json_encode( __( 'OK', 'alorbach-ai-gateway' ) ); ?>;
 				var errText = <?php echo wp_json_encode( __( 'Error', 'alorbach-ai-gateway' ) ); ?>;
 				var debugEnabled = <?php echo wp_json_encode( (bool) get_option( 'alorbach_debug_enabled', false ) ); ?>;
@@ -790,14 +793,16 @@ class Admin_Cost_Matrix {
 					var bodyEl = document.getElementById('alorbach_test_result_body');
 					var typeLabel = type === 'text' ? '<?php echo esc_js( __( 'Chat test result', 'alorbach-ai-gateway' ) ); ?>' : type === 'image' ? '<?php echo esc_js( __( 'Image test result', 'alorbach-ai-gateway' ) ); ?>' : type === 'audio' ? '<?php echo esc_js( __( 'Audio test result', 'alorbach-ai-gateway' ) ); ?>' : type === 'video' ? '<?php echo esc_js( __( 'Video test result', 'alorbach-ai-gateway' ) ); ?>' : '<?php echo esc_js( __( 'Test result', 'alorbach-ai-gateway' ) ); ?>';
 					titleEl.textContent = typeLabel + ': ' + label;
-					if (data.success && data.result) {
+					if (data.success) {
 						if (type === 'image' && data.result) {
 							bodyEl.innerHTML = '<img src="' + data.result.replace(/"/g, '&quot;') + '" alt="Generated" />';
 						} else if (type === 'text' || type === 'audio' || type === 'video') {
 							var txt = (data.result || '').toString();
 							bodyEl.innerHTML = txt ? '<pre>' + txt.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>' : '<p><?php echo esc_js( __( '(empty response)', 'alorbach-ai-gateway' ) ); ?></p>';
-						} else {
+						} else if (data.result) {
 							bodyEl.innerHTML = '<p>' + (data.result || '').toString().replace(/</g, '&lt;') + '</p>';
+						} else {
+							bodyEl.innerHTML = '<p><?php echo esc_js( __( '(empty response)', 'alorbach-ai-gateway' ) ); ?></p>';
 						}
 					} else {
 						var msg = (data.message || errText).replace(/</g, '&lt;').replace(/\n/g, '<br>');
@@ -812,6 +817,9 @@ class Admin_Cost_Matrix {
 				function closeTestResultModal() { testResultModal.style.display = 'none'; }
 				document.getElementById('alorbach_test_result_close').addEventListener('click', closeTestResultModal);
 				testResultModal.addEventListener('click', function(e) { if (e.target === testResultModal) closeTestResultModal(); });
+				document.addEventListener('keydown', function(e) {
+					if (e.key === 'Escape' && testResultModal.style.display !== 'none') closeTestResultModal();
+				});
 
 				document.querySelectorAll('.alorbach-test-text').forEach(function(btn) {
 					btn.addEventListener('click', function() {
@@ -958,6 +966,7 @@ class Admin_Cost_Matrix {
 
 				function renderModal(data) {
 					var labels = data.capability_labels || {};
+					var googleImportDefault = data.google_import_default || 'all';
 					var filterInput = document.getElementById('alorbach_import_filter');
 					if (filterInput) filterInput.value = '';
 					var body = document.getElementById('alorbach_import_modal_body');
@@ -977,10 +986,19 @@ class Admin_Cost_Matrix {
 					});
 					entries.forEach(function(entry) {
 						var entryId = entry.entry_id || '';
+						var isGoogle = (entry.type || '') === 'google';
+						var defaultChecked = !(isGoogle && googleImportDefault === 'none');
 						var section = document.createElement('div');
 						section.className = 'alorbach-import-entry';
 						section.dataset.entryId = entryId;
+						section.dataset.entryType = entry.type || '';
 						section.innerHTML = '<h3 class="alorbach-import-entry-label">' + (entry.label || '').replace(/</g, '&lt;') + '</h3>';
+						if (isGoogle) {
+							var hint = document.createElement('p');
+							hint.className = 'alorbach-import-google-hint description';
+							hint.innerHTML = '<?php echo esc_js( __( 'Google lists all catalog models. Check', 'alorbach-ai-gateway' ) ); ?> <a href="https://aistudio.google.com/app/rate_limit" target="_blank" rel="noopener"><?php echo esc_js( __( 'AI Studio Rate Limit', 'alorbach-ai-gateway' ) ); ?></a> <?php echo esc_js( __( 'to see which models you have access to. Only select models with non-zero limits.', 'alorbach-ai-gateway' ) ); ?>';
+							section.appendChild(hint);
+						}
 						['text','image','video','audio'].forEach(function(type) {
 							var items = entry[type] || [];
 							if (items.length === 0) return;
@@ -998,7 +1016,8 @@ class Admin_Cost_Matrix {
 								var div = document.createElement('div');
 								div.className = 'alorbach-import-item';
 								div.dataset.modelId = (item.id || '').toLowerCase();
-								div.innerHTML = '<label><input type="checkbox" class="alorbach-import-cb" data-type="' + type + '" data-entry-id="' + entryId + '" data-id="' + (item.id || '').replace(/"/g, '&quot;') + '" checked> <span>' + display.replace(/</g, '&lt;') + '</span> <span class="alorbach-capabilities">(' + caps.replace(/</g, '&lt;') + ')</span></label>';
+								var checkedAttr = defaultChecked ? ' checked' : '';
+								div.innerHTML = '<label><input type="checkbox" class="alorbach-import-cb" data-type="' + type + '" data-entry-id="' + entryId + '" data-id="' + (item.id || '').replace(/"/g, '&quot;') + '"' + checkedAttr + '> <span>' + display.replace(/</g, '&lt;') + '</span> <span class="alorbach-capabilities">(' + caps.replace(/</g, '&lt;') + ')</span></label>';
 								list.appendChild(div);
 							});
 							section.appendChild(typeDiv);
@@ -1019,6 +1038,9 @@ class Admin_Cost_Matrix {
 							document.querySelectorAll('.alorbach-import-cb[data-type="' + t + '"][data-entry-id="' + eid + '"]').forEach(function(cb) { cb.checked = false; });
 						};
 					});
+					var hasGoogle = entries.some(function(e) { return (e.type || '') === 'google'; });
+					var saveWhitelistBtn = document.getElementById('alorbach_save_google_whitelist_btn');
+					if (saveWhitelistBtn) saveWhitelistBtn.style.display = hasGoogle ? '' : 'none';
 					applyImportFilter();
 				}
 
@@ -1072,6 +1094,44 @@ class Admin_Cost_Matrix {
 				document.getElementById('alorbach_import_filter').addEventListener('input', applyImportFilter);
 
 				modalCancel.addEventListener('click', function() { modal.style.display = 'none'; pendingAction = null; });
+
+				document.getElementById('alorbach_save_google_whitelist_btn').addEventListener('click', function() {
+					var googleEntryIds = {};
+					document.querySelectorAll('.alorbach-import-entry[data-entry-type="google"]').forEach(function(el) {
+						var eid = el.getAttribute('data-entry-id') || '';
+						if (eid) googleEntryIds[eid] = true;
+					});
+					var modelIds = [];
+					document.querySelectorAll('.alorbach-import-cb:checked').forEach(function(cb) {
+						var eid = cb.getAttribute('data-entry-id') || '';
+						if (!googleEntryIds[eid]) return;
+						var includeCb = document.querySelector('.alorbach-include-entry[data-entry-id="' + eid + '"]');
+						if (includeCb && !includeCb.checked) return;
+						var id = cb.getAttribute('data-id');
+						if (id) modelIds.push(id);
+					});
+					if (modelIds.length === 0) {
+						var resultEl = document.getElementById('alorbach_import_result');
+						setResult(resultEl, false, '<?php echo esc_js( __( 'Select at least one Google model first.', 'alorbach-ai-gateway' ) ); ?>');
+						return;
+					}
+					var btn = this;
+					var origText = btn.textContent;
+					btn.disabled = true;
+					btn.textContent = '...';
+					setLoading(1);
+					fetch(restSaveGoogleWhitelist, { method: 'POST', headers: headers, body: JSON.stringify({ model_ids: modelIds }) })
+						.then(function(r) { return r.json(); })
+						.then(function(data) {
+							var resultEl = document.getElementById('alorbach_import_result');
+							setResult(resultEl, data.success, data.message || '');
+						})
+						.catch(function(err) {
+							var resultEl = document.getElementById('alorbach_import_result');
+							setResult(resultEl, false, err.message);
+						})
+						.finally(function() { btn.disabled = false; btn.textContent = origText; setLoading(-1); });
+				});
 
 				modalConfirm.addEventListener('click', function() {
 					if (!pendingAction) return;
