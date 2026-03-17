@@ -97,9 +97,21 @@ class REST_Proxy {
 					'default'           => 'gpt-4.1-mini',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
-				'max_tokens' => array(
+				'max_tokens'       => array(
 					'default'           => 1024,
 					'sanitize_callback' => 'absint',
+				),
+				'multi_step'       => array(
+					'default'           => false,
+					'sanitize_callback' => 'rest_sanitize_boolean',
+				),
+				'max_steps'        => array(
+					'default'           => 5,
+					'sanitize_callback' => 'absint',
+				),
+				'continue_message' => array(
+					'default'           => '',
+					'sanitize_callback' => 'sanitize_text_field',
 				),
 			),
 		) );
@@ -332,9 +344,12 @@ class REST_Proxy {
 			return $quota_error;
 		}
 
-		$messages = $request->get_param( 'messages' );
-		$model    = $request->get_param( 'model' );
-		$max_tokens = $request->get_param( 'max_tokens' );
+		$messages         = $request->get_param( 'messages' );
+		$model            = $request->get_param( 'model' );
+		$max_tokens       = $request->get_param( 'max_tokens' );
+		$multi_step       = (bool) $request->get_param( 'multi_step' );
+		$max_steps        = min( 20, max( 1, (int) $request->get_param( 'max_steps' ) ) );
+		$continue_message = (string) $request->get_param( 'continue_message' );
 
 		// Validate messages structure.
 		if ( ! is_array( $messages ) || empty( $messages ) ) {
@@ -386,6 +401,20 @@ class REST_Proxy {
 			'messages'   => $messages,
 			'max_tokens' => $max_tokens,
 		);
+
+		if ( $multi_step ) {
+			return self::execute_multi_step_chat(
+				$user_id,
+				$provider,
+				$body,
+				$messages,
+				$model,
+				$max_steps,
+				$continue_message,
+				$free_pass_through,
+				$request_signature
+			);
+		}
 
 		$response = API_Client::chat( $provider, $body );
 		if ( is_wp_error( $response ) ) {
@@ -1070,5 +1099,147 @@ class REST_Proxy {
 			'success' => true,
 			'message' => __( 'Google model whitelist saved. Future imports will only show these models.', 'alorbach-ai-gateway' ),
 		) );
+	}
+
+	/**
+	 * Execute a multi-step chat request, automatically continuing when the AI
+	 * truncates its response (finish_reason === "length") until the full output
+	 * is received or the maximum number of steps is reached.
+	 *
+	 * @param int    $user_id          WordPress user ID.
+	 * @param string $provider         AI provider slug.
+	 * @param array  $body             Initial request body (model, messages, max_tokens).
+	 * @param array  $messages         Initial conversation messages.
+	 * @param string $model            Model identifier.
+	 * @param int    $max_steps        Maximum continuation steps (1–20).
+	 * @param string $continue_message Continuation prompt injected between steps.
+	 * @param bool   $free_pass_through Skip billing when true.
+	 * @param string $base_signature   Idempotency base; each step appends "_step_N".
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	private static function execute_multi_step_chat(
+		$user_id,
+		$provider,
+		$body,
+		$messages,
+		$model,
+		$max_steps,
+		$continue_message,
+		$free_pass_through,
+		$base_signature
+	) {
+		// Long-running jobs may exceed the default PHP execution time limit.
+		set_time_limit( 0 );
+
+		if ( empty( $continue_message ) ) {
+			$continue_message = 'Continue exactly where you left off without any preamble or repetition.';
+		}
+
+		$content_chunks          = array();
+		$total_prompt_tokens     = 0;
+		$total_completion_tokens = 0;
+		$total_cached_tokens     = 0;
+		$total_api_cost          = 0;
+		$total_uc_cost           = 0;
+		$steps                   = array();
+		$last_response           = null;
+		$current_messages        = $messages;
+
+		for ( $step = 1; $step <= $max_steps; $step++ ) {
+			// Per-step balance check — stop spending if credits run out mid-job.
+			if ( ! $free_pass_through ) {
+				$balance = Ledger::get_balance( $user_id );
+				if ( $balance <= 0 ) {
+					return new \WP_Error(
+						'insufficient_credits',
+						__( 'Insufficient credits to continue.', 'alorbach-ai-gateway' ),
+						array( 'status' => 402 )
+					);
+				}
+			}
+
+			$body['messages'] = $current_messages;
+			$response         = API_Client::chat( $provider, $body );
+			if ( is_wp_error( $response ) ) {
+				return $response;
+			}
+
+			$last_response = $response;
+			$finish_reason = isset( $response['choices'][0]['finish_reason'] ) ? $response['choices'][0]['finish_reason'] : 'stop';
+			$step_content  = isset( $response['choices'][0]['message']['content'] ) ? (string) $response['choices'][0]['message']['content'] : '';
+
+			$content_chunks[] = $step_content;
+
+			$step_prompt_tokens     = 0;
+			$step_completion_tokens = 0;
+			$step_uc_cost           = 0;
+
+			if ( ! $free_pass_through ) {
+				$step_prompt_tokens     = isset( $response['usage']['prompt_tokens'] ) ? (int) $response['usage']['prompt_tokens'] : 0;
+				$step_completion_tokens = isset( $response['usage']['completion_tokens'] ) ? (int) $response['usage']['completion_tokens'] : 0;
+				$step_cached_tokens     = isset( $response['usage']['prompt_tokens_details']['cached_tokens'] ) ? (int) $response['usage']['prompt_tokens_details']['cached_tokens'] : 0;
+				$step_api_cost          = Cost_Matrix::calculate_chat_cost( $model, $step_prompt_tokens, $step_completion_tokens, $step_cached_tokens );
+				$step_uc_cost           = Cost_Matrix::apply_user_cost( $step_api_cost );
+
+				Ledger::insert_transaction(
+					$user_id,
+					'chat_deduction',
+					$model,
+					- $step_uc_cost,
+					$step_prompt_tokens,
+					$step_cached_tokens,
+					$step_completion_tokens,
+					$base_signature . '_step_' . $step,
+					$step_api_cost
+				);
+
+				$total_prompt_tokens     += $step_prompt_tokens;
+				$total_completion_tokens += $step_completion_tokens;
+				$total_cached_tokens     += $step_cached_tokens;
+				$total_api_cost          += $step_api_cost;
+				$total_uc_cost           += $step_uc_cost;
+			}
+
+			$steps[] = array(
+				'step'              => $step,
+				'finish_reason'     => $finish_reason,
+				'completion_tokens' => $step_completion_tokens,
+				'cost_uc'           => $step_uc_cost,
+			);
+
+			if ( $finish_reason !== 'length' ) {
+				break;
+			}
+
+			// Truncated: append partial assistant reply and inject continuation prompt.
+			$current_messages[] = array( 'role' => 'assistant', 'content' => $step_content );
+			$current_messages[] = array( 'role' => 'user',      'content' => $continue_message );
+		}
+
+		// Merge all chunks into the final choices content.
+		$combined_content = implode( '', $content_chunks );
+		if ( isset( $last_response['choices'][0]['message']['content'] ) ) {
+			$last_response['choices'][0]['message']['content'] = $combined_content;
+		}
+
+		if ( $free_pass_through ) {
+			$last_response['cost_uc']      = 0;
+			$last_response['cost_credits'] = User_Display::uc_to_credits( 0 );
+			$last_response['cost_usd']     = User_Display::uc_to_usd( 0 );
+		} else {
+			if ( isset( $last_response['usage'] ) ) {
+				$last_response['usage']['prompt_tokens']     = $total_prompt_tokens;
+				$last_response['usage']['completion_tokens'] = $total_completion_tokens;
+				$last_response['usage']['total_tokens']      = $total_prompt_tokens + $total_completion_tokens;
+			}
+			$last_response['cost_uc']      = $total_uc_cost;
+			$last_response['cost_credits'] = User_Display::uc_to_credits( $total_uc_cost );
+			$last_response['cost_usd']     = User_Display::uc_to_usd( $total_uc_cost );
+		}
+
+		$last_response['steps_count'] = count( $steps );
+		$last_response['steps']       = $steps;
+
+		return rest_ensure_response( $last_response );
 	}
 }

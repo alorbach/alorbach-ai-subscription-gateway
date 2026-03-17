@@ -390,6 +390,7 @@ class Admin_Cost_Matrix {
 								<th class="alorbach-cost-num"><?php esc_html_e( 'Input (per 1M tokens)', 'alorbach-ai-gateway' ); ?></th>
 								<th class="alorbach-cost-num"><?php esc_html_e( 'Output (per 1M tokens)', 'alorbach-ai-gateway' ); ?></th>
 								<th class="alorbach-cost-num"><?php esc_html_e( 'Cached (per 1M tokens)', 'alorbach-ai-gateway' ); ?></th>
+								<th class="alorbach-cost-num"><?php esc_html_e( 'Max output (tokens)', 'alorbach-ai-gateway' ); ?></th>
 								<th><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
 							</tr>
 						</thead>
