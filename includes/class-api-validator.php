@@ -109,7 +109,8 @@ class API_Validator {
 	 */
 	public static function verify_image_model( $size, $model = '' ) {
 		$model = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
-		$response = API_Client::images( 'test', $size, 1, $model );
+		// Always use lowest quality for tests to reduce cost and latency.
+		$response = API_Client::images( 'test', $size, 1, $model, 'low' );
 		if ( is_wp_error( $response ) ) {
 			return array( 'success' => false, 'message' => $response->get_error_message() );
 		}
@@ -126,12 +127,47 @@ class API_Validator {
 	}
 
 	/**
+	 * Models that support the audioTranscriptions API (audio → text).
+	 * gpt-audio-1.5 and *-tts use different endpoints (chat completions / speech synthesis).
+	 *
+	 * @var string[]
+	 */
+	private static $transcription_models = array(
+		'whisper-1',
+		'gpt-4o-transcribe',
+		'gpt-4o-mini-transcribe',
+		'gpt-4o-transcribe-diarize',
+	);
+
+	/**
 	 * Verify audio model via minimal Whisper transcription.
 	 *
 	 * @param string $model Model (e.g. whisper-1, gpt-4o-transcribe).
 	 * @return array{success: bool, message?: string, result?: string}
 	 */
 	public static function verify_audio_model( $model = 'whisper-1' ) {
+		$model = $model ?: 'whisper-1';
+		$supports_transcription = in_array( $model, self::$transcription_models, true )
+			|| strpos( $model, '-transcribe' ) !== false
+			|| strpos( $model, 'gpt-audio' ) === 0;
+		if ( ! $supports_transcription ) {
+			$is_tts = ( strpos( $model, '-tts' ) !== false );
+			if ( $is_tts ) {
+				return array(
+					'success' => false,
+					'message' => __( 'TTS models use the speech synthesis API, not transcription. The Test button only verifies transcription models (whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe).', 'alorbach-ai-gateway' ),
+				);
+			}
+			return array(
+				'success' => false,
+				'message' => sprintf(
+					/* translators: 1: model id, 2: list of supported models */
+					__( 'Model %1$s may not support the transcription API. Supported: %2$s.', 'alorbach-ai-gateway' ),
+					$model,
+					implode( ', ', self::$transcription_models )
+				),
+			);
+		}
 		try {
 			$tmp = self::create_minimal_wav();
 			if ( ! $tmp ) {
@@ -166,23 +202,91 @@ class API_Validator {
 	}
 
 	/**
-	 * Create minimal 1-second silent WAV file.
+	 * Create WAV file with synthesized speech for testing.
+	 * Uses formant synthesis to approximate "Hello, this is a test."
+	 * First tries plugin asset; falls back to inline generation.
 	 *
 	 * @return string|false Temp file path or false.
 	 */
 	private static function create_minimal_wav() {
-		$sample_rate = 8000;
-		$duration    = 1;
-		$num_samples = $sample_rate * $duration;
-		$data_size   = $num_samples * 2;
-		$file_size   = 36 + $data_size;
+		$asset_path = ALORBACH_PLUGIN_DIR . 'assets/audio/test-speech.wav';
+		if ( is_readable( $asset_path ) ) {
+			return self::copy_asset_to_temp( $asset_path );
+		}
+		return self::generate_test_speech_wav();
+	}
 
-		$header  = pack( 'A4V', 'RIFF', $file_size - 8 );
-		$header .= pack( 'A4', 'WAVE' );
-		$header .= pack( 'A4VvvVVvv', 'fmt ', 16, 1, 1, $sample_rate, $sample_rate * 2, 2, 16 );
-		$header .= pack( 'A4V', 'data', $data_size );
-		$samples = str_repeat( "\x00\x00", $num_samples );
-		$wav     = $header . $samples;
+	/**
+	 * Copy asset WAV to temp file (preserves .wav extension).
+	 *
+	 * @param string $asset_path Path to asset file.
+	 * @return string|false Temp file path or false.
+	 */
+	private static function copy_asset_to_temp( $asset_path ) {
+		if ( ! function_exists( 'wp_tempnam' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		$tmp = \wp_tempnam( 'alorbach-wav-' );
+		if ( ! $tmp ) {
+			return false;
+		}
+		$tmp_wav = preg_replace( '/\.tmp$/i', '.wav', $tmp );
+		if ( copy( $asset_path, $tmp_wav ) ) {
+			if ( $tmp !== $tmp_wav && file_exists( $tmp ) ) {
+				wp_delete_file( $tmp );
+			}
+			return $tmp_wav;
+		}
+		wp_delete_file( $tmp );
+		return false;
+	}
+
+	/**
+	 * Generate WAV with formant synthesis approximating "Hello, this is a test."
+	 *
+	 * @return string|false Temp file path or false.
+	 */
+	private static function generate_test_speech_wav() {
+		$sample_rate = 16000;
+		$syllables   = array(
+			array( 0.15, 700, 1220, 5000 ),   // he-
+			array( 0.12, 500, 1500, 4500 ),   // -llo
+			array( 0.08, 0, 0, 0 ),          // pause
+			array( 0.12, 400, 1600, 5000 ),   // thi-
+			array( 0.10, 400, 1600, 4500 ),   // -s
+			array( 0.08, 0, 0, 0 ),          // pause
+			array( 0.10, 400, 1600, 4500 ),   // is
+			array( 0.08, 0, 0, 0 ),          // pause
+			array( 0.15, 700, 1220, 5000 ),   // a
+			array( 0.08, 0, 0, 0 ),          // pause
+			array( 0.12, 500, 1500, 5000 ),   // te-
+			array( 0.15, 500, 1500, 4500 ),   // -st
+		);
+
+		$samples = '';
+		foreach ( $syllables as $syl ) {
+			list( $dur, $f1, $f2, $amp ) = $syl;
+			$n = (int) ( $sample_rate * $dur );
+			for ( $i = 0; $i < $n; $i++ ) {
+				$t = $i / $sample_rate;
+				if ( $amp > 0 && $f1 > 0 ) {
+					$env = sin( $t * M_PI / $dur );
+					$s  = $env * $amp * ( 0.6 * sin( 2 * M_PI * $f1 * $t ) + 0.4 * sin( 2 * M_PI * $f2 * $t ) );
+				} else {
+					$s = 0;
+				}
+				$s   = (int) max( -32768, min( 32767, $s ) );
+				$samples .= pack( 'v', $s < 0 ? $s + 65536 : $s );
+			}
+		}
+
+		$data_size = strlen( $samples );
+		$file_size = 36 + $data_size;
+		$header    = pack( 'A4V', 'RIFF', $file_size - 8 );
+		$header   .= pack( 'A4', 'WAVE' );
+		$header   .= pack( 'A4VvvVVvv', 'fmt ', 16, 1, 1, $sample_rate, $sample_rate * 2, 2, 16 );
+		$header   .= pack( 'A4V', 'data', $data_size );
+		$wav       = $header . $samples;
 
 		if ( ! function_exists( 'wp_tempnam' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -200,7 +304,6 @@ class API_Validator {
 			wp_delete_file( $tmp );
 			return false;
 		}
-		// API detects format by extension; wp_tempnam uses .tmp, so rename to .wav.
 		$tmp_wav = preg_replace( '/\.tmp$/i', '.wav', $tmp );
 		if ( $tmp_wav !== $tmp && rename( $tmp, $tmp_wav ) ) {
 			return $tmp_wav;

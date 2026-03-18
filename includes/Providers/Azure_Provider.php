@@ -139,11 +139,58 @@ class Azure_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials ) {
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
+		}
+		// gpt-audio-1.5 uses chat completions with audio input (audio → text), not audioTranscriptions.
+		if ( strpos( $model, 'gpt-audio' ) === 0 ) {
+			$audio_bytes = is_readable( $file_path ) ? file_get_contents( $file_path ) : false;
+			if ( $audio_bytes === false || strlen( $audio_bytes ) < 100 ) {
+				return new \WP_Error( 'read_error', __( 'Could not read audio file or file is too small.', 'alorbach-ai-gateway' ) );
+			}
+			if ( ! $format ) {
+				$ext    = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+				$format = in_array( $ext, array( 'wav', 'mp3', 'flac', 'opus', 'm4a', 'webm' ), true ) ? $ext : 'wav';
+			}
+			$format = in_array( $format, array( 'wav', 'mp3', 'flac', 'opus', 'm4a', 'webm' ), true ) ? $format : 'wav';
+			$audio_b64 = base64_encode( $audio_bytes );
+			// System message must always state that the user provides audio; custom prompt adds format instructions.
+			$base = __( 'You are a transcription assistant. The user will provide audio in the next message. Transcribe it.', 'alorbach-ai-gateway' );
+			$sys  = $prompt ? $base . ' ' . $prompt : $base . ' ' . __( 'Output only the transcribed text, nothing else. For silent or unclear audio, output a single period.', 'alorbach-ai-gateway' );
+			$body = array(
+				'modalities' => array( 'text' ),
+				'messages'   => array(
+					array(
+						'role'    => 'system',
+						'content' => $sys,
+					),
+					array(
+						'role'    => 'user',
+						'content' => array(
+							array(
+								'type'         => 'input_audio',
+								'input_audio'  => array(
+									'data'   => $audio_b64,
+									'format' => $format,
+								),
+							),
+						),
+					),
+				),
+			);
+			$url = $endpoint . '/openai/deployments/' . $model . '/chat/completions?api-version=2025-01-01-preview';
+			return array(
+				'url'             => $url,
+				'headers'         => array(
+					'Content-Type' => 'application/json',
+					'api-key'      => $api_key,
+				),
+				'body'            => wp_json_encode( $body ),
+				'response_format' => 'chat_completions',
+			);
 		}
 		$api_ver = ( strpos( $model, 'gpt-4o-transcribe' ) !== false || strpos( $model, 'gpt-4o-mini-transcribe' ) !== false )
 			? '2025-04-01-preview'
@@ -294,7 +341,8 @@ class Azure_Provider extends Provider_Base {
 				$caps      = $m['capabilities'] ?? array();
 				$inference = ! empty( $caps['inference'] );
 				$chat      = ! empty( $caps['chat_completion'] );
-				$type      = self::classify_openai_model( $id );
+				// Prefer API capabilities when available; fall back to ID-based classification.
+				$type = ! empty( $caps['image_generation'] ) ? 'image' : self::classify_openai_model( $id );
 				if ( $type === 'image' ) {
 					$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'image', 'capabilities' => array( 'text_to_image' ) );
 				} elseif ( $type === 'video' ) {

@@ -268,6 +268,31 @@ class Model_Importer {
 			$result['entries'][] = $entry_data;
 		}
 
+		// Debug: when enabled, add classification rules and per-model trace for troubleshooting.
+		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' ) ) {
+			$result['_debug'] = array(
+				'classification_rules' => array(
+					'image' => 'gpt-image*, dall-e*, flux*, imagen*, gemini*-image*',
+					'video' => 'sora*',
+					'audio' => 'whisper*, gpt-audio*, *-tts, *-transcribe, realtime*',
+					'text'  => 'default (chat/inference)',
+				),
+				'models_by_type' => array(),
+			);
+			foreach ( $result['entries'] as $entry ) {
+				$entry_id = $entry['entry_id'] ?? '';
+				$entry_label = $entry['label'] ?? $entry_id;
+				foreach ( array( 'text', 'image', 'video', 'audio' ) as $cap_type ) {
+					foreach ( $entry[ $cap_type ] ?? array() as $item ) {
+						$id = $item['id'] ?? '';
+						if ( $id ) {
+							$result['_debug']['models_by_type'][ $entry_label ][ $cap_type ][] = $id;
+						}
+					}
+				}
+			}
+		}
+
 		// Opportunistically persist any max_tokens values returned by providers
 		// so Cost_Matrix::get_max_tokens() can serve them without a static table lookup.
 		$stored_max = get_option( 'alorbach_model_max_tokens', array() );
@@ -483,7 +508,7 @@ class Model_Importer {
 			if ( empty( $item ) ) {
 				continue;
 			}
-			$is_model = ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
+			$is_model = ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
 			$is_size  = (bool) preg_match( '/^\d+x\d+$/', $item );
 			if ( $is_model ) {
 				if ( ! $overwrite && in_array( $item, $image_models, true ) ) {
@@ -495,8 +520,8 @@ class Model_Importer {
 				if ( strpos( $item, 'gpt-image' ) === 0 && ! isset( $image_model_costs[ $item ] ) ) {
 					$image_model_costs[ $item ] = $gpt_image_default_costs;
 				}
-				// Imagen/Gemini image: use default cost if not set (e.g. 40000 UC per image).
-				if ( ( strpos( $item, 'imagen-' ) === 0 || strpos( $item, 'gemini-' ) === 0 ) && ! isset( $image_model_costs[ $item ] ) ) {
+				// Imagen/Gemini/FLUX image: use default cost if not set (e.g. 40000 UC per image).
+				if ( ( strpos( $item, 'imagen-' ) === 0 || strpos( $item, 'gemini-' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 ) && ! isset( $image_model_costs[ $item ] ) ) {
 					$image_model_costs[ $item ] = array(
 						'low'    => array( '1024x1024' => 40000 ),
 						'medium' => array( '1024x1024' => 40000 ),
@@ -648,8 +673,11 @@ class Model_Importer {
 	 * @return string 'text'|'image'|'audio'|'video'
 	 */
 	private static function classify_openai_model( $model_id ) {
-		// Image generation: gpt-image-*, dall-e-*
+		// Image generation: gpt-image-*, dall-e-*, FLUX* (Azure/Foundry), imagen-*, gemini*-image*
 		if ( strpos( $model_id, 'gpt-image' ) === 0 || strpos( $model_id, 'dall-e' ) === 0 ) {
+			return 'image';
+		}
+		if ( strpos( strtolower( $model_id ), 'flux' ) === 0 ) {
 			return 'image';
 		}
 		// Video generation: sora-* (case-insensitive; API may return Sora-2)

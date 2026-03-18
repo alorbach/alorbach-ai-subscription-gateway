@@ -213,6 +213,7 @@ class REST_Proxy {
 			},
 			'args'                => array(
 				'audio_base64'     => array( 'required' => true ),
+				'audio_format'     => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'duration_seconds' => array( 'required' => false, 'sanitize_callback' => 'absint' ),
 				'model'            => array( 'default' => 'whisper-1', 'sanitize_callback' => 'sanitize_text_field' ),
 				'prompt'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
@@ -809,6 +810,7 @@ class REST_Proxy {
 		$duration  = (int) $request->get_param( 'duration_seconds' );
 		$model     = $request->get_param( 'model' ) ?: 'whisper-1';
 		$prompt    = $request->get_param( 'prompt' ) ?: '';
+		$format    = $request->get_param( 'audio_format' ) ?: null;
 
 		// Limit encoded size to ~48 MB decoded to prevent DoS via memory exhaustion.
 		if ( ! is_string( $audio_b64 ) || strlen( $audio_b64 ) > 67108864 ) {
@@ -821,8 +823,9 @@ class REST_Proxy {
 		}
 
 		// Idempotency: reject duplicate transcribe requests within a 5-minute window.
+		// Include prompt so retries with different instructions are allowed.
 		$time_bucket       = (int) ( time() / 300 );
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'transcribe', hash( 'sha256', $audio_b64 ), $model, $time_bucket ) ) );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'transcribe', hash( 'sha256', $audio_b64 ), $model, $prompt, $time_bucket ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -843,6 +846,10 @@ class REST_Proxy {
 			return new \WP_Error( 'upload_error', __( 'Could not save audio.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
 		}
 
+		if ( ! $format ) {
+			$format = \Alorbach\AIGateway\API_Client::detect_audio_format( $decoded );
+		}
+
 		if ( $duration <= 0 && class_exists( 'getID3' ) ) {
 			$getid3 = new \getID3();
 			$info   = $getid3->analyze( $tmp );
@@ -861,7 +868,7 @@ class REST_Proxy {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
-		$response = API_Client::transcribe( $tmp, $model, $prompt );
+		$response = API_Client::transcribe( $tmp, $model, $prompt, $format );
 		wp_delete_file( $tmp );
 
 		if ( is_wp_error( $response ) ) {

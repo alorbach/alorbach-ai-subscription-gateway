@@ -66,7 +66,7 @@ abstract class Provider_Base implements Provider_Interface {
 	 *
 	 * @return null
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials ) {
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null ) {
 		return null;
 	}
 
@@ -118,7 +118,11 @@ abstract class Provider_Base implements Provider_Interface {
 	 * @return string text, image, video, audio.
 	 */
 	protected static function classify_openai_model( $model_id ) {
+		// Image generation: gpt-image-*, dall-e-*, FLUX* (Azure/Foundry), imagen-*, gemini*-image*
 		if ( strpos( $model_id, 'gpt-image' ) === 0 || strpos( $model_id, 'dall-e' ) === 0 ) {
+			return 'image';
+		}
+		if ( strpos( strtolower( $model_id ), 'flux' ) === 0 ) {
 			return 'image';
 		}
 		if ( strpos( strtolower( $model_id ), 'sora' ) === 0 ) {

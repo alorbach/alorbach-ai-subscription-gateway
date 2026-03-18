@@ -130,7 +130,7 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials ) {
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
@@ -138,6 +138,53 @@ class OpenAI_Provider extends Provider_Base {
 		// OpenAI expects whisper-1, not whisper.
 		if ( $model === 'whisper' ) {
 			$model = 'whisper-1';
+		}
+		// gpt-audio uses chat completions with audio input (audio → text), not audio/transcriptions.
+		if ( strpos( $model, 'gpt-audio' ) === 0 ) {
+			$audio_bytes = is_readable( $file_path ) ? file_get_contents( $file_path ) : false;
+			if ( $audio_bytes === false || strlen( $audio_bytes ) < 100 ) {
+				return new \WP_Error( 'read_error', __( 'Could not read audio file or file is too small.', 'alorbach-ai-gateway' ) );
+			}
+			if ( ! $format ) {
+				$ext    = strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+				$format = in_array( $ext, array( 'wav', 'mp3', 'flac', 'opus', 'm4a', 'webm' ), true ) ? $ext : 'wav';
+			}
+			$format = in_array( $format, array( 'wav', 'mp3', 'flac', 'opus', 'm4a', 'webm' ), true ) ? $format : 'wav';
+			$audio_b64 = base64_encode( $audio_bytes );
+			// System message must always state that the user provides audio; custom prompt adds format instructions.
+			$base = __( 'You are a transcription assistant. The user will provide audio in the next message. Transcribe it.', 'alorbach-ai-gateway' );
+			$sys  = $prompt ? $base . ' ' . $prompt : $base . ' ' . __( 'Output only the transcribed text, nothing else. For silent or unclear audio, output a single period.', 'alorbach-ai-gateway' );
+			$body = array(
+				'model'       => $model,
+				'modalities'  => array( 'text' ),
+				'messages'    => array(
+					array(
+						'role'    => 'system',
+						'content' => $sys,
+					),
+					array(
+						'role'    => 'user',
+						'content' => array(
+							array(
+								'type'         => 'input_audio',
+								'input_audio'  => array(
+									'data'   => $audio_b64,
+									'format' => $format,
+								),
+							),
+						),
+					),
+				),
+			);
+			return array(
+				'url'             => 'https://api.openai.com/v1/chat/completions',
+				'headers'         => array(
+					'Content-Type'  => 'application/json',
+					'Authorization' => 'Bearer ' . $api_key,
+				),
+				'body'            => wp_json_encode( $body ),
+				'response_format' => 'chat_completions',
+			);
 		}
 		$boundary = wp_generate_password( 24, false );
 		$body     = '--' . $boundary . "\r\n";

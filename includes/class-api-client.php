@@ -162,6 +162,48 @@ class API_Client {
 	}
 
 	/**
+	 * Detect audio format from file bytes (magic bytes).
+	 *
+	 * @param string $bytes Raw audio file content.
+	 * @return string Format: wav, mp3, flac, opus, m4a, webm, or wav as fallback.
+	 */
+	public static function detect_audio_format( $bytes ) {
+		$len = strlen( $bytes );
+		if ( $len < 12 ) {
+			return 'wav';
+		}
+		// RIFF....WAVE
+		if ( substr( $bytes, 0, 4 ) === 'RIFF' && substr( $bytes, 8, 4 ) === 'WAVE' ) {
+			return 'wav';
+		}
+		// ID3 (MP3 with ID3 tag)
+		if ( substr( $bytes, 0, 3 ) === 'ID3' ) {
+			return 'mp3';
+		}
+		// MP3 frame sync (FF FB or FF FA)
+		if ( $len >= 2 && ( $bytes[0] === "\xFF" && ( $bytes[1] === "\xFB" || $bytes[1] === "\xFA" ) ) ) {
+			return 'mp3';
+		}
+		// fLaC
+		if ( substr( $bytes, 0, 4 ) === 'fLaC' ) {
+			return 'flac';
+		}
+		// OggS (Ogg/Opus)
+		if ( substr( $bytes, 0, 4 ) === 'OggS' ) {
+			return 'opus';
+		}
+		// EBML (WebM)
+		if ( substr( $bytes, 0, 4 ) === "\x1A\x45\xDF\xA3" ) {
+			return 'webm';
+		}
+		// ftyp at offset 4 (MP4/M4A)
+		if ( $len >= 8 && substr( $bytes, 4, 4 ) === 'ftyp' ) {
+			return 'm4a';
+		}
+		return 'wav';
+	}
+
+	/**
 	 * Extract error message from API response body (handles various formats).
 	 *
 	 * @param array|null $body     Parsed JSON body.
@@ -291,12 +333,13 @@ class API_Client {
 	/**
 	 * Transcribe audio via Whisper (OpenAI or Azure).
 	 *
-	 * @param string $file_path Path to audio file.
-	 * @param string $model    Model (e.g. whisper-1, gpt-4o-transcribe).
-	 * @param string $prompt   Optional prompt.
+	 * @param string      $file_path Path to audio file.
+	 * @param string      $model    Model (e.g. whisper-1, gpt-4o-transcribe).
+	 * @param string      $prompt   Optional prompt.
+	 * @param string|null $format   Optional format (wav, mp3, flac, opus, m4a, webm). Auto-detected from path if null.
 	 * @return array|WP_Error Response with 'text' or error.
 	 */
-	public static function transcribe( $file_path, $model = 'whisper-1', $prompt = '' ) {
+	public static function transcribe( $file_path, $model = 'whisper-1', $prompt = '', $format = null ) {
 		$model  = $model ?: 'whisper-1';
 		$prompt = is_string( $prompt ) ? trim( $prompt ) : '';
 		if ( ! file_exists( $file_path ) ) {
@@ -311,7 +354,7 @@ class API_Client {
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$request = $prov->build_transcribe_request( $file_path, $model, $prompt, $creds );
+		$request = $prov->build_transcribe_request( $file_path, $model, $prompt, $creds, $format );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Transcription not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -329,6 +372,13 @@ class API_Client {
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
 			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+		}
+		// gpt-audio uses chat completions; response has choices[0].message.content.
+		if ( ! empty( $request['response_format'] ) && $request['response_format'] === 'chat_completions' ) {
+			$text = isset( $body_response['choices'][0]['message']['content'] )
+				? (string) $body_response['choices'][0]['message']['content']
+				: '';
+			return array( 'text' => $text );
 		}
 		return is_array( $body_response ) ? $body_response : array( 'text' => (string) $raw_body );
 	}

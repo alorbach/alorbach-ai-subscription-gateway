@@ -77,13 +77,14 @@ interface Provider_Interface {
 	/**
 	 * Build transcribe request. Return null if not supported.
 	 *
-	 * @param string $file_path   Path to audio file.
-	 * @param string $model       Model (e.g. whisper-1).
-	 * @param string $prompt      Optional prompt.
-	 * @param array  $credentials Credentials.
+	 * @param string      $file_path   Path to audio file.
+	 * @param string      $model       Model (e.g. whisper-1).
+	 * @param string      $prompt      Optional prompt.
+	 * @param array       $credentials Credentials.
+	 * @param string|null $format      Optional format (wav, mp3, flac, opus, m4a, webm). Auto-detected from path if null.
 	 * @return array{url: string, headers: array, body: string}|WP_Error|null
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials );
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null );
 
 	/**
 	 * Build video generation request. Return null if not supported.
