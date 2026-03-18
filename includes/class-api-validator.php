@@ -7,6 +7,7 @@
 
 namespace Alorbach\AIGateway;
 
+use Alorbach\AIGateway\Providers\Azure_Provider;
 use Alorbach\AIGateway\Providers\Provider_Registry;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -77,6 +78,7 @@ class API_Validator {
 
 	/**
 	 * Verify text model via minimal chat completion.
+	 * Codex models (gpt-5.x-codex) on Azure require the v1 Responses API.
 	 *
 	 * @param string $provider  openai, azure, google, github_models.
 	 * @param string $model     Model ID.
@@ -86,6 +88,10 @@ class API_Validator {
 	public static function verify_text_model( $provider, $model, $entry_id = '' ) {
 		if ( strpos( strtolower( $model ), 'sora' ) === 0 ) {
 			return array( 'success' => false, 'message' => __( 'Sora is a video model. Use video generation to verify; the Test button uses the chat API.', 'alorbach-ai-gateway' ) );
+		}
+		$is_codex = strpos( strtolower( $model ), '-codex' ) !== false;
+		if ( $is_codex && $provider === 'azure' ) {
+			return self::verify_codex_model_azure( $model, $entry_id );
 		}
 		$body = array(
 			'model'      => $model,
@@ -98,6 +104,72 @@ class API_Validator {
 		}
 		$content = isset( $response['choices'][0]['message']['content'] ) ? $response['choices'][0]['message']['content'] : '';
 		return array( 'success' => true, 'result' => $content );
+	}
+
+	/**
+	 * Verify Codex model on Azure via v1 Responses API.
+	 * Codex models do not support chat/completions; they require /openai/v1/responses.
+	 *
+	 * @param string $model    Model ID (e.g. gpt-5.3-codex).
+	 * @param string $entry_id Optional. When set, use credentials for this specific entry.
+	 * @return array{success: bool, message?: string, result?: string}
+	 */
+	private static function verify_codex_model_azure( $model, $entry_id = '' ) {
+		$creds = ! empty( $entry_id )
+			? API_Keys_Helper::get_credentials_for_entry( $entry_id )
+			: API_Keys_Helper::get_credentials_for_provider( 'azure' );
+		if ( ! $creds ) {
+			return array( 'success' => false, 'message' => __( 'API key not configured for Azure.', 'alorbach-ai-gateway' ) );
+		}
+		$prov = Provider_Registry::get( 'azure' );
+		if ( ! $prov instanceof Azure_Provider ) {
+			return array( 'success' => false, 'message' => __( 'Azure provider not available.', 'alorbach-ai-gateway' ) );
+		}
+		$request = $prov->build_responses_request( $model, $creds );
+		if ( is_wp_error( $request ) ) {
+			return array( 'success' => false, 'message' => $request->get_error_message() );
+		}
+		$response = wp_remote_post( $request['url'], array(
+			'headers' => $request['headers'],
+			'body'    => $request['body'],
+			'timeout' => 60,
+		) );
+		if ( is_wp_error( $response ) ) {
+			return array( 'success' => false, 'message' => $response->get_error_message() );
+		}
+		$code       = wp_remote_retrieve_response_code( $response );
+		$raw_body   = wp_remote_retrieve_body( $response );
+		$body_array = json_decode( $raw_body, true );
+		if ( $code >= 400 ) {
+			$msg = API_Client::extract_api_error_message( $body_array, $raw_body, $code );
+			return array( 'success' => false, 'message' => $msg );
+		}
+		$content = self::extract_responses_output_text( $body_array );
+		return array( 'success' => true, 'result' => $content );
+	}
+
+	/**
+	 * Extract aggregated text from Responses API output array.
+	 *
+	 * @param array|null $body Parsed JSON response.
+	 * @return string
+	 */
+	private static function extract_responses_output_text( $body ) {
+		if ( ! is_array( $body ) || empty( $body['output'] ) ) {
+			return '';
+		}
+		$parts = array();
+		foreach ( (array) $body['output'] as $item ) {
+			if ( empty( $item['content'] ) || ! is_array( $item['content'] ) ) {
+				continue;
+			}
+			foreach ( $item['content'] as $part ) {
+				if ( isset( $part['type'] ) && $part['type'] === 'output_text' && isset( $part['text'] ) ) {
+					$parts[] = $part['text'];
+				}
+			}
+		}
+		return implode( '', $parts );
 	}
 
 	/**

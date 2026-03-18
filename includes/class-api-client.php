@@ -211,7 +211,7 @@ class API_Client {
 	 * @param int        $code    HTTP status code.
 	 * @return string Error message.
 	 */
-	private static function extract_api_error_message( $body, $raw_body, $code ) {
+	public static function extract_api_error_message( $body, $raw_body, $code ) {
 		// Never leak auth error details to callers.
 		if ( $code === 401 || $code === 403 ) {
 			return __( 'Authentication failed. Please check the API key configuration.', 'alorbach-ai-gateway' );

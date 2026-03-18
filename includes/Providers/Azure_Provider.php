@@ -84,6 +84,36 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Build Responses API request for Codex models.
+	 * Codex models (gpt-5.x-codex) require the v1 Responses API, not chat/completions.
+	 *
+	 * @param string $model      Model ID (e.g. gpt-5.3-codex).
+	 * @param array  $credentials Credentials with endpoint and api_key.
+	 * @return array{url: string, headers: array, body: string}|WP_Error
+	 */
+	public function build_responses_request( $model, $credentials ) {
+		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
+		$api_key  = $credentials['api_key'] ?? '';
+		if ( empty( $endpoint ) || empty( $api_key ) ) {
+			return new \WP_Error( 'no_api_key', __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
+		}
+		$body = array(
+			'model'             => $model,
+			'input'             => 'Hi',
+			'max_output_tokens' => 64,
+		);
+		$url = $endpoint . '/openai/v1/responses';
+		return array(
+			'url'     => $url,
+			'headers' => array(
+				'Content-Type' => 'application/json',
+				'api-key'     => $api_key,
+			),
+			'body'    => wp_json_encode( $body ),
+		);
+	}
+
+	/**
 	 * {@inheritdoc}
 	 */
 	public function build_chat_request( $body, $credentials ) {
@@ -108,6 +138,32 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Map FLUX model ID to Black Forest Labs API path.
+	 *
+	 * @param string $model Model ID (e.g. FLUX.2-pro, FLUX-1.1-pro).
+	 * @return string|null BFL path or null if not FLUX.
+	 */
+	private static function get_flux_bfl_path( $model ) {
+		$m = strtolower( $model );
+		if ( strpos( $m, 'flux' ) !== 0 ) {
+			return null;
+		}
+		if ( strpos( $m, 'flux.2-pro' ) === 0 || strpos( $m, 'flux-2-pro' ) === 0 ) {
+			return 'providers/blackforestlabs/v1/flux-2-pro';
+		}
+		if ( strpos( $m, 'flux.1.1' ) !== false || strpos( $m, 'flux-1.1' ) !== false || strpos( $m, 'flux1.1' ) !== false ) {
+			return 'providers/blackforestlabs/v1/flux-pro-1.1';
+		}
+		if ( strpos( $m, 'kontext' ) !== false ) {
+			return 'providers/blackforestlabs/v1/flux-kontext-pro';
+		}
+		if ( strpos( $m, 'flux.2' ) === 0 || strpos( $m, 'flux-2' ) === 0 ) {
+			return 'providers/blackforestlabs/v1/flux-2-pro';
+		}
+		return 'providers/blackforestlabs/v1/flux-2-pro';
+	}
+
+	/**
 	 * {@inheritdoc}
 	 */
 	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials ) {
@@ -116,16 +172,30 @@ class Azure_Provider extends Provider_Base {
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$body = array(
-			'prompt' => $prompt,
-			'n'      => $n,
-			'size'   => $size,
-		);
-		if ( strpos( $model, 'gpt-image' ) === 0 ) {
-			$body['quality']       = $quality ?: 'medium';
-			$body['output_format'] = $output_format ?: 'png';
+		$bfl_path = self::get_flux_bfl_path( $model );
+		if ( $bfl_path ) {
+			$dim = self::parse_size( $size );
+			$body = array(
+				'prompt'        => $prompt,
+				'n'             => $n,
+				'width'         => $dim[0],
+				'height'        => $dim[1],
+				'output_format' => strtolower( $output_format ?: 'png' ),
+				'model'         => strtolower( $model ),
+			);
+			$url = $endpoint . '/' . $bfl_path . '?api-version=preview';
+		} else {
+			$body = array(
+				'prompt' => $prompt,
+				'n'      => $n,
+				'size'   => $size,
+			);
+			if ( strpos( $model, 'gpt-image' ) === 0 ) {
+				$body['quality']       = $quality ?: 'medium';
+				$body['output_format'] = $output_format ?: 'png';
+			}
+			$url = $endpoint . '/openai/deployments/' . $model . '/images/generations?api-version=2025-04-01-preview';
 		}
-		$url = $endpoint . '/openai/deployments/' . $model . '/images/generations?api-version=2025-04-01-preview';
 		return array(
 			'url'     => $url,
 			'headers' => array(
@@ -134,6 +204,19 @@ class Azure_Provider extends Provider_Base {
 			),
 			'body'    => wp_json_encode( $body ),
 		);
+	}
+
+	/**
+	 * Parse size string (e.g. 1024x1024) into width and height.
+	 *
+	 * @param string $size Size string.
+	 * @return int[] [width, height]
+	 */
+	private static function parse_size( $size ) {
+		if ( preg_match( '/^(\d+)\s*x\s*(\d+)$/i', trim( $size ), $m ) ) {
+			return array( (int) $m[1], (int) $m[2] );
+		}
+		return array( 1024, 1024 );
 	}
 
 	/**
