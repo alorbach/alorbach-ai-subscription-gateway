@@ -27,14 +27,10 @@ class Tokenizer {
 		'gpt-4.1'          => 'o200k_base',
 		'gpt-4.1-mini'     => 'o200k_base',
 		'gpt-4.1-nano'     => 'o200k_base',
-		'gpt-5'            => 'o200k_base',
-		'gpt-5-mini'       => 'o200k_base',
-		'gpt-5-nano'       => 'o200k_base',
 		'gpt-4-turbo'      => 'cl100k_base',
 		'gpt-4'            => 'cl100k_base',
 		'o1'               => 'o200k_base',
 		'o1-mini'          => 'o200k_base',
-		'o3-pro'           => 'o200k_base',
 		'o4-mini'          => 'o200k_base',
 		'gemini-2.0-flash' => 'cl100k_base',
 		'gemini-2.5-flash' => 'cl100k_base',
@@ -54,10 +50,21 @@ class Tokenizer {
 	 * @return int Token count, or 0 on error.
 	 */
 	public static function count_tokens( $text, $model = 'gpt-4.1-mini' ) {
+		// Allow plugins to override token counting entirely (e.g. to use a different library).
+		$override = apply_filters( 'alorbach_count_tokens', null, $text, $model );
+		if ( null !== $override ) {
+			return (int) $override;
+		}
+
 		try {
 			if ( class_exists( 'Yethee\Tiktoken\EncoderProvider' ) ) {
 				$provider = new \Yethee\Tiktoken\EncoderProvider();
-				$encoder  = $provider->getForModel( $model );
+				// Use our own model→encoding map and resolve by encoding name so that
+				// models not yet registered inside tiktoken's own model table (e.g.
+				// gpt-4.1-mini) still get accurate BPE counts rather than falling
+				// through to the character-heuristic below.
+				$encoding = self::get_encoding_for_model( $model );
+				$encoder  = $provider->getForEncoding( $encoding );
 				$tokens   = $encoder->encode( $text );
 				return is_array( $tokens ) ? count( $tokens ) : 0;
 			}

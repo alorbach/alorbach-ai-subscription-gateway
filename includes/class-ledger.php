@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Ledger {
 
 	const TABLE_NAME = 'alorbach_ledger';
-	const DB_VERSION = '1.1';
+	const DB_VERSION = '1.2';
 
 	/**
 	 * Create the ledger table.
@@ -42,7 +42,8 @@ class Ledger {
 			PRIMARY KEY (transaction_id),
 			KEY user_id (user_id),
 			KEY created_at (created_at),
-			KEY transaction_type (transaction_type)
+			KEY transaction_type (transaction_type),
+			KEY request_signature (request_signature(64))
 		) {$charset_collate};";
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';

@@ -51,7 +51,7 @@ function alorbach_activate() {
 
 register_deactivation_hook( __FILE__, 'alorbach_deactivate' );
 function alorbach_deactivate() {
-	// No data cleanup on deactivation
+	wp_clear_scheduled_hook( 'alorbach_retry_wc_renewal' );
 }
 
 add_action( 'rest_api_init', 'alorbach_register_rest_routes' );
@@ -242,5 +242,12 @@ function alorbach_handle_retry_wc_renewal( $user_id, $credits_uc ) {
 	$result = Alorbach\AIGateway\Ledger::insert_transaction( (int) $user_id, 'subscription_credit', null, (int) $credits_uc );
 	if ( $result ) {
 		do_action( 'alorbach_credits_added', (int) $user_id, (int) $credits_uc, 'woocommerce_retry' );
+	} else {
+		error_log( sprintf(
+			'[alorbach-ai-gateway] WC renewal retry failed permanently for user %d (%d UC). Manual credit grant required.',
+			(int) $user_id,
+			(int) $credits_uc
+		) );
+		do_action( 'alorbach_wc_renewal_retry_failed', (int) $user_id, (int) $credits_uc );
 	}
 }

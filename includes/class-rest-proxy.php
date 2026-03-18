@@ -28,27 +28,44 @@ class REST_Proxy {
 		$option_map = array(
 			'chat'       => array( 'alorbach_rate_limit_chat', 100 ),
 			'images'     => array( 'alorbach_rate_limit_images', 30 ),
-			'transcribe' => array( 'alorbach_rate_limit_images', 30 ),
+			'transcribe' => array( 'alorbach_rate_limit_transcribe', 30 ),
 			'video'      => array( 'alorbach_rate_limit_video', 10 ),
 		);
 		list( $option_key, $default ) = isset( $option_map[ $endpoint ] ) ? $option_map[ $endpoint ] : array( '', 60 );
-		$limit = $option_key ? max( 1, (int) get_option( $option_key, $default ) ) : $default;
+		$limit     = $option_key ? max( 1, (int) get_option( $option_key, $default ) ) : $default;
+		$cache_key = 'alorbach_rl_' . $user_id . '_' . $endpoint;
 
-		$key   = 'alorbach_rl_' . $user_id . '_' . $endpoint;
-		$count = (int) get_transient( $key );
-		if ( $count >= $limit ) {
-			return new \WP_Error(
-				'rate_limit_exceeded',
-				/* translators: %d: rate limit window in seconds */
-				sprintf( __( 'Too many requests. Please wait %d seconds before trying again.', 'alorbach-ai-gateway' ), $window ),
-				array( 'status' => 429 )
-			);
-		}
-		if ( $count === 0 ) {
-			set_transient( $key, 1, $window );
+		$rate_error = new \WP_Error(
+			'rate_limit_exceeded',
+			/* translators: %d: rate limit window in seconds */
+			sprintf( __( 'Too many requests. Please wait %d seconds before trying again.', 'alorbach-ai-gateway' ), $window ),
+			array( 'status' => 429 )
+		);
+
+		if ( wp_using_ext_object_cache() ) {
+			// Atomic path: wp_cache_add is guaranteed-atomic on Redis/Memcached.
+			if ( ! wp_cache_add( $cache_key, 1, '', $window ) ) {
+				$count = wp_cache_incr( $cache_key, 1 );
+				if ( false === $count || $count <= 0 ) {
+					// Key expired between add and incr — treat as fresh window.
+					wp_cache_set( $cache_key, 1, '', $window );
+					$count = 1;
+				}
+				if ( $count > $limit ) {
+					return $rate_error;
+				}
+			}
 		} else {
-			set_transient( $key, $count + 1, $window );
+			// Non-persistent cache: each process has its own memory store, so
+			// transients are the cross-request mechanism available here. A narrow
+			// race window exists on concurrent requests; acceptable for this tier.
+			$count = (int) get_transient( $cache_key );
+			if ( $count >= $limit ) {
+				return $rate_error;
+			}
+			set_transient( $cache_key, $count + 1, $window );
 		}
+
 		return null;
 	}
 
@@ -374,7 +391,7 @@ class REST_Proxy {
 			$max_tokens = $model_max;
 		}
 
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model, microtime( true ) ) ) );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -401,6 +418,18 @@ class REST_Proxy {
 			'messages'   => $messages,
 			'max_tokens' => $max_tokens,
 		);
+
+		/**
+		 * Filter the request body sent to the AI provider.
+		 *
+		 * Allows third-party plugins to inject additional parameters (e.g. temperature,
+		 * tools, response_format) before the request is dispatched.
+		 *
+		 * @param array  $body    Request body.
+		 * @param int    $user_id WordPress user ID.
+		 * @param string $model   Model slug.
+		 */
+		$body = apply_filters( 'alorbach_chat_request_body', $body, $user_id, $model );
 
 		if ( $multi_step ) {
 			return self::execute_multi_step_chat(
@@ -446,6 +475,7 @@ class REST_Proxy {
 			$request_signature,
 			$api_cost
 		);
+		do_action( 'alorbach_after_deduction', $user_id, 'chat', $model, $uc_cost, $api_cost );
 
 		$response['cost_uc']      = $uc_cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $uc_cost );
@@ -736,6 +766,7 @@ class REST_Proxy {
 		}
 
 		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost, null, null, null, null, $api_cost );
+		do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
@@ -780,7 +811,15 @@ class REST_Proxy {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 		}
 		$tmp = \wp_tempnam( 'alorbach-whisper-' );
-		if ( ! $tmp || false === file_put_contents( $tmp, $decoded ) ) {
+		if ( ! $tmp ) {
+			return new \WP_Error( 'upload_error', __( 'Could not create temporary file.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		global $wp_filesystem;
+		if ( ! $wp_filesystem ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			WP_Filesystem();
+		}
+		if ( ! $wp_filesystem || ! $wp_filesystem->put_contents( $tmp, $decoded, FS_CHMOD_FILE ) ) {
 			return new \WP_Error( 'upload_error', __( 'Could not save audio.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
 		}
 
@@ -790,7 +829,7 @@ class REST_Proxy {
 			$duration = isset( $info['playtime_seconds'] ) ? (int) ceil( $info['playtime_seconds'] ) : 0;
 		}
 		if ( $duration <= 0 ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'invalid_duration', __( 'duration_seconds required when getID3 is not available.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
@@ -798,18 +837,19 @@ class REST_Proxy {
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
-			@unlink( $tmp );
+			wp_delete_file( $tmp );
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
 		$response = API_Client::transcribe( $tmp, $model, $prompt );
-		@unlink( $tmp );
+		wp_delete_file( $tmp );
 
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
 
 		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost, null, null, null, null, $api_cost );
+		do_action( 'alorbach_after_deduction', $user_id, 'audio', $model, $cost, $api_cost );
 		$response['cost_uc']           = $cost;
 		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']           = User_Display::uc_to_usd( $cost );
@@ -857,6 +897,7 @@ class REST_Proxy {
 		}
 
 		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost, null, null, null, null, $api_cost );
+		do_action( 'alorbach_after_deduction', $user_id, 'video', $model, $cost, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
@@ -1129,7 +1170,10 @@ class REST_Proxy {
 		$base_signature
 	) {
 		// Long-running jobs may exceed the default PHP execution time limit.
-		set_time_limit( 0 );
+		// Use a configurable hard cap to prevent unbounded blocking requests (DoS).
+		$timeout  = max( 30, (int) get_option( 'alorbach_multi_step_timeout', 120 ) );
+		$deadline = time() + $timeout;
+		set_time_limit( $timeout + 5 ); // Allow PHP a small grace period beyond our deadline.
 
 		if ( empty( $continue_message ) ) {
 			$continue_message = 'Continue exactly where you left off without any preamble or repetition.';
@@ -1146,10 +1190,21 @@ class REST_Proxy {
 		$current_messages        = $messages;
 
 		for ( $step = 1; $step <= $max_steps; $step++ ) {
-			// Per-step balance check — stop spending if credits run out mid-job.
+			// Abort gracefully if we are approaching the wall-clock deadline.
+			if ( time() >= $deadline ) {
+				break;
+			}
+
+			// Per-step balance check with a cost estimate — stop spending if credits
+			// are insufficient for this step before making the (costly) API call.
 			if ( ! $free_pass_through ) {
-				$balance = Ledger::get_balance( $user_id );
-				if ( $balance <= 0 ) {
+				$balance            = Ledger::get_balance( $user_id );
+				$step_input_tokens  = Tokenizer::count_messages_tokens( $current_messages, $model );
+				$step_output_est    = $body['max_tokens'];
+				$step_cost_estimate = Cost_Matrix::apply_user_cost(
+					Cost_Matrix::calculate_chat_cost( $model, $step_input_tokens, $step_output_est, 0 )
+				);
+				if ( $balance < $step_cost_estimate ) {
 					return new \WP_Error(
 						'insufficient_credits',
 						__( 'Insufficient credits to continue.', 'alorbach-ai-gateway' ),

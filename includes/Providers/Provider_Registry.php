@@ -34,6 +34,17 @@ class Provider_Registry {
 		self::register( new Azure_Provider() );
 		self::register( new Google_Provider() );
 		self::register( new GitHub_Models_Provider() );
+
+		/**
+		 * Fires after built-in providers are registered, allowing third-party plugins
+		 * to add custom providers via Provider_Registry::register().
+		 *
+		 * @example
+		 * add_action( 'alorbach_register_providers', function() {
+		 *     \Alorbach\AIGateway\Providers\Provider_Registry::register( new My_Custom_Provider() );
+		 * } );
+		 */
+		do_action( 'alorbach_register_providers' );
 	}
 
 	/**
