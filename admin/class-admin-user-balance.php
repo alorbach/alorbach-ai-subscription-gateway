@@ -62,7 +62,7 @@ class Admin_User_Balance {
 			}
 		}
 
-		$users = get_users( array( 'number' => 100, 'orderby' => 'login' ) );
+		$users = get_users( array( 'number' => -1, 'orderby' => 'login' ) );
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'User Balance', 'alorbach-ai-gateway' ); ?></h1>
@@ -223,16 +223,13 @@ class Admin_User_Balance {
 	 * @param int|null $user_id Optional. Filter by user ID. Null = all users.
 	 */
 	private static function download_transactions_csv( $user_id = null ) {
-		$args = array( 'per_page' => 999999, 'page' => 1 );
-		if ( $user_id > 0 ) {
-			$args['user_id'] = $user_id;
-		}
-		$result = \Alorbach\AIGateway\Ledger::get_transactions( $args );
-		$rows   = $result['rows'];
+		$batch_size = 500;
+		$page       = 1;
 
 		$filename = 'alorbach-transactions-' . gmdate( 'Y-m-d-His' ) . '.csv';
 		header( 'Content-Type: text/csv; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="' . $filename . '"' );
+		header( 'Cache-Control: no-cache, no-store, must-revalidate' );
 
 		$out = fopen( 'php://output', 'w' );
 		if ( $out === false ) {
@@ -241,25 +238,36 @@ class Admin_User_Balance {
 
 		fputcsv( $out, array( 'transaction_id', 'user_id', 'user_login', 'user_email', 'transaction_type', 'model_used', 'api_cost_uc', 'user_charge_uc', 'credits', 'created_at' ) );
 
-		foreach ( $rows as $row ) {
-			$user      = $row['user_id'] ? get_user_by( 'id', $row['user_id'] ) : null;
-			$user_login = $user ? $user->user_login : '';
-			$user_email = $user ? $user->user_email : '';
-			$credits   = \Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] );
-			$api_cost_uc = isset( $row['api_cost_uc'] ) && $row['api_cost_uc'] !== null && $row['api_cost_uc'] !== '' ? $row['api_cost_uc'] : '';
-			fputcsv( $out, array(
-				$row['transaction_id'],
-				$row['user_id'],
-				$user_login,
-				$user_email,
-				$row['transaction_type'],
-				$row['model_used'] ?? '',
-				$api_cost_uc,
-				$row['uc_amount'],
-				$credits,
-				$row['created_at'],
-			) );
-		}
+		do {
+			$args = array( 'per_page' => $batch_size, 'page' => $page );
+			if ( $user_id > 0 ) {
+				$args['user_id'] = $user_id;
+			}
+			$result = \Alorbach\AIGateway\Ledger::get_transactions( $args );
+			$rows   = $result['rows'];
+
+			foreach ( $rows as $row ) {
+				$user        = $row['user_id'] ? get_user_by( 'id', $row['user_id'] ) : null;
+				$user_login  = $user ? $user->user_login : '';
+				$user_email  = $user ? $user->user_email : '';
+				$credits     = \Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] );
+				$api_cost_uc = isset( $row['api_cost_uc'] ) && $row['api_cost_uc'] !== null && $row['api_cost_uc'] !== '' ? $row['api_cost_uc'] : '';
+				fputcsv( $out, array(
+					$row['transaction_id'],
+					$row['user_id'],
+					$user_login,
+					$user_email,
+					$row['transaction_type'],
+					$row['model_used'] ?? '',
+					$api_cost_uc,
+					$row['uc_amount'],
+					$credits,
+					$row['created_at'],
+				) );
+			}
+			$page++;
+		} while ( count( $rows ) >= $batch_size );
+
 		fclose( $out );
 	}
 }

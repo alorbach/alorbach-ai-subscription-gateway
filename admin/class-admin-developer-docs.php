@@ -303,6 +303,16 @@ data.steps.forEach( s => {
 					<td><?php esc_html_e( 'Modify user charge after markup applied', 'alorbach-ai-gateway' ); ?></td>
 				</tr>
 				<tr>
+					<td><code>alorbach_chat_request_body</code></td>
+					<td>$body, $user_id, $model</td>
+					<td><?php esc_html_e( 'Modify the request body sent to the AI provider for chat (inject temperature, tools, response_format, etc.)', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>alorbach_count_tokens</code></td>
+					<td>$count, $text, $model</td>
+					<td><?php esc_html_e( 'Override token count for a given text and model. Return an integer to short-circuit the tokenizer.', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
+				<tr>
 					<td><code>alorbach_uc_to_credit_ratio</code></td>
 					<td>—</td>
 					<td><?php esc_html_e( 'Override UC-to-credit ratio (default 1000)', 'alorbach-ai-gateway' ); ?></td>
@@ -363,6 +373,11 @@ data.steps.forEach( s => {
 					<td><code>alorbach_stripe_subscription_deleted</code></td>
 					<td>$event</td>
 					<td><?php esc_html_e( 'Fired when Stripe subscription is deleted', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>alorbach_after_deduction</code></td>
+					<td>$user_id, $type, $model, $cost_uc, $api_cost_uc</td>
+					<td><?php esc_html_e( 'Fired after credits are deducted for any request (type: chat, image, audio, video). $cost_uc is the user charge; $api_cost_uc is the raw API cost.', 'alorbach-ai-gateway' ); ?></td>
 				</tr>
 				<tr>
 					<td><code>alorbach_subscription_payment_failed</code></td>

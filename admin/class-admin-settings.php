@@ -32,6 +32,7 @@ class Admin_Settings {
 			$rate_limit_window    = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) $_POST['alorbach_rate_limit_window'] ) ) : 60;
 			$rate_limit_chat      = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_chat'] ) ) : 100;
 			$rate_limit_images    = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_images'] ) ) : 30;
+			$rate_limit_transcribe = isset( $_POST['alorbach_rate_limit_transcribe'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_transcribe'] ) ) : 30;
 			$rate_limit_video     = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_video'] ) ) : 10;
 
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
@@ -42,6 +43,7 @@ class Admin_Settings {
 			update_option( 'alorbach_rate_limit_window', $rate_limit_window );
 			update_option( 'alorbach_rate_limit_chat', $rate_limit_chat );
 			update_option( 'alorbach_rate_limit_images', $rate_limit_images );
+			update_option( 'alorbach_rate_limit_transcribe', $rate_limit_transcribe );
 			update_option( 'alorbach_rate_limit_video', $rate_limit_video );
 			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) $_POST['alorbach_monthly_quota_uc'] ) : 0;
 			update_option( 'alorbach_monthly_quota_uc', $monthly_quota_uc );
@@ -56,6 +58,7 @@ class Admin_Settings {
 		$rate_limit_window      = (int) get_option( 'alorbach_rate_limit_window', 60 );
 		$rate_limit_chat        = (int) get_option( 'alorbach_rate_limit_chat', 100 );
 		$rate_limit_images      = (int) get_option( 'alorbach_rate_limit_images', 30 );
+		$rate_limit_transcribe  = (int) get_option( 'alorbach_rate_limit_transcribe', 30 );
 		$rate_limit_video       = (int) get_option( 'alorbach_rate_limit_video', 10 );
 		$monthly_quota_uc       = (int) get_option( 'alorbach_monthly_quota_uc', 0 );
 		?>
@@ -139,10 +142,17 @@ class Admin_Settings {
 						</td>
 					</tr>
 					<tr>
-						<th scope="row"><label for="alorbach_rate_limit_images"><?php esc_html_e( 'Image &amp; Transcribe requests / window', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<input type="number" name="alorbach_rate_limit_images" id="alorbach_rate_limit_images" value="<?php echo esc_attr( $rate_limit_images ); ?>" min="1" max="9999" step="1" class="small-text" />
-							<p class="description"><?php esc_html_e( 'Max image generation and audio transcription requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
+					<th scope="row"><label for="alorbach_rate_limit_images"><?php esc_html_e( 'Image requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+					<td>
+						<input type="number" name="alorbach_rate_limit_images" id="alorbach_rate_limit_images" value="<?php echo esc_attr( $rate_limit_images ); ?>" min="1" max="9999" step="1" class="small-text" />
+						<p class="description"><?php esc_html_e( 'Max image generation requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
+					</td>
+				</tr>
+				<tr>
+					<th scope="row"><label for="alorbach_rate_limit_transcribe"><?php esc_html_e( 'Transcribe requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+					<td>
+						<input type="number" name="alorbach_rate_limit_transcribe" id="alorbach_rate_limit_transcribe" value="<?php echo esc_attr( $rate_limit_transcribe ); ?>" min="1" max="9999" step="1" class="small-text" />
+						<p class="description"><?php esc_html_e( 'Max audio transcription requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 					<tr>

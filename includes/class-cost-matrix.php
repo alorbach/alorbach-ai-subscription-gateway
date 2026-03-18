@@ -230,14 +230,14 @@ class Cost_Matrix {
 	 * @param int $api_cost_uc API cost in UC.
 	 * @return int User cost in UC (amount to deduct from balance).
 	 */
-	public static function apply_user_cost( $api_cost_uc ) {
+	public static function apply_user_cost( $api_cost_uc, $model = '' ) {
 		if ( ! get_option( 'alorbach_selling_enabled', false ) ) {
 			return (int) $api_cost_uc;
 		}
 		$mult = (float) get_option( 'alorbach_selling_multiplier', 2.0 );
 		$mult = max( 1.0, $mult );
 		$user_cost = (int) round( $api_cost_uc * $mult );
-		return apply_filters( 'alorbach_user_cost', $user_cost, $api_cost_uc, null );
+		return apply_filters( 'alorbach_user_cost', $user_cost, $api_cost_uc, $model );
 	}
 
 	/**

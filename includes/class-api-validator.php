@@ -138,7 +138,7 @@ class API_Validator {
 				return array( 'success' => false, 'message' => __( 'Could not create test audio.', 'alorbach-ai-gateway' ) );
 			}
 			$response = API_Client::transcribe( $tmp, $model );
-			@unlink( $tmp );
+		wp_delete_file( $tmp );
 			if ( is_wp_error( $response ) ) {
 				return array( 'success' => false, 'message' => $response->get_error_message() );
 			}
@@ -188,10 +188,16 @@ class API_Validator {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 		}
 		$tmp = \wp_tempnam( 'alorbach-wav-' );
-		if ( ! $tmp || false === file_put_contents( $tmp, $wav ) ) {
-			if ( $tmp ) {
-				@unlink( $tmp );
-			}
+		if ( ! $tmp ) {
+			return false;
+		}
+		global $wp_filesystem;
+		if ( ! $wp_filesystem ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			WP_Filesystem();
+		}
+		if ( ! $wp_filesystem || ! $wp_filesystem->put_contents( $tmp, $wav, FS_CHMOD_FILE ) ) {
+			wp_delete_file( $tmp );
 			return false;
 		}
 		// API detects format by extension; wp_tempnam uses .tmp, so rename to .wav.
@@ -199,7 +205,7 @@ class API_Validator {
 		if ( $tmp_wav !== $tmp && rename( $tmp, $tmp_wav ) ) {
 			return $tmp_wav;
 		}
-		@unlink( $tmp );
+		wp_delete_file( $tmp );
 		return false;
 	}
 }

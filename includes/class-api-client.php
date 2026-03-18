@@ -28,14 +28,8 @@ class API_Client {
 	public static function get_provider_for_model( $model ) {
 		$helper = API_Keys_Helper::class;
 
-		if ( strpos( $model, 'gemini' ) === 0 ) {
-			return $helper::has_provider( 'google' ) ? 'google' : 'google';
-		}
-		if ( strpos( $model, 'imagen-' ) === 0 ) {
-			return $helper::has_provider( 'google' ) ? 'google' : 'google';
-		}
-		if ( strpos( $model, 'veo-' ) === 0 ) {
-			return $helper::has_provider( 'google' ) ? 'google' : 'google';
+		if ( strpos( $model, 'gemini' ) === 0 || strpos( $model, 'imagen-' ) === 0 || strpos( $model, 'veo-' ) === 0 ) {
+			return 'google';
 		}
 
 		// GitHub Models uses publisher/model format (e.g. azure-openai/gpt-5, openai/gpt-4.1).
@@ -403,6 +397,8 @@ class API_Client {
 	 * @return array|WP_Error Response with data[url] or error.
 	 */
 	public static function video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
+		// Video polling can take several minutes; disable the PHP execution time limit.
+		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
 		$create_result = self::create_video( $prompt, $model, $size, $duration_seconds );
 		if ( is_wp_error( $create_result ) ) {
 			return $create_result;

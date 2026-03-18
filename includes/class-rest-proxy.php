@@ -411,7 +411,7 @@ class REST_Proxy {
 			$output_estimate = $max_tokens;
 			$input_cost     = (int) ( ( $input_tokens * Cost_Matrix::get_input_cost_per_token( $model ) ) / 1000000 );
 			$output_cost    = (int) ( ( $output_estimate * Cost_Matrix::get_output_cost_per_token( $model ) ) / 1000000 );
-			$auth_hold      = Cost_Matrix::apply_user_cost( $input_cost + $output_cost );
+			$auth_hold      = Cost_Matrix::apply_user_cost( $input_cost + $output_cost, $model );
 
 			$balance = Ledger::get_balance( $user_id );
 			if ( $balance < $auth_hold ) {
@@ -468,7 +468,7 @@ class REST_Proxy {
 		$cached_tokens   = isset( $response['usage']['prompt_tokens_details']['cached_tokens'] ) ? (int) $response['usage']['prompt_tokens_details']['cached_tokens'] : 0;
 
 		$api_cost = Cost_Matrix::calculate_chat_cost( $model, $prompt_tokens, $completion_tokens, $cached_tokens );
-		$uc_cost  = Cost_Matrix::apply_user_cost( $api_cost );
+		$uc_cost  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 
 		Ledger::insert_transaction(
 			$user_id,
@@ -622,7 +622,7 @@ class REST_Proxy {
 			$n       = max( 1, min( 10, (int) $request->get_param( 'n' ) ) );
 			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 			$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
-			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
+			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		} elseif ( $type === 'video' ) {
 			$model    = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_video_model', 'sora-2' );
 			$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
@@ -630,12 +630,12 @@ class REST_Proxy {
 				$duration = 8;
 			}
 			$api_cost = Cost_Matrix::get_video_cost( $model, $duration );
-			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost );
+			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		} elseif ( $type === 'audio' ) {
 			$duration = max( 1, (int) $request->get_param( 'duration_seconds' ) );
 			$model    = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_audio_model', 'whisper-1' );
 			$api_cost  = Cost_Matrix::get_audio_cost( $duration, $model );
-			$cost_uc   = Cost_Matrix::apply_user_cost( $api_cost );
+			$cost_uc   = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		}
 
 		return rest_ensure_response( array(
@@ -759,8 +759,15 @@ class REST_Proxy {
 			? $quality
 			: get_option( 'alorbach_image_default_quality', 'medium' );
 
+		// Idempotency: reject duplicate image requests within a 5-minute window.
+		$time_bucket       = (int) ( time() / 300 );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $n, $time_bucket ) ) );
+		if ( Ledger::signature_exists( $request_signature ) ) {
+			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+
 		$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
-		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
+		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
@@ -771,7 +778,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost, null, null, null, null, $api_cost );
+		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost, null, null, null, $request_signature, $api_cost );
 		do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
@@ -813,6 +820,13 @@ class REST_Proxy {
 			return new \WP_Error( 'invalid_audio', __( 'Invalid base64 audio.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
+		// Idempotency: reject duplicate transcribe requests within a 5-minute window.
+		$time_bucket       = (int) ( time() / 300 );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'transcribe', hash( 'sha256', $audio_b64 ), $model, $time_bucket ) ) );
+		if ( Ledger::signature_exists( $request_signature ) ) {
+			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+
 		if ( ! function_exists( 'wp_tempnam' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
 		}
@@ -840,7 +854,7 @@ class REST_Proxy {
 		}
 
 		$api_cost = Cost_Matrix::get_audio_cost( $duration, $model );
-		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
+		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			wp_delete_file( $tmp );
@@ -854,7 +868,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost, null, null, null, null, $api_cost );
+		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost, null, null, null, $request_signature, $api_cost );
 		do_action( 'alorbach_after_deduction', $user_id, 'audio', $model, $cost, $api_cost );
 		$response['cost_uc']           = $cost;
 		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
@@ -890,8 +904,15 @@ class REST_Proxy {
 			$duration = 8;
 		}
 
+		// Idempotency: reject duplicate video requests within a 5-minute window.
+		$time_bucket       = (int) ( time() / 300 );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'video', $prompt, $model, $size, $duration, $time_bucket ) ) );
+		if ( Ledger::signature_exists( $request_signature ) ) {
+			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+
 		$api_cost = Cost_Matrix::get_video_cost( $model, $duration );
-		$cost     = Cost_Matrix::apply_user_cost( $api_cost );
+		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
@@ -902,7 +923,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost, null, null, null, null, $api_cost );
+		Ledger::insert_transaction( $user_id, 'video_deduction', $model, -$cost, null, null, null, $request_signature, $api_cost );
 		do_action( 'alorbach_after_deduction', $user_id, 'video', $model, $cost, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
@@ -1206,7 +1227,8 @@ class REST_Proxy {
 				$step_input_tokens  = Tokenizer::count_messages_tokens( $current_messages, $model );
 				$step_output_est    = $body['max_tokens'];
 				$step_cost_estimate = Cost_Matrix::apply_user_cost(
-					Cost_Matrix::calculate_chat_cost( $model, $step_input_tokens, $step_output_est, 0 )
+					Cost_Matrix::calculate_chat_cost( $model, $step_input_tokens, $step_output_est, 0 ),
+					$model
 				);
 				if ( $balance < $step_cost_estimate ) {
 					return new \WP_Error(
@@ -1238,7 +1260,7 @@ class REST_Proxy {
 				$step_completion_tokens = isset( $response['usage']['completion_tokens'] ) ? (int) $response['usage']['completion_tokens'] : 0;
 				$step_cached_tokens     = isset( $response['usage']['prompt_tokens_details']['cached_tokens'] ) ? (int) $response['usage']['prompt_tokens_details']['cached_tokens'] : 0;
 				$step_api_cost          = Cost_Matrix::calculate_chat_cost( $model, $step_prompt_tokens, $step_completion_tokens, $step_cached_tokens );
-				$step_uc_cost           = Cost_Matrix::apply_user_cost( $step_api_cost );
+				$step_uc_cost           = Cost_Matrix::apply_user_cost( $step_api_cost, $model );
 
 				Ledger::insert_transaction(
 					$user_id,
