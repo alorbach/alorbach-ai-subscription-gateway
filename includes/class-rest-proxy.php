@@ -242,10 +242,16 @@ class REST_Proxy {
 			'callback'            => array( __CLASS__, 'admin_verify_api_key' ),
 			'permission_callback' => $admin_permission,
 			'args'                => array(
-				'provider' => array(
+				'provider'  => array(
 					'required'          => true,
 					'type'              => 'string',
 					'enum'              => array( 'openai', 'azure', 'google', 'github_models' ),
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'entry_id'  => array(
+					'required'          => false,
+					'type'              => 'string',
+					'default'           => '',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 			),
@@ -911,15 +917,13 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_api_key( $request ) {
-		$provider = $request->get_param( 'provider' );
-		if ( empty( $provider ) ) {
-			$json = $request->get_json_params();
-			$provider = isset( $json['provider'] ) ? sanitize_text_field( $json['provider'] ) : '';
-		}
+		$json     = $request->get_json_params();
+		$provider = $request->get_param( 'provider' ) ?: ( isset( $json['provider'] ) ? sanitize_text_field( $json['provider'] ) : '' );
+		$entry_id = $request->get_param( 'entry_id' ) ?: ( isset( $json['entry_id'] ) ? sanitize_text_field( $json['entry_id'] ) : '' );
 		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'github_models' ), true ) ) {
 			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
 		}
-		$result = API_Validator::verify_key( $provider );
+		$result = API_Validator::verify_key( $provider, $entry_id );
 		return rest_ensure_response( $result );
 	}
 

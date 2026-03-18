@@ -21,15 +21,18 @@ class API_Validator {
 	/**
 	 * Verify API key for a provider.
 	 *
-	 * @param string $provider openai, azure, google, github_models.
+	 * @param string $provider  openai, azure, google, github_models.
+	 * @param string $entry_id  Optional. When set, use credentials for this specific entry.
 	 * @return array{success: bool, message?: string}
 	 */
-	public static function verify_key( $provider ) {
+	public static function verify_key( $provider, $entry_id = '' ) {
 		$prov = Provider_Registry::get( $provider );
 		if ( ! $prov ) {
 			return array( 'success' => false, 'message' => __( 'Unknown provider.', 'alorbach-ai-gateway' ) );
 		}
-		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$creds = ! empty( $entry_id )
+			? API_Keys_Helper::get_credentials_for_entry( $entry_id )
+			: API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			return array( 'success' => false, 'message' => __( 'API key not configured for this provider.', 'alorbach-ai-gateway' ) );
 		}

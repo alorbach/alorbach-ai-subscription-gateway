@@ -171,6 +171,20 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Check if endpoint is a Foundry-style host (services, models, or inference).
+	 *
+	 * @param string $endpoint Endpoint URL.
+	 * @return bool
+	 */
+	private static function is_foundry_endpoint( $endpoint ) {
+		return (
+			strpos( $endpoint, 'services.ai.azure.com' ) !== false ||
+			strpos( $endpoint, 'models.ai.azure.com' ) !== false ||
+			strpos( $endpoint, 'inference.ai.azure.com' ) !== false
+		);
+	}
+
+	/**
 	 * {@inheritdoc}
 	 */
 	public function verify_key( $credentials ) {
@@ -183,14 +197,23 @@ class Azure_Provider extends Provider_Base {
 		if ( strpos( $endpoint, '.azure.com' ) === false ) {
 			return array( 'success' => false, 'message' => __( 'Endpoint must end with .azure.com (e.g. https://xxx.services.ai.azure.com)', 'alorbach-ai-gateway' ) );
 		}
-		$is_foundry = ( strpos( $endpoint, 'services.ai.azure.com' ) !== false );
+		$is_foundry = self::is_foundry_endpoint( $endpoint );
 		$urls       = $is_foundry
 			? array(
 				$endpoint . '/openai/v1/models',
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
 				$endpoint . '/openai/models?api-version=2024-10-21',
+				$endpoint . '/openai/deployments?api-version=2024-02-15-preview',
+				$endpoint . '/openai/deployments?api-version=2023-03-15-preview',
 			)
-			: array( $endpoint . '/openai/models?api-version=2024-10-21' );
-		$last_error = '';
+			: array(
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
+				$endpoint . '/openai/models?api-version=2024-10-21',
+			);
+		$last_error   = '';
+		$last_body    = '';
+		$last_url     = '';
+		$debug_enabled = (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' );
 		foreach ( $urls as $url ) {
 			$response = wp_remote_get(
 				$url,
@@ -201,6 +224,7 @@ class Azure_Provider extends Provider_Base {
 			);
 			if ( is_wp_error( $response ) ) {
 				$last_error = $response->get_error_message();
+				$last_url   = $url;
 				continue;
 			}
 			$code = wp_remote_retrieve_response_code( $response );
@@ -209,8 +233,17 @@ class Azure_Provider extends Provider_Base {
 			}
 			$body       = json_decode( wp_remote_retrieve_body( $response ), true );
 			$last_error = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid Azure configuration.', 'alorbach-ai-gateway' );
+			$last_body  = wp_remote_retrieve_body( $response );
+			$last_url   = $url;
 		}
-		return array( 'success' => false, 'message' => $last_error );
+		$result = array( 'success' => false, 'message' => $last_error );
+		if ( $debug_enabled ) {
+			$result['_debug'] = array(
+				'last_url'  => $last_url,
+				'last_body' => $last_body,
+			);
+		}
+		return $result;
 	}
 
 	/**
@@ -222,17 +255,21 @@ class Azure_Provider extends Provider_Base {
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
 			return array();
 		}
-		$is_foundry = ( strpos( $endpoint, 'services.ai.azure.com' ) !== false );
-		$deployments = $this->fetch_deployments( $endpoint, $api_key );
+		$is_foundry   = self::is_foundry_endpoint( $endpoint );
+		$deployments  = $this->fetch_deployments( $endpoint, $api_key );
 		if ( ! empty( $deployments ) ) {
 			return $deployments;
 		}
 		$urls = $is_foundry
 			? array(
 				$endpoint . '/openai/v1/models',
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
 				$endpoint . '/openai/models?api-version=2024-10-21',
 			)
-			: array( $endpoint . '/openai/models?api-version=2024-10-21' );
+			: array(
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
+				$endpoint . '/openai/models?api-version=2024-10-21',
+			);
 		foreach ( $urls as $url ) {
 			$response = wp_remote_get(
 				$url,
@@ -285,40 +322,44 @@ class Azure_Provider extends Provider_Base {
 	 * @return array|null Items or null.
 	 */
 	private function fetch_deployments( $endpoint, $api_key ) {
-		$url = $endpoint . '/openai/deployments?api-version=2023-03-15-preview';
-		$response = wp_remote_get(
-			$url,
-			array(
-				'headers' => array( 'api-key' => $api_key ),
-				'timeout' => 15,
-			)
-		);
-		if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) >= 400 ) {
-			return null;
-		}
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! isset( $body['data'] ) || ! is_array( $body['data'] ) ) {
-			return null;
-		}
-		$items = array();
-		foreach ( $body['data'] as $d ) {
-			$id = $d['id'] ?? $d['name'] ?? '';
-			if ( empty( $id ) ) {
+		$versions = array( '2024-02-15-preview', '2023-03-15-preview' );
+		foreach ( $versions as $api_version ) {
+			$url      = $endpoint . '/openai/deployments?api-version=' . $api_version;
+			$response = wp_remote_get(
+				$url,
+				array(
+					'headers' => array( 'api-key' => $api_key ),
+					'timeout' => 15,
+				)
+			);
+			if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) >= 400 ) {
 				continue;
 			}
-			$type = self::classify_openai_model( $id );
-			if ( $type === 'image' ) {
-				$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'image', 'capabilities' => array( 'text_to_image' ) );
-			} elseif ( $type === 'audio' ) {
-				$audio_caps = strpos( $id, '-tts' ) !== false ? array( 'text_to_audio' ) : array( 'audio_to_text' );
-				$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'audio', 'capabilities' => $audio_caps );
-			} elseif ( $type === 'video' ) {
-				$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'video', 'capabilities' => array( 'text_to_video' ) );
-			} else {
-				$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'text', 'capabilities' => self::infer_openai_capabilities( $id ) );
+			$body = json_decode( wp_remote_retrieve_body( $response ), true );
+			if ( ! isset( $body['data'] ) || ! is_array( $body['data'] ) ) {
+				continue;
 			}
+			$items = array();
+			foreach ( $body['data'] as $d ) {
+				$id = $d['id'] ?? $d['name'] ?? '';
+				if ( empty( $id ) ) {
+					continue;
+				}
+				$type = self::classify_openai_model( $id );
+				if ( $type === 'image' ) {
+					$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'image', 'capabilities' => array( 'text_to_image' ) );
+				} elseif ( $type === 'audio' ) {
+					$audio_caps = strpos( $id, '-tts' ) !== false ? array( 'text_to_audio' ) : array( 'audio_to_text' );
+					$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'audio', 'capabilities' => $audio_caps );
+				} elseif ( $type === 'video' ) {
+					$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'video', 'capabilities' => array( 'text_to_video' ) );
+				} else {
+					$items[] = array( 'id' => $id, 'provider' => 'azure', 'type' => 'text', 'capabilities' => self::infer_openai_capabilities( $id ) );
+				}
+			}
+			return ! empty( $items ) ? $items : null;
 		}
-		return ! empty( $items ) ? $items : null;
+		return null;
 	}
 
 	/**

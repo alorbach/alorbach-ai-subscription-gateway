@@ -800,6 +800,20 @@ class Model_Importer {
 	}
 
 	/**
+	 * Check if endpoint is a Foundry-style host (services, models, or inference).
+	 *
+	 * @param string $endpoint Endpoint URL.
+	 * @return bool
+	 */
+	private static function is_azure_foundry_endpoint( $endpoint ) {
+		return (
+			strpos( $endpoint, 'services.ai.azure.com' ) !== false ||
+			strpos( $endpoint, 'models.ai.azure.com' ) !== false ||
+			strpos( $endpoint, 'inference.ai.azure.com' ) !== false
+		);
+	}
+
+	/**
 	 * Fetch Azure Foundry deployments (deployed models only) via legacy endpoint.
 	 * Returns deployment names as model IDs. Falls back to null if endpoint unavailable.
 	 *
@@ -808,65 +822,71 @@ class Model_Importer {
 	 * @return array|null List of model items, or null if not available.
 	 */
 	private static function fetch_azure_foundry_deployments( $endpoint, $api_key ) {
-		$url = $endpoint . '/openai/deployments?api-version=2023-03-15-preview';
-		$response = wp_remote_get(
-			$url,
-			array(
-				'headers' => array( 'api-key' => $api_key ),
-				'timeout' => 15,
-			)
-		);
-		if ( is_wp_error( $response ) ) {
-			return null;
-		}
-		if ( wp_remote_retrieve_response_code( $response ) >= 400 ) {
-			return null;
-		}
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( ! isset( $body['data'] ) || ! is_array( $body['data'] ) ) {
-			return null;
-		}
-		$items = array();
-		foreach ( $body['data'] as $d ) {
-			$id = isset( $d['id'] ) ? $d['id'] : ( isset( $d['name'] ) ? $d['name'] : '' );
-			if ( empty( $id ) ) {
+		$versions = array( '2024-02-15-preview', '2023-03-15-preview' );
+		foreach ( $versions as $api_version ) {
+			$url      = $endpoint . '/openai/deployments?api-version=' . $api_version;
+			$response = wp_remote_get(
+				$url,
+				array(
+					'headers' => array( 'api-key' => $api_key ),
+					'timeout' => 15,
+				)
+			);
+			if ( is_wp_error( $response ) ) {
+				return null;
+			}
+			if ( wp_remote_retrieve_response_code( $response ) >= 400 ) {
 				continue;
 			}
-			$type = self::classify_openai_model( $id );
-			if ( $type === 'image' ) {
-				$items[] = array(
-					'id'           => $id,
-					'provider'     => 'azure',
-					'type'         => 'image',
-					'capabilities' => array( 'text_to_image' ),
-				);
-			} elseif ( $type === 'audio' ) {
-				$audio_caps = strpos( $id, '-tts' ) !== false
-					? array( 'text_to_audio' )
-					: array( 'audio_to_text' );
-				$items[] = array(
-					'id'           => $id,
-					'provider'     => 'azure',
-					'type'         => 'audio',
-					'capabilities' => $audio_caps,
-				);
-			} elseif ( $type === 'video' ) {
-				$items[] = array(
-					'id'           => $id,
-					'provider'     => 'azure',
-					'type'         => 'video',
-					'capabilities' => array( 'text_to_video' ),
-				);
-			} else {
-				$items[] = array(
-					'id'           => $id,
-					'provider'     => 'azure',
-					'type'         => 'text',
-					'capabilities' => self::infer_openai_capabilities( $id ),
-				);
+			$body = json_decode( wp_remote_retrieve_body( $response ), true );
+			if ( ! isset( $body['data'] ) || ! is_array( $body['data'] ) ) {
+				continue;
+			}
+			$items = array();
+			foreach ( $body['data'] as $d ) {
+				$id = isset( $d['id'] ) ? $d['id'] : ( isset( $d['name'] ) ? $d['name'] : '' );
+				if ( empty( $id ) ) {
+					continue;
+				}
+				$type = self::classify_openai_model( $id );
+				if ( $type === 'image' ) {
+					$items[] = array(
+						'id'           => $id,
+						'provider'     => 'azure',
+						'type'         => 'image',
+						'capabilities' => array( 'text_to_image' ),
+					);
+				} elseif ( $type === 'audio' ) {
+					$audio_caps = strpos( $id, '-tts' ) !== false
+						? array( 'text_to_audio' )
+						: array( 'audio_to_text' );
+					$items[] = array(
+						'id'           => $id,
+						'provider'     => 'azure',
+						'type'         => 'audio',
+						'capabilities' => $audio_caps,
+					);
+				} elseif ( $type === 'video' ) {
+					$items[] = array(
+						'id'           => $id,
+						'provider'     => 'azure',
+						'type'         => 'video',
+						'capabilities' => array( 'text_to_video' ),
+					);
+				} else {
+					$items[] = array(
+						'id'           => $id,
+						'provider'     => 'azure',
+						'type'         => 'text',
+						'capabilities' => self::infer_openai_capabilities( $id ),
+					);
+				}
+			}
+			if ( ! empty( $items ) ) {
+				return $items;
 			}
 		}
-		return $items;
+		return null;
 	}
 
 	/**
@@ -878,8 +898,8 @@ class Model_Importer {
 	 * @return array|WP_Error List of model items.
 	 */
 	private static function fetch_azure_models_detailed( $endpoint, $api_key ) {
-		$endpoint = rtrim( trim( $endpoint ), '/' );
-		$is_foundry = ( strpos( $endpoint, 'services.ai.azure.com' ) !== false );
+		$endpoint   = rtrim( trim( $endpoint ), '/' );
+		$is_foundry = self::is_azure_foundry_endpoint( $endpoint );
 
 		// For Foundry: try deployments first (deployed-only), then fall back to models catalog.
 		if ( $is_foundry ) {
@@ -892,9 +912,13 @@ class Model_Importer {
 		$urls = $is_foundry
 			? array(
 				$endpoint . '/openai/v1/models',
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
 				$endpoint . '/openai/models?api-version=2024-10-21',
 			)
-			: array( $endpoint . '/openai/models?api-version=2024-10-21' );
+			: array(
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
+				$endpoint . '/openai/models?api-version=2024-10-21',
+			);
 
 		foreach ( $urls as $url ) {
 			$response = wp_remote_get(
@@ -1043,8 +1067,8 @@ class Model_Importer {
 	 * @return array|WP_Error List of model IDs.
 	 */
 	private static function fetch_azure_models( $endpoint, $api_key ) {
-		$endpoint = rtrim( trim( $endpoint ), '/' );
-		$is_foundry = ( strpos( $endpoint, 'services.ai.azure.com' ) !== false );
+		$endpoint   = rtrim( trim( $endpoint ), '/' );
+		$is_foundry = self::is_azure_foundry_endpoint( $endpoint );
 
 		// For Foundry: try deployments first (deployed-only).
 		if ( $is_foundry ) {
@@ -1057,9 +1081,13 @@ class Model_Importer {
 		$urls = $is_foundry
 			? array(
 				$endpoint . '/openai/v1/models',
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
 				$endpoint . '/openai/models?api-version=2024-10-21',
 			)
-			: array( $endpoint . '/openai/models?api-version=2024-10-21' );
+			: array(
+				$endpoint . '/openai/models?api-version=2024-12-01-preview',
+				$endpoint . '/openai/models?api-version=2024-10-21',
+			);
 
 		foreach ( $urls as $url ) {
 			$response = wp_remote_get(

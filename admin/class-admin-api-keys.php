@@ -169,13 +169,16 @@ class Admin_API_Keys {
 				if (testBtn) {
 					testBtn.addEventListener('click', function() {
 						var provider = typeSel ? typeSel.value : 'openai';
+						var entryId = row.getAttribute('data-entry-id') || '';
 						var resultEl = row.querySelector('.alorbach-test-result');
 						resultEl.textContent = '...';
 						resultEl.style.color = '';
+						var body = { provider: provider };
+						if (entryId) body.entry_id = entryId;
 						fetch(restUrl, {
 							method: 'POST',
 							headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
-							body: JSON.stringify({ provider: provider })
+							body: JSON.stringify(body)
 						}).then(function(r) { return r.json(); }).then(function(data) {
 							resultEl.textContent = data.success ? okText : (data.message || errText);
 							resultEl.style.color = data.success ? 'green' : 'red';
@@ -240,7 +243,7 @@ class Admin_API_Keys {
 		$free     = ! empty( $entry['free_pass_through'] );
 		$key_id   = 'key-' . ( is_numeric( $index ) ? $index : str_replace( '{{INDEX}}', 'tpl', $index ) );
 		?>
-		<tr data-type="<?php echo esc_attr( $type ); ?>">
+		<tr data-type="<?php echo esc_attr( $type ); ?>" data-entry-id="<?php echo esc_attr( $id ); ?>">
 			<td class="entry-type">
 				<input type="hidden" name="entries[<?php echo esc_attr( $index ); ?>][id]" value="<?php echo esc_attr( $id ); ?>" />
 				<select name="entries[<?php echo esc_attr( $index ); ?>][type]" class="alorbach-type-select">
