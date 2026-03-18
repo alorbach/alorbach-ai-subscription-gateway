@@ -447,8 +447,10 @@ class API_Client {
 	 * @return array|WP_Error Response with data[url] or error.
 	 */
 	public static function video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
-		// Video polling can take several minutes; disable the PHP execution time limit.
-		@set_time_limit( 0 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		$max_polls     = (int) apply_filters( 'alorbach_video_poll_max', 60 );
+		$poll_interval = (int) apply_filters( 'alorbach_video_poll_interval', 5 );
+		// Set a bounded execution time limit covering the full polling window.
+		set_time_limit( $max_polls * $poll_interval + 30 );
 		$create_result = self::create_video( $prompt, $model, $size, $duration_seconds );
 		if ( is_wp_error( $create_result ) ) {
 			return $create_result;
@@ -456,8 +458,6 @@ class API_Client {
 		$video_id  = $create_result['id'] ?? '';
 		$provider  = $create_result['provider'] ?? 'openai';
 		$creds     = API_Keys_Helper::get_credentials_for_provider( $provider );
-		$max_polls = 60;
-		$poll_interval = 5;
 
 		// Azure Sora 2 and OpenAI both use /v1/videos endpoint; Azure uses endpoint + api-key.
 		$base_url = ( $provider === 'azure' && ! empty( $creds['endpoint'] ) )
@@ -547,6 +547,7 @@ class API_Client {
 				return new \WP_Error( 'api_error', __( 'Could not retrieve video content URL from API.', 'alorbach-ai-gateway' ), $err_data );
 			}
 		}
+		do_action( 'alorbach_video_poll_timeout', $video_id, $provider );
 		return new \WP_Error( 'timeout', __( 'Video generation timed out. The video may still be processing.', 'alorbach-ai-gateway' ) );
 	}
 

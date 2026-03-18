@@ -174,7 +174,7 @@ class API_Validator {
 				return array( 'success' => false, 'message' => __( 'Could not create test audio.', 'alorbach-ai-gateway' ) );
 			}
 			$response = API_Client::transcribe( $tmp, $model );
-		wp_delete_file( $tmp );
+			wp_delete_file( $tmp );
 			if ( is_wp_error( $response ) ) {
 				return array( 'success' => false, 'message' => $response->get_error_message() );
 			}

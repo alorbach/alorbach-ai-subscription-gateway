@@ -196,7 +196,12 @@ class OpenAI_Provider extends Provider_Base {
 		$body .= '--' . $boundary . "\r\n";
 		$body .= 'Content-Disposition: form-data; name="file"; filename="' . basename( $file_path ) . '"' . "\r\n";
 		$body .= 'Content-Type: application/octet-stream' . "\r\n\r\n";
-		$body .= file_get_contents( $file_path ) . "\r\n";
+		global $wp_filesystem;
+		if ( ! $wp_filesystem ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			WP_Filesystem();
+		}
+		$body .= $wp_filesystem->get_contents( $file_path ) . "\r\n";
 		$body .= '--' . $boundary . '--' . "\r\n";
 		return array(
 			'url'     => 'https://api.openai.com/v1/audio/transcriptions',

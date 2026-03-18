@@ -23,7 +23,7 @@ class Google_Provider extends Provider_Base {
 	 */
 	private static $text_prefixes = array( 'gemini-' );
 
-/**
+	/**
 	 * {@inheritdoc}
 	 */
 	public function get_type() {

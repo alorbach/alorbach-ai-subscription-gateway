@@ -108,7 +108,8 @@ class Azure_Retail_Prices {
 			}
 
 			$all = array_merge( $all, $body['Items'] );
-			$url = isset( $body['NextPageLink'] ) ? $body['NextPageLink'] : null;
+			$next = isset( $body['NextPageLink'] ) ? $body['NextPageLink'] : null;
+			$url  = ( is_string( $next ) && strpos( $next, 'https://prices.azure.com/' ) === 0 ) ? $next : null;
 		}
 
 		return $all;

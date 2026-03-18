@@ -247,6 +247,28 @@ class Cost_Matrix {
 	 * @return array{input: int, output: int, cached: int}
 	 */
 	public static function get_import_costs( $model ) {
+		$known = array(
+			'gpt-4o'           => array( 'input' => 2500000,  'output' => 10000000, 'cached' => 250000 ),
+			'gpt-4o-mini'      => array( 'input' => 150000,   'output' => 600000,   'cached' => 15000 ),
+			'gpt-4.1'          => array( 'input' => 2000000,  'output' => 8000000,  'cached' => 200000 ),
+			'gpt-4.1-mini'     => array( 'input' => 400000,   'output' => 1600000,  'cached' => 40000 ),
+			'gpt-4.1-nano'     => array( 'input' => 100000,   'output' => 400000,   'cached' => 10000 ),
+			'gpt-5'            => array( 'input' => 1250000,  'output' => 10000000, 'cached' => 125000 ),
+			'gpt-5-mini'       => array( 'input' => 250000,   'output' => 2000000,  'cached' => 25000 ),
+			'gpt-5-nano'       => array( 'input' => 50000,    'output' => 400000,   'cached' => 5000 ),
+			'o1'               => array( 'input' => 15000000, 'output' => 60000000, 'cached' => 1500000 ),
+			'o1-mini'          => array( 'input' => 3000000,  'output' => 12000000, 'cached' => 300000 ),
+			'o3-pro'           => array( 'input' => 20000000, 'output' => 80000000, 'cached' => 2000000 ),
+			'o4-mini'          => array( 'input' => 1100000,  'output' => 4400000,  'cached' => 110000 ),
+			'gemini-2.0-flash' => array( 'input' => 75000,    'output' => 300000,   'cached' => 7500 ),
+			'gemini-2.5-flash' => array( 'input' => 75000,    'output' => 300000,   'cached' => 7500 ),
+			'gemini-2.5-pro'   => array( 'input' => 1250000,  'output' => 5000000,  'cached' => 125000 ),
+			'gemini-1.5-flash' => array( 'input' => 75000,    'output' => 300000,   'cached' => 7500 ),
+			'gemini-1.5-pro'   => array( 'input' => 1250000,  'output' => 5000000,  'cached' => 125000 ),
+		);
+		if ( isset( $known[ $model ] ) ) {
+			return $known[ $model ];
+		}
 		return array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
 	}
 

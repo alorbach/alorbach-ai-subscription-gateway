@@ -54,3 +54,4 @@ delete_option( 'alorbach_monthly_quota_uc' );
 delete_option( 'alorbach_model_max_tokens' );
 delete_option( 'alorbach_demo_max_tokens_options' );
 delete_option( 'alorbach_demo_default_max_tokens' );
+delete_option( 'alorbach_azure_prices_cache' );

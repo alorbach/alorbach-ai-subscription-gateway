@@ -20,7 +20,7 @@ class Admin_Usage {
 	 * Render Usage page.
 	 */
 	public static function render() {
-		$users = get_users( array( 'number' => 100, 'orderby' => 'login' ) );
+		$users = get_users( array( 'number' => -1, 'orderby' => 'login' ) );
 		$month = gmdate( 'Y-m' );
 		?>
 		<div class="wrap">
