@@ -136,7 +136,7 @@ class Ledger {
 		global $wpdb;
 		$table = self::get_table_name();
 		$sum   = $wpdb->get_var( $wpdb->prepare(
-			"SELECT COALESCE(ABS(SUM(uc_amount)), 0) FROM {$table} WHERE user_id = %d AND uc_amount < 0 AND created_at >= %s AND created_at < %s",
+			"SELECT COALESCE(ABS(SUM(uc_amount)), 0) FROM {$table} WHERE user_id = %d AND uc_amount < 0 AND created_at >= %s AND created_at <= %s",
 			$user_id,
 			$start . ' 00:00:00',
 			$end . ' 23:59:59'
@@ -154,6 +154,49 @@ class Ledger {
 		$start = gmdate( 'Y-m-01' );
 		$end   = gmdate( 'Y-m-t' );
 		return self::get_usage( $user_id, $start, $end );
+	}
+
+	/**
+	 * Get balances for all users in a single query.
+	 *
+	 * @return array Map of user_id (int) => balance (int) in UC.
+	 */
+	public static function get_all_balances() {
+		global $wpdb;
+		$table = self::get_table_name();
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is a plugin constant.
+		$rows  = $wpdb->get_results( "SELECT user_id, COALESCE(SUM(uc_amount), 0) AS balance FROM {$table} WHERE user_id > 0 GROUP BY user_id", ARRAY_A );
+		$result = array();
+		if ( $rows ) {
+			foreach ( $rows as $row ) {
+				$result[ (int) $row['user_id'] ] = (int) $row['balance'];
+			}
+		}
+		return $result;
+	}
+
+	/**
+	 * Get usage this month for all users in a single query.
+	 *
+	 * @return array Map of user_id (int) => usage (int) in UC.
+	 */
+	public static function get_all_usage_this_month() {
+		global $wpdb;
+		$table = self::get_table_name();
+		$start = gmdate( 'Y-m-01' ) . ' 00:00:00';
+		$end   = gmdate( 'Y-m-t' ) . ' 23:59:59';
+		$rows  = $wpdb->get_results( $wpdb->prepare(
+			"SELECT user_id, COALESCE(ABS(SUM(uc_amount)), 0) AS usage_uc FROM {$table} WHERE user_id > 0 AND uc_amount < 0 AND created_at >= %s AND created_at <= %s GROUP BY user_id",
+			$start,
+			$end
+		), ARRAY_A );
+		$result = array();
+		if ( $rows ) {
+			foreach ( $rows as $row ) {
+				$result[ (int) $row['user_id'] ] = (int) $row['usage_uc'];
+			}
+		}
+		return $result;
 	}
 
 	/**
@@ -205,6 +248,7 @@ class Ledger {
 				...$values
 			) );
 		} else {
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name is a plugin constant, not user input.
 			$total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table}" );
 		}
 

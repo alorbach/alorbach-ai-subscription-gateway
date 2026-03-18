@@ -22,6 +22,7 @@ class Admin_Usage {
 	public static function render() {
 		$users = get_users( array( 'number' => -1, 'orderby' => 'login' ) );
 		$month = gmdate( 'Y-m' );
+		$all_usage = \Alorbach\AIGateway\Ledger::get_all_usage_this_month();
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Usage (Current Month)', 'alorbach-ai-gateway' ); ?></h1>
@@ -36,7 +37,7 @@ class Admin_Usage {
 				</thead>
 				<tbody>
 					<?php foreach ( $users as $user ) :
-						$usage  = \Alorbach\AIGateway\Ledger::get_usage_this_month( $user->ID );
+					$usage   = isset( $all_usage[ $user->ID ] ) ? $all_usage[ $user->ID ] : 0;
 						$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $usage );
 						?>
 						<tr>

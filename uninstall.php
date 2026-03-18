@@ -14,6 +14,7 @@ $table_name = $wpdb->prefix . 'alorbach_ledger';
 $wpdb->query( "DROP TABLE IF EXISTS {$table_name}" );
 
 delete_option( 'alorbach_api_keys' );
+delete_option( 'alorbach_api_keys_entries' );
 delete_option( 'alorbach_cost_matrix' );
 delete_option( 'alorbach_plans' );
 delete_option( 'alorbach_product_to_plan' );

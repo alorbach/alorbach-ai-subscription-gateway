@@ -695,9 +695,8 @@ class REST_Proxy {
 		if ( $event_id && Ledger::signature_exists( $sig_key ) ) {
 			return rest_ensure_response( array( 'received' => true ) );
 		}
-		if ( $event_id ) {
-			Ledger::insert_transaction( 0, 'stripe_idempotency', null, 0, null, null, null, $sig_key );
-		}
+		// Note: the idempotency row is stored only after successful processing (below)
+		// so that a DB failure on credit insert allows Stripe to retry the webhook.
 
 		do_action( 'alorbach_stripe_webhook', $event['type'], $event );
 
@@ -717,6 +716,7 @@ class REST_Proxy {
 					$inserted = Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
 					if ( ! $inserted ) {
 						// Signal failure so Stripe automatically retries the webhook.
+						// Do NOT store the idempotency row so the retry is not blocked.
 						return new \WP_Error( 'db_error', __( 'Failed to record transaction. Please retry.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
 					}
 					do_action( 'alorbach_credits_added', $user_id, $credits, 'stripe' );
@@ -726,6 +726,12 @@ class REST_Proxy {
 			do_action( 'alorbach_stripe_payment_failed', $event );
 		} elseif ( $event['type'] === 'customer.subscription.deleted' ) {
 			do_action( 'alorbach_stripe_subscription_deleted', $event );
+		}
+
+		// Store idempotency row only on the success path so that a failed credit
+		// insert (above) allows Stripe to retry the webhook without being blocked.
+		if ( $event_id ) {
+			Ledger::insert_transaction( 0, 'stripe_idempotency', null, 0, null, null, null, $sig_key );
 		}
 
 		return rest_ensure_response( array( 'received' => true ) );
@@ -1220,6 +1226,11 @@ class REST_Proxy {
 		$steps                   = array();
 		$last_response           = null;
 		$current_messages        = $messages;
+
+		// Mark this multi-step request as in-flight so any retry from the client
+		// hits the outer signature_exists() check and receives 409 instead of
+		// re-executing (and double-billing) already-completed steps.
+		Ledger::insert_transaction( $user_id, 'chat_deduction', $model, 0, null, null, null, $base_signature );
 
 		for ( $step = 1; $step <= $max_steps; $step++ ) {
 			// Abort gracefully if we are approaching the wall-clock deadline.

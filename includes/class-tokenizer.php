@@ -78,13 +78,28 @@ class Tokenizer {
 	/**
 	 * Count tokens for messages array (OpenAI format).
 	 *
+	 * Uses OpenAI's per-message accounting: each message costs 3 overhead tokens
+	 * plus the tokens in its role and content. A 3-token reply primer is added.
+	 * This matches the formula described in the OpenAI cookbook and avoids the
+	 * over-count caused by JSON-encoding the whole array.
+	 *
 	 * @param array  $messages Messages array.
 	 * @param string $model    Model name.
 	 * @return int Token count.
 	 */
 	public static function count_messages_tokens( $messages, $model = 'gpt-4.1-mini' ) {
-		$str = wp_json_encode( $messages );
-		return self::count_tokens( $str, $model );
+		$total = 3; // reply primer
+		foreach ( $messages as $message ) {
+			$role    = isset( $message['role'] ) ? (string) $message['role'] : '';
+			$content = isset( $message['content'] ) ? $message['content'] : '';
+			if ( is_array( $content ) ) {
+				$content = wp_json_encode( $content );
+			}
+			$total += 3; // per-message overhead
+			$total += self::count_tokens( $role, $model );
+			$total += self::count_tokens( (string) $content, $model );
+		}
+		return $total;
 	}
 
 	/**

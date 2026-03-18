@@ -121,6 +121,9 @@ class Google_Provider extends Provider_Base {
 			if ( $role === 'system' ) {
 				if ( ! isset( $body['systemInstruction'] ) ) {
 					$body['systemInstruction'] = array( 'parts' => array( array( 'text' => $content ) ) );
+				} else {
+					// Append additional system messages into the same systemInstruction.
+					$body['systemInstruction']['parts'][] = array( 'text' => $content );
 				}
 				continue;
 			}

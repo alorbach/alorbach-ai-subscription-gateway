@@ -141,7 +141,12 @@ class OpenAI_Provider extends Provider_Base {
 		}
 		// gpt-audio uses chat completions with audio input (audio → text), not audio/transcriptions.
 		if ( strpos( $model, 'gpt-audio' ) === 0 ) {
-			$audio_bytes = is_readable( $file_path ) ? file_get_contents( $file_path ) : false;
+			global $wp_filesystem;
+			if ( ! $wp_filesystem ) {
+				require_once ABSPATH . 'wp-admin/includes/file.php';
+				WP_Filesystem();
+			}
+			$audio_bytes = $wp_filesystem ? $wp_filesystem->get_contents( $file_path ) : false;
 			if ( $audio_bytes === false || strlen( $audio_bytes ) < 100 ) {
 				return new \WP_Error( 'read_error', __( 'Could not read audio file or file is too small.', 'alorbach-ai-gateway' ) );
 			}

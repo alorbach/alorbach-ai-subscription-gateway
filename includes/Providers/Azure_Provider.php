@@ -124,7 +124,6 @@ class Azure_Provider extends Provider_Base {
 		}
 		$model = $body['model'] ?? 'gpt-4o';
 		$body  = self::normalize_chat_body( $body, $model );
-		$body  = $body;
 		unset( $body['model'] );
 		$url = $endpoint . '/openai/deployments/' . $model . '/chat/completions?api-version=2024-10-21';
 		return array(
@@ -230,7 +229,12 @@ class Azure_Provider extends Provider_Base {
 		}
 		// gpt-audio-1.5 uses chat completions with audio input (audio → text), not audioTranscriptions.
 		if ( strpos( $model, 'gpt-audio' ) === 0 ) {
-			$audio_bytes = is_readable( $file_path ) ? file_get_contents( $file_path ) : false;
+			global $wp_filesystem;
+			if ( ! $wp_filesystem ) {
+				require_once ABSPATH . 'wp-admin/includes/file.php';
+				WP_Filesystem();
+			}
+			$audio_bytes = $wp_filesystem ? $wp_filesystem->get_contents( $file_path ) : false;
 			if ( $audio_bytes === false || strlen( $audio_bytes ) < 100 ) {
 				return new \WP_Error( 'read_error', __( 'Could not read audio file or file is too small.', 'alorbach-ai-gateway' ) );
 			}

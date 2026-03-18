@@ -63,6 +63,7 @@ class Admin_User_Balance {
 		}
 
 		$users = get_users( array( 'number' => -1, 'orderby' => 'login' ) );
+		$all_balances = \Alorbach\AIGateway\Ledger::get_all_balances();
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'User Balance', 'alorbach-ai-gateway' ); ?></h1>
@@ -79,7 +80,7 @@ class Admin_User_Balance {
 				</thead>
 				<tbody>
 					<?php foreach ( $users as $user ) :
-						$balance = \Alorbach\AIGateway\Ledger::get_balance( $user->ID );
+						$balance = isset( $all_balances[ $user->ID ] ) ? $all_balances[ $user->ID ] : 0;
 						$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $balance );
 						?>
 						<tr>
