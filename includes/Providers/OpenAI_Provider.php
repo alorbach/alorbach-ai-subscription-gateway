@@ -254,23 +254,11 @@ class OpenAI_Provider extends Provider_Base {
 		if ( empty( $api_key ) ) {
 			return array( 'success' => false, 'message' => __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$response = wp_remote_get(
+		return self::make_verified_get(
 			'https://api.openai.com/v1/models',
-			array(
-				'headers' => array( 'Authorization' => 'Bearer ' . $api_key ),
-				'timeout' => 15,
-			)
+			array( 'Authorization' => 'Bearer ' . $api_key ),
+			__( 'Invalid API key.', 'alorbach-ai-gateway' )
 		);
-		if ( is_wp_error( $response ) ) {
-			return array( 'success' => false, 'message' => $response->get_error_message() );
-		}
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code >= 400 ) {
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg  = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid API key.', 'alorbach-ai-gateway' );
-			return array( 'success' => false, 'message' => $msg );
-		}
-		return array( 'success' => true );
 	}
 
 	/**

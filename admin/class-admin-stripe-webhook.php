@@ -20,10 +20,10 @@ class Admin_Stripe_Webhook {
 	 * Render Stripe Webhook page.
 	 */
 	public static function render() {
-		if ( isset( $_POST['alorbach_stripe_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_stripe_nonce'] ) ), 'alorbach_stripe' ) ) {
+		if ( Admin_Helper::verify_post_nonce( 'alorbach_stripe_nonce', 'alorbach_stripe' ) ) {
 			$secret = isset( $_POST['webhook_secret'] ) ? sanitize_text_field( wp_unslash( $_POST['webhook_secret'] ) ) : '';
 			update_option( 'alorbach_stripe_webhook_secret', $secret );
-			echo '<div class="notice notice-success"><p>' . esc_html__( 'Stripe webhook secret saved.', 'alorbach-ai-gateway' ) . '</p></div>';
+			Admin_Helper::render_notice( __( 'Stripe webhook secret saved.', 'alorbach-ai-gateway' ) );
 		}
 
 		$webhook_url = rest_url( 'alorbach/v1/stripe-webhook' );

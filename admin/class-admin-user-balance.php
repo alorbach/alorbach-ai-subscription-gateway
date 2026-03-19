@@ -32,7 +32,7 @@ class Admin_User_Balance {
 
 		$filter_user_id = isset( $_GET['user_id'] ) ? (int) $_GET['user_id'] : null;
 
-		if ( isset( $_POST['alorbach_balance_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_balance_nonce'] ) ), 'alorbach_balance' ) ) {
+		if ( Admin_Helper::verify_post_nonce( 'alorbach_balance_nonce', 'alorbach_balance' ) ) {
 			$user_id     = isset( $_POST['user_id'] ) ? (int) $_POST['user_id'] : 0;
 			$amount      = isset( $_POST['amount'] ) ? (float) $_POST['amount'] : 0;
 			$amount_unit = isset( $_POST['amount_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['amount_unit'] ) ) : 'uc';
@@ -57,13 +57,14 @@ class Admin_User_Balance {
 				if ( $uc > 0 ) {
 					$uc = $action === 'subtract' ? -$uc : $uc;
 					\Alorbach\AIGateway\Ledger::insert_transaction( $user_id, 'admin_credit', null, $uc );
-					echo '<div class="notice notice-success"><p>' . esc_html__( 'Balance updated.', 'alorbach-ai-gateway' ) . '</p></div>';
+					Admin_Helper::render_notice( __( 'Balance updated.', 'alorbach-ai-gateway' ) );
 				}
 			}
 		}
 
-		$users = get_users( array( 'number' => -1, 'orderby' => 'login' ) );
+		$users        = get_users( array( 'number' => -1, 'orderby' => 'login' ) );
 		$all_balances = \Alorbach\AIGateway\Ledger::get_all_balances();
+		$all_usage    = \Alorbach\AIGateway\Ledger::get_all_usage_this_month();
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'User Balance', 'alorbach-ai-gateway' ); ?></h1>
@@ -110,6 +111,30 @@ class Admin_User_Balance {
 									<input type="submit" class="button button-small" value="<?php esc_attr_e( 'Apply', 'alorbach-ai-gateway' ); ?>" />
 								</form>
 							</td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+
+			<h2><?php esc_html_e( 'Monthly Usage', 'alorbach-ai-gateway' ); ?></h2>
+			<p><?php echo esc_html( sprintf( __( 'Month: %s', 'alorbach-ai-gateway' ), gmdate( 'Y-m' ) ) ); ?></p>
+			<table class="widefat striped">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'User', 'alorbach-ai-gateway' ); ?></th>
+						<th><?php esc_html_e( 'Usage (UC)', 'alorbach-ai-gateway' ); ?></th>
+						<th><?php esc_html_e( 'Usage (Credits)', 'alorbach-ai-gateway' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $users as $user ) :
+						$usage   = isset( $all_usage[ $user->ID ] ) ? $all_usage[ $user->ID ] : 0;
+						$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $usage );
+						?>
+						<tr>
+							<td><?php echo esc_html( $user->user_login ); ?> (<?php echo esc_html( $user->user_email ); ?>)</td>
+							<td><?php echo esc_html( number_format_i18n( $usage ) ); ?></td>
+							<td><?php echo esc_html( number_format_i18n( $credits, 2 ) ); ?></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>
@@ -179,7 +204,7 @@ class Admin_User_Balance {
 							<tr>
 								<td><?php echo esc_html( $row['transaction_id'] ); ?></td>
 								<td><?php echo esc_html( $user_login ? $user_login . ' (' . $user_email . ')' : $row['user_id'] ); ?></td>
-								<td><?php echo esc_html( $row['transaction_type'] ); ?></td>
+								<td><?php echo esc_html( Admin_Helper::get_transaction_type_label( $row['transaction_type'] ) ); ?></td>
 								<td><?php echo esc_html( $row['model_used'] ?? '—' ); ?></td>
 								<td><?php echo $api_cost_uc !== null && $api_cost_uc !== '' ? esc_html( number_format_i18n( (int) $api_cost_uc ) ) : '—'; ?></td>
 								<td><?php echo esc_html( number_format_i18n( $row['uc_amount'] ) ); ?></td>
@@ -189,30 +214,13 @@ class Admin_User_Balance {
 						<?php endforeach; ?>
 					</tbody>
 				</table>
-				<?php if ( $pages > 1 ) : ?>
-					<div class="tablenav bottom">
-						<div class="tablenav-pages">
-							<span class="displaying-num"><?php echo esc_html( sprintf( _n( '%s item', '%s items', $total, 'alorbach-ai-gateway' ), number_format_i18n( $total ) ) ); ?></span>
-							<span class="pagination-links">
-								<?php
-								$pagination_base = add_query_arg( 'page', 'alorbach-user-balance', admin_url( 'admin.php' ) );
-								if ( $filter_user_id > 0 ) {
-									$pagination_base = add_query_arg( 'user_id', $filter_user_id, $pagination_base );
-								}
-								if ( $page > 1 ) {
-									$prev_url = add_query_arg( 'paged', $page - 1, $pagination_base );
-									echo '<a class="prev-page button" href="' . esc_url( $prev_url ) . '">' . esc_html__( '&laquo;', 'alorbach-ai-gateway' ) . '</a> ';
-								}
-								echo '<span class="paging-input">' . esc_html( sprintf( __( 'Page %1$d of %2$d', 'alorbach-ai-gateway' ), $page, $pages ) ) . '</span>';
-								if ( $page < $pages ) {
-									$next_url = add_query_arg( 'paged', $page + 1, $pagination_base );
-									echo ' <a class="next-page button" href="' . esc_url( $next_url ) . '">' . esc_html__( '&raquo;', 'alorbach-ai-gateway' ) . '</a>';
-								}
-								?>
-							</span>
-						</div>
-					</div>
-				<?php endif; ?>
+				<?php
+				$pagination_base = add_query_arg( 'page', 'alorbach-user-balance', admin_url( 'admin.php' ) );
+				if ( $filter_user_id > 0 ) {
+					$pagination_base = add_query_arg( 'user_id', $filter_user_id, $pagination_base );
+				}
+				Admin_Helper::render_pagination( $page, $pages, $total, $pagination_base );
+				?>
 			<?php endif; ?>
 		</div>
 		<?php

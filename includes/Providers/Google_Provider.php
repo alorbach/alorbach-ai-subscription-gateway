@@ -169,18 +169,11 @@ class Google_Provider extends Provider_Base {
 		if ( empty( $api_key ) ) {
 			return array( 'success' => false, 'message' => __( 'Google API key not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$url = 'https://generativelanguage.googleapis.com/v1beta/models?key=' . $api_key;
-		$response = wp_remote_get( $url, array( 'timeout' => 15 ) );
-		if ( is_wp_error( $response ) ) {
-			return array( 'success' => false, 'message' => $response->get_error_message() );
-		}
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code >= 400 ) {
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg  = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid API key.', 'alorbach-ai-gateway' );
-			return array( 'success' => false, 'message' => $msg );
-		}
-		return array( 'success' => true );
+		return self::make_verified_get(
+			'https://generativelanguage.googleapis.com/v1beta/models?key=' . $api_key,
+			array(),
+			__( 'Invalid API key.', 'alorbach-ai-gateway' )
+		);
 	}
 
 	/**

@@ -951,9 +951,8 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_api_key( $request ) {
-		$json     = $request->get_json_params();
-		$provider = $request->get_param( 'provider' ) ?: ( isset( $json['provider'] ) ? sanitize_text_field( $json['provider'] ) : '' );
-		$entry_id = $request->get_param( 'entry_id' ) ?: ( isset( $json['entry_id'] ) ? sanitize_text_field( $json['entry_id'] ) : '' );
+		$provider = self::get_json_or_query_param( $request, 'provider' );
+		$entry_id = self::get_json_or_query_param( $request, 'entry_id' );
 		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'github_models' ), true ) ) {
 			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
 		}
@@ -968,16 +967,9 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_text( $request ) {
-		$params = $request->get_json_params();
-		if ( is_array( $params ) ) {
-			$provider = isset( $params['provider'] ) ? sanitize_text_field( $params['provider'] ) : '';
-			$model    = isset( $params['model'] ) ? sanitize_text_field( $params['model'] ) : '';
-			$entry_id = isset( $params['entry_id'] ) ? sanitize_text_field( $params['entry_id'] ) : '';
-		} else {
-			$provider = $request->get_param( 'provider' ) ?: '';
-			$model    = $request->get_param( 'model' ) ?: '';
-			$entry_id = $request->get_param( 'entry_id' ) ?: '';
-		}
+		$provider = self::get_json_or_query_param( $request, 'provider' );
+		$model    = self::get_json_or_query_param( $request, 'model' );
+		$entry_id = self::get_json_or_query_param( $request, 'entry_id' );
 		$result = API_Validator::verify_text_model( $provider, $model, $entry_id );
 		if ( (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' ) && is_array( $result ) ) {
 			$result['_debug'] = array(
@@ -996,14 +988,8 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_image( $request ) {
-		$params = $request->get_json_params();
-		if ( is_array( $params ) ) {
-			$size  = isset( $params['size'] ) ? sanitize_text_field( $params['size'] ) : '1024x1024';
-			$model = isset( $params['model'] ) ? sanitize_text_field( $params['model'] ) : '';
-		} else {
-			$size  = $request->get_param( 'size' ) ?: '1024x1024';
-			$model = $request->get_param( 'model' ) ?: '';
-		}
+		$size  = self::get_json_or_query_param( $request, 'size', '1024x1024' );
+		$model = self::get_json_or_query_param( $request, 'model' );
 		$result = API_Validator::verify_image_model( $size, $model );
 		return rest_ensure_response( $result );
 	}
@@ -1016,8 +1002,7 @@ class REST_Proxy {
 	 */
 	public static function admin_verify_audio( $request ) {
 		try {
-			$params = $request->get_json_params();
-			$model  = ( is_array( $params ) && isset( $params['model'] ) ) ? sanitize_text_field( $params['model'] ) : ( $request->get_param( 'model' ) ?: 'whisper-1' );
+			$model  = self::get_json_or_query_param( $request, 'model', 'whisper-1' );
 			$result = API_Validator::verify_audio_model( $model );
 			return rest_ensure_response( $result );
 		} catch ( \Throwable $e ) {
@@ -1035,8 +1020,7 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_video( $request ) {
-		$params = $request->get_json_params();
-		$model  = ( is_array( $params ) && isset( $params['model'] ) ) ? sanitize_text_field( $params['model'] ) : ( $request->get_param( 'model' ) ?: 'sora-2' );
+		$model  = self::get_json_or_query_param( $request, 'model', 'sora-2' );
 		$result = API_Validator::verify_video_model( $model );
 		return rest_ensure_response( $result );
 	}
@@ -1340,5 +1324,22 @@ class REST_Proxy {
 		$last_response['steps']       = $steps;
 
 		return rest_ensure_response( $last_response );
+	}
+
+	/**
+	 * Read a parameter from the JSON body; fall back to query/route param.
+	 *
+	 * @param \WP_REST_Request $request Request object.
+	 * @param string           $key     Parameter name.
+	 * @param string           $default Default when the parameter is absent.
+	 * @return string Sanitized value.
+	 */
+	private static function get_json_or_query_param( $request, $key, $default = '' ) {
+		$params = $request->get_json_params();
+		if ( is_array( $params ) && isset( $params[ $key ] ) ) {
+			return sanitize_text_field( $params[ $key ] );
+		}
+		$val = $request->get_param( $key );
+		return ( $val !== null && $val !== '' ) ? sanitize_text_field( $val ) : $default;
 	}
 }

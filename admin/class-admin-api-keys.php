@@ -44,7 +44,7 @@ class Admin_API_Keys {
 			echo '<div class="notice ' . esc_attr( $notice_class ) . ' is-dismissible"><p>' . esc_html( $oauth_notice['message'] ) . '</p></div>';
 		}
 
-		if ( isset( $_POST['alorbach_api_keys_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_api_keys_nonce'] ) ), 'alorbach_api_keys' ) ) {
+		if ( Admin_Helper::verify_post_nonce( 'alorbach_api_keys_nonce', 'alorbach_api_keys' ) ) {
 			$entries = array();
 			$raw     = isset( $_POST['entries'] ) && is_array( $_POST['entries'] ) ? $_POST['entries'] : array();
 			foreach ( $raw as $e ) {

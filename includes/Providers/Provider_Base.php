@@ -179,4 +179,30 @@ abstract class Provider_Base implements Provider_Interface {
 		}
 		return empty( $prefixes );
 	}
+
+	/**
+	 * Perform a verified GET request and return a success/failure result array.
+	 *
+	 * Checks for WP_Error, HTTP 4xx/5xx, and extracts an error message from
+	 * common response structures (body['error']['message'] or body['message']).
+	 *
+	 * @param string $url            Request URL.
+	 * @param array  $headers        HTTP headers.
+	 * @param string $fallback_error Fallback error message if none found in body.
+	 * @return array{success: bool, message?: string}
+	 */
+	protected static function make_verified_get( $url, $headers = array(), $fallback_error = '' ) {
+		$response = wp_remote_get( $url, array( 'headers' => $headers, 'timeout' => 15 ) );
+		if ( is_wp_error( $response ) ) {
+			return array( 'success' => false, 'message' => $response->get_error_message() );
+		}
+		$code = wp_remote_retrieve_response_code( $response );
+		if ( $code >= 400 ) {
+			$body = json_decode( wp_remote_retrieve_body( $response ), true );
+			$msg  = isset( $body['error']['message'] ) ? $body['error']['message']
+				: ( isset( $body['message'] ) ? $body['message'] : $fallback_error );
+			return array( 'success' => false, 'message' => $msg );
+		}
+		return array( 'success' => true );
+	}
 }

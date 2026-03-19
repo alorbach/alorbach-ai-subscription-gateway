@@ -20,7 +20,7 @@ class Admin_Settings {
 	 * Render Settings page.
 	 */
 	public static function render() {
-		if ( isset( $_POST['alorbach_settings_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_settings_nonce'] ) ), 'alorbach_settings' ) ) {
+		if ( Admin_Helper::verify_post_nonce( 'alorbach_settings_nonce', 'alorbach_settings' ) ) {
 			$selling_enabled   = isset( $_POST['alorbach_selling_enabled'] );
 			$selling_multiplier = isset( $_POST['alorbach_selling_multiplier'] ) ? (float) $_POST['alorbach_selling_multiplier'] : 2.0;
 			$selling_multiplier = max( 1.0, $selling_multiplier );
@@ -47,7 +47,7 @@ class Admin_Settings {
 			update_option( 'alorbach_rate_limit_video', $rate_limit_video );
 			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) $_POST['alorbach_monthly_quota_uc'] ) : 0;
 			update_option( 'alorbach_monthly_quota_uc', $monthly_quota_uc );
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Settings saved.', 'alorbach-ai-gateway' ) . '</p></div>';
+			Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
 		}
 
 		$selling_enabled        = (bool) get_option( 'alorbach_selling_enabled', false );

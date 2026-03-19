@@ -93,11 +93,7 @@ class Admin_Demo_Defaults {
 	 * @return array Model IDs.
 	 */
 	public static function get_video_models() {
-		$costs  = get_option( 'alorbach_video_costs', array() );
-		$costs  = is_array( $costs ) ? $costs : array();
-		$models = array_keys( $costs );
-		sort( $models );
-		return ! empty( $models ) ? $models : array( 'sora-2' );
+		return self::get_sorted_option_keys( 'alorbach_video_costs', array( 'sora-2' ) );
 	}
 
 	/**
@@ -106,11 +102,22 @@ class Admin_Demo_Defaults {
 	 * @return array Model IDs.
 	 */
 	public static function get_audio_models() {
-		$costs  = get_option( 'alorbach_audio_costs', array() );
+		return self::get_sorted_option_keys( 'alorbach_audio_costs', array( 'whisper-1' ) );
+	}
+
+	/**
+	 * Get sorted array_keys from a WP option, with a fallback array.
+	 *
+	 * @param string $option_key       WP option name.
+	 * @param array  $default_fallback Returned when option is empty.
+	 * @return array
+	 */
+	private static function get_sorted_option_keys( $option_key, $default_fallback ) {
+		$costs  = get_option( $option_key, array() );
 		$costs  = is_array( $costs ) ? $costs : array();
 		$models = array_keys( $costs );
 		sort( $models );
-		return ! empty( $models ) ? $models : array( 'whisper-1' );
+		return ! empty( $models ) ? $models : $default_fallback;
 	}
 
 	/**

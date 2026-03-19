@@ -71,27 +71,15 @@ class GitHub_Models_Provider extends Provider_Base {
 		if ( empty( $api_key ) ) {
 			return array( 'success' => false, 'message' => __( 'GitHub Models token not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$response = wp_remote_get(
+		return self::make_verified_get(
 			self::BASE_URL . '/catalog/models',
 			array(
-				'headers' => array(
-					'Authorization'       => 'Bearer ' . $api_key,
-					'Accept'              => 'application/vnd.github+json',
-					'X-GitHub-Api-Version' => '2026-03-10',
-				),
-				'timeout' => 15,
-			)
+				'Authorization'        => 'Bearer ' . $api_key,
+				'Accept'               => 'application/vnd.github+json',
+				'X-GitHub-Api-Version' => '2026-03-10',
+			),
+			__( 'Invalid GitHub token.', 'alorbach-ai-gateway' )
 		);
-		if ( is_wp_error( $response ) ) {
-			return array( 'success' => false, 'message' => $response->get_error_message() );
-		}
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code >= 400 ) {
-			$body = json_decode( wp_remote_retrieve_body( $response ), true );
-			$msg  = isset( $body['message'] ) ? $body['message'] : __( 'Invalid GitHub token.', 'alorbach-ai-gateway' );
-			return array( 'success' => false, 'message' => $msg );
-		}
-		return array( 'success' => true );
 	}
 
 	/**

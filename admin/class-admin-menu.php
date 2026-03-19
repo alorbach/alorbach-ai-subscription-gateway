@@ -37,7 +37,6 @@ class Admin_Menu {
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Demo Defaults', 'alorbach-ai-gateway' ), __( 'Demo Defaults', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-demo-defaults', array( Admin_Demo_Defaults::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Plans', 'alorbach-ai-gateway' ), __( 'Plans', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-plans', array( Admin_Plans::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'User Balance', 'alorbach-ai-gateway' ), __( 'User Balance', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-user-balance', array( Admin_User_Balance::class, 'render' ) );
-		add_submenu_page( 'alorbach-ai-gateway', __( 'Usage', 'alorbach-ai-gateway' ), __( 'Usage', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-usage', array( Admin_Usage::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Stripe Webhook', 'alorbach-ai-gateway' ), __( 'Stripe Webhook', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-stripe-webhook', array( Admin_Stripe_Webhook::class, 'render' ) );
 		add_submenu_page( 'alorbach-ai-gateway', __( 'Developer', 'alorbach-ai-gateway' ), __( 'Developer', 'alorbach-ai-gateway' ), 'manage_options', 'alorbach-developer', array( Admin_Developer_Docs::class, 'render' ) );
 	}

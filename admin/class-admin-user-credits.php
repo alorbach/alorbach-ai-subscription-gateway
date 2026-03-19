@@ -81,7 +81,7 @@ class Admin_User_Credits {
 					</thead>
 					<tbody>
 						<?php foreach ( $rows as $row ) :
-							$type_label = self::get_transaction_type_label( $row['transaction_type'] );
+						$type_label = Admin_Helper::get_transaction_type_label( $row['transaction_type'] );
 							$amount    = (int) $row['uc_amount'];
 							$credits   = \Alorbach\AIGateway\User_Display::uc_to_credits( $amount );
 							$usd       = \Alorbach\AIGateway\User_Display::format_uc_as_usd( abs( $amount ) );
@@ -99,49 +99,13 @@ class Admin_User_Credits {
 						<?php endforeach; ?>
 					</tbody>
 				</table>
-				<?php if ( $pages > 1 ) : ?>
-					<div class="tablenav bottom">
-						<div class="tablenav-pages">
-							<span class="displaying-num"><?php echo esc_html( sprintf( _n( '%s item', '%s items', $total, 'alorbach-ai-gateway' ), number_format_i18n( $total ) ) ); ?></span>
-							<span class="pagination-links">
-								<?php
-								$base_url = add_query_arg( 'page', 'alorbach-my-credits', admin_url( 'admin.php' ) );
-								if ( $page > 1 ) {
-									$prev_url = add_query_arg( 'paged', $page - 1, $base_url );
-									echo '<a class="prev-page button" href="' . esc_url( $prev_url ) . '">' . esc_html__( '&laquo;', 'alorbach-ai-gateway' ) . '</a> ';
-								}
-								echo '<span class="paging-input">' . esc_html( sprintf( __( 'Page %1$d of %2$d', 'alorbach-ai-gateway' ), $page, $pages ) ) . '</span>';
-								if ( $page < $pages ) {
-									$next_url = add_query_arg( 'paged', $page + 1, $base_url );
-									echo ' <a class="next-page button" href="' . esc_url( $next_url ) . '">' . esc_html__( '&raquo;', 'alorbach-ai-gateway' ) . '</a>';
-								}
-								?>
-							</span>
-						</div>
-					</div>
-				<?php endif; ?>
+				<?php
+				$base_url = add_query_arg( 'page', 'alorbach-my-credits', admin_url( 'admin.php' ) );
+				Admin_Helper::render_pagination( $page, $pages, $total, $base_url );
+				?>
 			<?php endif; ?>
 		</div>
 		<?php
-	}
-
-	/**
-	 * Get human-readable label for transaction type.
-	 *
-	 * @param string $type Transaction type.
-	 * @return string
-	 */
-	private static function get_transaction_type_label( $type ) {
-		$labels = array(
-			'chat_deduction'       => __( 'Chat', 'alorbach-ai-gateway' ),
-			'image_deduction'      => __( 'Image', 'alorbach-ai-gateway' ),
-			'audio_deduction'      => __( 'Audio', 'alorbach-ai-gateway' ),
-			'video_deduction'      => __( 'Video', 'alorbach-ai-gateway' ),
-			'admin_credit'         => __( 'Admin credit', 'alorbach-ai-gateway' ),
-			'subscription_credit'  => __( 'Subscription', 'alorbach-ai-gateway' ),
-			'balance_forward'      => __( 'Balance forward', 'alorbach-ai-gateway' ),
-		);
-		return isset( $labels[ $type ] ) ? $labels[ $type ] : $type;
 	}
 
 	/**

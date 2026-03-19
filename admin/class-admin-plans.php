@@ -33,7 +33,7 @@ class Admin_Plans {
 	 * Render Plans page.
 	 */
 	public static function render() {
-		if ( isset( $_POST['alorbach_plans_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_plans_nonce'] ) ), 'alorbach_plans' ) ) {
+		if ( Admin_Helper::verify_post_nonce( 'alorbach_plans_nonce', 'alorbach_plans' ) ) {
 			$plans = isset( $_POST['plans'] ) && is_array( $_POST['plans'] ) ? $_POST['plans'] : array();
 			$saved = array();
 			foreach ( $plans as $slug => $p ) {
@@ -58,7 +58,7 @@ class Admin_Plans {
 				update_option( 'alorbach_product_to_plan', $mapping );
 			}
 
-			echo '<div class="notice notice-success"><p>' . esc_html__( 'Plans saved.', 'alorbach-ai-gateway' ) . '</p></div>';
+			Admin_Helper::render_notice( __( 'Plans saved.', 'alorbach-ai-gateway' ) );
 		}
 
 		$plans = get_option( 'alorbach_plans', self::get_defaults() );
