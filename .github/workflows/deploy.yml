@@ -1,0 +1,76 @@
+name: Deploy to WordPress.org
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      PLUGIN_SLUG: alorbach-ai-subscription-gateway
+      SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+      SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version (strip optional v-prefix)
+        id: vars
+        run: |
+          ref="${GITHUB_REF_NAME}"
+          version="${ref#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build plugin zip
+        id: package
+        run: |
+          set -euo pipefail
+          SLUG="${PLUGIN_SLUG}"
+          VERSION="${{ steps.vars.outputs.version }}"
+          BUILD_DIR="build"
+          rm -rf "$BUILD_DIR"
+          mkdir -p "$BUILD_DIR/$SLUG"
+          rsync -a --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            --exclude "$BUILD_DIR" \
+            --exclude ".wordpress-org" \
+            --exclude ".*" \
+            --exclude "bin/" \
+            --exclude "node_modules/" \
+            --exclude "*.log" \
+            --exclude "*.zip" \
+            --exclude "composer.lock" \
+            --exclude "package-lock.json" \
+            --exclude "README.md" \
+            ./ "$BUILD_DIR/$SLUG"/
+          (cd "$BUILD_DIR" && zip -r "${SLUG}-${VERSION}.zip" "$SLUG")
+          echo "zip_path=${PWD}/${BUILD_DIR}/${SLUG}-${VERSION}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release and upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: ${{ steps.package.outputs.zip_path }}
+          generate_release_notes: true
+
+      - name: Skipping WP.org deploy (missing secrets)
+        if: ${{ env.SVN_USERNAME == '' || env.SVN_PASSWORD == '' }}
+        run: |
+          echo "SVN secrets missing; skipping WordPress.org deploy"
+
+      - name: WordPress Plugin Deploy
+        if: ${{ env.SVN_USERNAME != '' && env.SVN_PASSWORD != '' }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        env:
+          SVN_USERNAME: ${{ env.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ env.SVN_PASSWORD }}
+          SLUG: ${{ env.PLUGIN_SLUG }}
+          ASSETS_DIR: .wordpress-org
