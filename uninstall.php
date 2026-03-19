@@ -11,7 +11,7 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 
 global $wpdb;
 $table_name = $wpdb->prefix . 'alorbach_ledger';
-$wpdb->query( "DROP TABLE IF EXISTS {$table_name}" );
+$wpdb->query( 'DROP TABLE IF EXISTS `' . esc_sql( $table_name ) . '`' ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Table name derived from $wpdb->prefix, not user input.
 
 delete_option( 'alorbach_api_keys' );
 delete_option( 'alorbach_api_keys_entries' );

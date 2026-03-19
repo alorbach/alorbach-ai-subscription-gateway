@@ -20,6 +20,9 @@ class Admin_User_Balance {
 	 * Render User Balance page.
 	 */
 	public static function render() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+		}
 		// Handle CSV download (early exit).
 		if ( current_user_can( 'manage_options' )
 			&& isset( $_GET['action'] ) && $_GET['action'] === 'download_transactions_csv'
@@ -33,8 +36,8 @@ class Admin_User_Balance {
 		$filter_user_id = isset( $_GET['user_id'] ) ? (int) $_GET['user_id'] : null;
 
 		if ( Admin_Helper::verify_post_nonce( 'alorbach_balance_nonce', 'alorbach_balance' ) ) {
-			$user_id     = isset( $_POST['user_id'] ) ? (int) $_POST['user_id'] : 0;
-			$amount      = isset( $_POST['amount'] ) ? (float) $_POST['amount'] : 0;
+			$user_id     = isset( $_POST['user_id'] ) ? (int) sanitize_text_field( wp_unslash( $_POST['user_id'] ) ) : 0;
+			$amount      = isset( $_POST['amount'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['amount'] ) ) : 0;
 			$amount_unit = isset( $_POST['amount_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['amount_unit'] ) ) : 'uc';
 			$action      = isset( $_POST['amount_action'] ) ? sanitize_text_field( wp_unslash( $_POST['amount_action'] ) ) : 'add';
 

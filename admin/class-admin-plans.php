@@ -12,7 +12,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Class Admin_Plans
+ * Admin: Subscription plan management.
+ *
+ * Provides the UI for defining AI Gateway subscription plans (name, price,
+ * monthly UC credit allocation) and mapping WooCommerce products to plans.
+ * Plans are stored via the `alorbach_plans` option and can be extended
+ * through the `alorbach_plans` filter.
+ *
+ * @package Alorbach\AIGateway\Admin
+ * @since   1.0.0
  */
 class Admin_Plans {
 
@@ -33,6 +41,9 @@ class Admin_Plans {
 	 * Render Plans page.
 	 */
 	public static function render() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+		}
 		if ( Admin_Helper::verify_post_nonce( 'alorbach_plans_nonce', 'alorbach_plans' ) ) {
 			$plans = isset( $_POST['plans'] ) && is_array( $_POST['plans'] ) ? $_POST['plans'] : array();
 			$saved = array();

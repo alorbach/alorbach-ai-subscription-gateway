@@ -15,7 +15,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Class Admin_API_Keys
+ * Admin: API Keys configuration (grid).
+ *
+ * Manages the multi-entry API key list for all supported providers
+ * (OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex OAuth).
+ * Each entry can be enabled/disabled independently and supports an
+ * optional display name for identification.
+ *
+ * @package Alorbach\AIGateway\Admin
+ * @since   1.0.0
  */
 class Admin_API_Keys {
 
@@ -36,6 +44,9 @@ class Admin_API_Keys {
 	 * Render API Keys page.
 	 */
 	public static function render() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+		}
 		// Show OAuth callback notices set by the admin_init handler.
 		$oauth_notice = get_transient( 'alorbach_codex_oauth_notice' );
 		if ( $oauth_notice ) {

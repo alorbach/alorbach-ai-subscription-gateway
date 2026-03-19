@@ -92,7 +92,7 @@ function alorbach_codex_exchange_handler() {
 	}
 	check_admin_referer( 'alorbach_codex_exchange' );
 
-	$pasted = isset( $_POST['codex_redirect_url'] ) ? wp_unslash( $_POST['codex_redirect_url'] ) : '';
+	$pasted = isset( $_POST['codex_redirect_url'] ) ? sanitize_text_field( wp_unslash( $_POST['codex_redirect_url'] ) ) : '';
 	$result = Alorbach\AIGateway\Codex_OAuth::exchange_code_from_input( $pasted );
 
 	if ( is_wp_error( $result ) ) {

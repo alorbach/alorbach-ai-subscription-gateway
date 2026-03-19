@@ -208,6 +208,9 @@ class Admin_Demo_Defaults {
 	 * Render Demo Defaults page.
 	 */
 	public static function render() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+		}
 		$text_models   = self::get_text_models();
 		$image_sizes   = self::get_image_sizes();
 		$image_models  = self::get_image_models();

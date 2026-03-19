@@ -20,20 +20,23 @@ class Admin_Settings {
 	 * Render Settings page.
 	 */
 	public static function render() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+		}
 		if ( Admin_Helper::verify_post_nonce( 'alorbach_settings_nonce', 'alorbach_settings' ) ) {
 			$selling_enabled   = isset( $_POST['alorbach_selling_enabled'] );
-			$selling_multiplier = isset( $_POST['alorbach_selling_multiplier'] ) ? (float) $_POST['alorbach_selling_multiplier'] : 2.0;
+			$selling_multiplier = isset( $_POST['alorbach_selling_multiplier'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['alorbach_selling_multiplier'] ) ) : 2.0;
 			$selling_multiplier = max( 1.0, $selling_multiplier );
 			$debug_enabled     = isset( $_POST['alorbach_debug_enabled'] );
 			$google_import_default = isset( $_POST['alorbach_google_import_default'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_google_import_default'] ) ) : 'all';
 			$google_import_default = in_array( $google_import_default, array( 'all', 'none' ), true ) ? $google_import_default : 'all';
 			$google_model_whitelist = isset( $_POST['alorbach_google_model_whitelist'] ) ? sanitize_textarea_field( wp_unslash( $_POST['alorbach_google_model_whitelist'] ) ) : '';
 
-			$rate_limit_window    = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) $_POST['alorbach_rate_limit_window'] ) ) : 60;
-			$rate_limit_chat      = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_chat'] ) ) : 100;
-			$rate_limit_images    = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_images'] ) ) : 30;
-			$rate_limit_transcribe = isset( $_POST['alorbach_rate_limit_transcribe'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_transcribe'] ) ) : 30;
-			$rate_limit_video     = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) $_POST['alorbach_rate_limit_video'] ) ) : 10;
+			$rate_limit_window    = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_window'] ) ) ) ) : 60;
+			$rate_limit_chat      = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_chat'] ) ) ) ) : 100;
+			$rate_limit_images    = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_images'] ) ) ) ) : 30;
+			$rate_limit_transcribe = isset( $_POST['alorbach_rate_limit_transcribe'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_transcribe'] ) ) ) ) : 30;
+			$rate_limit_video     = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_video'] ) ) ) ) : 10;
 
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
 			update_option( 'alorbach_selling_multiplier', $selling_multiplier );
@@ -45,7 +48,7 @@ class Admin_Settings {
 			update_option( 'alorbach_rate_limit_images', $rate_limit_images );
 			update_option( 'alorbach_rate_limit_transcribe', $rate_limit_transcribe );
 			update_option( 'alorbach_rate_limit_video', $rate_limit_video );
-			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) $_POST['alorbach_monthly_quota_uc'] ) : 0;
+			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_monthly_quota_uc'] ) ) ) : 0;
 			update_option( 'alorbach_monthly_quota_uc', $monthly_quota_uc );
 			Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
 		}
