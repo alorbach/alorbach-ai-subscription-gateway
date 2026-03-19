@@ -127,7 +127,7 @@ Base URL: `/wp-json/alorbach/v1`
 do_action( 'alorbach_after_deduction', $user_id, $type, $model, $uc_cost, $api_cost );
 
 // Fires after credits are added (e.g. WooCommerce renewal)
-do_action( 'alorbach_credits_added', $user_id, $credits_uc, $source );
+do_action( 'alorbach_credits_added', $user_id, $credits_uc, $source ); // source: stripe|woocommerce|woocommerce_retry
 
 // Register custom AI providers
 add_action( 'alorbach_register_providers', function() {
@@ -137,16 +137,24 @@ add_action( 'alorbach_register_providers', function() {
 // WooCommerce subscription events
 do_action( 'alorbach_subscription_payment_failed', $subscription, $last_order );
 do_action( 'alorbach_wc_renewal_retry_failed', $user_id, $credits_uc );
+
+// Stripe events (after signature verification)
+do_action( 'alorbach_stripe_webhook', $event_type, $event );
+do_action( 'alorbach_stripe_payment_failed', $event );
+do_action( 'alorbach_stripe_subscription_deleted', $event );
+
+// Video generation
+do_action( 'alorbach_video_poll_timeout', $video_id, $provider );
 ```
 
 ### Filters
 
 ```php
 // Modify the chat request body before sending to the provider
-add_filter( 'alorbach_chat_request_body', function( $body, $user_id ) {
+add_filter( 'alorbach_chat_request_body', function( $body, $user_id, $model ) {
     $body['temperature'] = 0.7;
     return $body;
-}, 10, 2 );
+}, 10, 3 );
 
 // Change how many UC equal 1 displayed Credit (default: 1000)
 add_filter( 'alorbach_uc_to_credit_ratio', fn() => 500 );
@@ -155,8 +163,20 @@ add_filter( 'alorbach_uc_to_credit_ratio', fn() => 500 );
 add_filter( 'alorbach_credits_label', fn() => 'Tokens' );
 
 // Customize balance/usage display HTML
-add_filter( 'alorbach_balance_display', fn( $html, $uc ) => $html, 10, 2 );
-add_filter( 'alorbach_usage_display',   fn( $html, $uc ) => $html, 10, 2 );
+add_filter( 'alorbach_balance_display', fn( $html, $user_id, $balance ) => $html, 10, 3 );
+add_filter( 'alorbach_usage_display',   fn( $html, $user_id, $usage, $period ) => $html, 10, 4 );
+
+// Override token counting
+add_filter( 'alorbach_count_tokens', fn( $count, $text, $model ) => null, 10, 3 );
+
+// Custom user cost (e.g. free for a specific model)
+add_filter( 'alorbach_user_cost', function( $user_cost, $api_cost_uc, $model ) {
+    return $user_cost;
+}, 10, 3 );
+
+// Video polling tuning
+add_filter( 'alorbach_video_poll_max',      fn() => 120 ); // double polling attempts
+add_filter( 'alorbach_video_poll_interval', fn() => 10  ); // poll every 10s
 ```
 
 ---
@@ -189,6 +209,41 @@ $balance_uc = Ledger::get_balance( $user_id );
 $usage_uc   = Ledger::get_usage_this_month( $user_id );
 $rows       = Ledger::get_transactions( [ 'user_id' => $user_id, 'limit' => 20, 'offset' => 0 ] );
 ```
+
+---
+
+## Custom AI Providers
+
+Any AI backend can be added without modifying the plugin. Extend `Provider_Base`,
+implement the two required methods, and register on the `alorbach_register_providers` hook:
+
+```php
+use Alorbach\AIGateway\Providers\Provider_Base;
+use Alorbach\AIGateway\Providers\Provider_Registry;
+
+class My_Custom_Provider extends Provider_Base {
+    public function get_type()      { return 'my_provider'; }
+    public function supports_chat() { return true; }
+
+    public function build_chat_request( $body, $credentials ) {
+        $body = self::normalize_chat_body( $body, $body['model'] ?? '' );
+        return [
+            'url'     => 'https://api.my-provider.com/v1/chat/completions',
+            'headers' => [ 'Authorization' => 'Bearer ' . $credentials['api_key'], 'Content-Type' => 'application/json' ],
+            'body'    => wp_json_encode( $body ),
+        ];
+    }
+
+    public function verify_key( $credentials )  { return true; }
+    public function fetch_models( $credentials ) { return [ 'my-model-v1' ]; }
+}
+
+add_action( 'alorbach_register_providers', function() {
+    Provider_Registry::register( new My_Custom_Provider() );
+} );
+```
+
+See `Provider_Base` for optional method stubs (images, audio, video) you only override when needed.
 
 ---
 

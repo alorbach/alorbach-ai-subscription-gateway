@@ -27,8 +27,7 @@ class Admin_Developer_Docs {
 
 			<?php self::section_shortcodes(); ?>
 			<?php self::section_rest_api(); ?>
-			<?php self::section_hooks(); ?>
-			<?php self::section_php(); ?>
+			<?php self::section_hooks(); ?>		<?php self::section_custom_providers(); ?>			<?php self::section_php(); ?>
 		</div>
 		<?php
 	}
@@ -299,8 +298,8 @@ data.steps.forEach( s => {
 				</tr>
 				<tr>
 					<td><code>alorbach_user_cost</code></td>
-					<td>$user_cost, $api_cost_uc, $context</td>
-					<td><?php esc_html_e( 'Modify user charge after markup applied', 'alorbach-ai-gateway' ); ?></td>
+					<td>$user_cost, $api_cost_uc, $model</td>
+					<td><?php esc_html_e( 'Modify user charge after markup applied. $user_cost is the marked-up UC amount; $api_cost_uc is the raw API cost.', 'alorbach-ai-gateway' ); ?></td>
 				</tr>
 				<tr>
 					<td><code>alorbach_chat_request_body</code></td>
@@ -342,6 +341,16 @@ data.steps.forEach( s => {
 					<td>—</td>
 					<td><?php esc_html_e( 'Return true to create sample pages on plugin activation', 'alorbach-ai-gateway' ); ?></td>
 				</tr>
+				<tr>
+					<td><code>alorbach_video_poll_max</code></td>
+					<td>$max (int)</td>
+					<td><?php esc_html_e( 'Maximum polling iterations when waiting for video generation. Default: 60.', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>alorbach_video_poll_interval</code></td>
+					<td>$interval (int)</td>
+					<td><?php esc_html_e( 'Seconds between video generation poll requests. Default: 5.', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
 			</tbody>
 		</table>
 		<h3><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></h3>
@@ -355,9 +364,14 @@ data.steps.forEach( s => {
 			</thead>
 			<tbody>
 				<tr>
+					<td><code>alorbach_register_providers</code></td>
+					<td>—</td>
+					<td><?php esc_html_e( 'Fires after built-in providers are registered. Call Provider_Registry::register() here to add custom providers.', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
+				<tr>
 					<td><code>alorbach_credits_added</code></td>
-					<td>$user_id, $credits, $source</td>
-					<td><?php esc_html_e( 'Fired when credits are added (stripe, woocommerce)', 'alorbach-ai-gateway' ); ?></td>
+					<td>$user_id, $credits_uc, $source</td>
+					<td><?php esc_html_e( 'Fired when credits are added. $source: stripe | woocommerce | woocommerce_retry.', 'alorbach-ai-gateway' ); ?></td>
 				</tr>
 				<tr>
 					<td><code>alorbach_stripe_webhook</code></td>
@@ -384,17 +398,87 @@ data.steps.forEach( s => {
 					<td>$subscription, $last_order</td>
 					<td><?php esc_html_e( 'Fired when WooCommerce subscription payment fails', 'alorbach-ai-gateway' ); ?></td>
 				</tr>
+				<tr>
+					<td><code>alorbach_wc_renewal_retry_failed</code></td>
+					<td>$user_id, $credits_uc</td>
+					<td><?php esc_html_e( 'Fired when the WooCommerce renewal retry (5 min after failure) also fails to credit the user.', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
+				<tr>
+					<td><code>alorbach_video_poll_timeout</code></td>
+					<td>$video_id, $provider</td>
+					<td><?php esc_html_e( 'Fired when video generation polling times out without a completed or failed status.', 'alorbach-ai-gateway' ); ?></td>
+				</tr>
 			</tbody>
 		</table>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// Example: Modify user cost
-add_filter( 'alorbach_user_cost', function( $user_cost, $api_cost_uc, $context ) {
-  return (int) ( $api_cost_uc * 1.5 ); // Custom 50% markup
+		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// Example: Custom per-model markup
+add_filter( 'alorbach_user_cost', function( $user_cost, $api_cost_uc, $model ) {
+  // Free for certain models, 2× for everything else
+  if ( str_starts_with( $model, 'gpt-4.1-mini' ) ) return $api_cost_uc;
+  return (int) ( $api_cost_uc * 2 );
 }, 10, 3 );
+
+// Example: Add a system prompt to every chat request
+add_filter( 'alorbach_chat_request_body', function( $body, $user_id, $model ) {
+  array_unshift( $body['messages'], [ 'role' => 'system', 'content' => 'Be concise.' ] );
+  return $body;
+}, 10, 3 );
+
+// Example: Register a custom AI provider
+add_action( 'alorbach_register_providers', function() {
+  \Alorbach\AIGateway\Providers\Provider_Registry::register( new My_Custom_Provider() );
+} );
 
 // Example: Override balance display
 add_filter( 'alorbach_balance_display', function( $html, $user_id, $balance ) {
   return '<span class="my-balance">' . esc_html( $balance / 1000 ) . ' credits</span>';
 }, 10, 3 );</code></pre>
+		<?php
+	}
+
+	/**
+	 * Custom providers section.
+	 */
+	private static function section_custom_providers() {
+		?>
+		<h2><?php esc_html_e( 'Custom AI Providers', 'alorbach-ai-gateway' ); ?></h2>
+		<p><?php esc_html_e( 'Add any AI backend by implementing Provider_Interface (or extending Provider_Base) and registering it on the alorbach_register_providers action.', 'alorbach-ai-gateway' ); ?></p>
+		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>use Alorbach\AIGateway\Providers\Provider_Base;
+use Alorbach\AIGateway\Providers\Provider_Registry;
+
+class My_Custom_Provider extends Provider_Base {
+
+    public function get_type()      { return 'my_provider'; }
+    public function supports_chat() { return true; }
+
+    public function build_chat_request( $body, $credentials ) {
+        $api_key = $credentials['api_key'] ?? '';
+        if ( empty( $api_key ) ) {
+            return new \WP_Error( 'no_key', 'Missing API key.' );
+        }
+        $body = self::normalize_chat_body( $body, $body['model'] ?? '' );
+        return [
+            'url'     => 'https://api.my-provider.com/v1/chat/completions',
+            'headers' => [ 'Authorization' => 'Bearer ' . $api_key, 'Content-Type' => 'application/json' ],
+            'body'    => wp_json_encode( $body ),
+        ];
+    }
+
+    public function verify_key( $credentials )  { return true; }
+    public function fetch_models( $credentials ) { return [ 'my-model-v1' ]; }
+}
+
+add_action( 'alorbach_register_providers', function() {
+    Provider_Registry::register( new My_Custom_Provider() );
+} );</code></pre>
+		<p>
+			<?php
+			printf(
+				/* translators: %s: method list */
+				esc_html__( 'Provider_Base provides no-op stubs for %s so you only implement what your backend supports.', 'alorbach-ai-gateway' ),
+				'<code>supports_images()</code>, <code>supports_audio()</code>, <code>supports_video()</code>, <code>build_images_request()</code>, <code>build_transcribe_request()</code>, <code>build_video_request()</code>'
+			);
+			?>
+		</p>
 		<?php
 	}
 
