@@ -32,6 +32,139 @@ class Admin_Cost_Matrix {
 	}
 
 	/**
+	 * Handle GET actions before any output (hooked to admin_init).
+	 */
+	public static function handle_actions() {
+		if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		if ( ( $_GET['page'] ?? '' ) !== 'alorbach-cost-matrix' ) {
+			return;
+		}
+
+		$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
+
+		// Add custom text model.
+		if ( isset( $_GET['alorbach_add_model'] ) && isset( $_GET['model'] ) ) {
+			$new_model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$entry_id  = isset( $_GET['entry_id'] ) ? sanitize_text_field( wp_unslash( $_GET['entry_id'] ) ) : '';
+			if ( ! empty( $new_model ) && wp_verify_nonce( $nonce, 'alorbach_add_model' ) && $new_model !== 'default' ) {
+				$cost_matrix = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
+				$models = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
+				if ( empty( $entry_id ) ) {
+					$provider = \Alorbach\AIGateway\API_Client::get_provider_for_model( $new_model );
+					$entry    = \Alorbach\AIGateway\API_Keys_Helper::get_entry_by_type( $provider );
+					$entry_id = $entry ? ( $entry['id'] ?? 'legacy' ) : 'legacy';
+				}
+				$models[] = array( 'model' => $new_model, 'entry_id' => $entry_id, 'input' => '', 'output' => '', 'cached' => '' );
+				\Alorbach\AIGateway\Cost_Matrix::save_cost_matrix( array( 'default' => $cost_matrix['default'] ?? array(), 'models' => $models ) );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_model', 'model', 'entry_id', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Remove custom text model.
+		if ( isset( $_GET['alorbach_remove_model'] ) && isset( $_GET['model'] ) ) {
+			$remove_model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$entry_id     = isset( $_GET['entry_id'] ) ? sanitize_text_field( wp_unslash( $_GET['entry_id'] ) ) : '';
+			if ( ! empty( $remove_model ) && wp_verify_nonce( $nonce, 'alorbach_remove_model' ) && $remove_model !== 'default' ) {
+				$cost_matrix = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
+				$models = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
+				$models = array_values( array_filter( $models, function ( $row ) use ( $remove_model, $entry_id ) {
+					$match_model = ( $row['model'] ?? '' ) === $remove_model;
+					$match_entry = empty( $entry_id ) || ( $row['entry_id'] ?? '' ) === $entry_id;
+					return ! ( $match_model && $match_entry );
+				} ) );
+				\Alorbach\AIGateway\Cost_Matrix::save_cost_matrix( array( 'default' => $cost_matrix['default'] ?? array(), 'models' => $models ) );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_model', 'model', 'entry_id', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Add custom image size.
+		if ( isset( $_GET['alorbach_add_image'] ) && isset( $_GET['size'] ) ) {
+			$new_size = preg_replace( '/[^a-zA-Z0-9\-_x]/', '', sanitize_text_field( wp_unslash( $_GET['size'] ) ) );
+			if ( ! empty( $new_size ) && wp_verify_nonce( $nonce, 'alorbach_add_image' ) ) {
+				$image_costs = get_option( 'alorbach_image_costs', array() );
+				$image_costs = is_array( $image_costs ) ? $image_costs : array();
+				$image_costs[ $new_size ] = 40000;
+				update_option( 'alorbach_image_costs', $image_costs );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_image', 'size', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Remove custom image size.
+		if ( isset( $_GET['alorbach_remove_image'] ) && isset( $_GET['size'] ) ) {
+			$remove_size = preg_replace( '/[^a-zA-Z0-9\-_x]/', '', sanitize_text_field( wp_unslash( $_GET['size'] ) ) );
+			if ( ! empty( $remove_size ) && wp_verify_nonce( $nonce, 'alorbach_remove_image' ) ) {
+				$image_costs = get_option( 'alorbach_image_costs', array() );
+				$image_costs = is_array( $image_costs ) ? $image_costs : array();
+				unset( $image_costs[ $remove_size ] );
+				update_option( 'alorbach_image_costs', $image_costs );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_image', 'size', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Add custom audio model.
+		if ( isset( $_GET['alorbach_add_audio'] ) && isset( $_GET['model'] ) ) {
+			$new_audio = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			if ( ! empty( $new_audio ) && wp_verify_nonce( $nonce, 'alorbach_add_audio' ) ) {
+				$audio_costs = get_option( 'alorbach_audio_costs', array() );
+				$audio_costs = is_array( $audio_costs ) ? $audio_costs : array();
+				if ( ! isset( $audio_costs[ $new_audio ] ) ) {
+					$audio_costs[ $new_audio ] = 100;
+					update_option( 'alorbach_audio_costs', $audio_costs );
+				}
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_audio', 'model', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Remove custom audio model.
+		if ( isset( $_GET['alorbach_remove_audio'] ) && isset( $_GET['model'] ) ) {
+			$remove_audio = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			if ( ! empty( $remove_audio ) && wp_verify_nonce( $nonce, 'alorbach_remove_audio' ) ) {
+				$audio_costs = get_option( 'alorbach_audio_costs', array() );
+				$audio_costs = is_array( $audio_costs ) ? $audio_costs : array();
+				unset( $audio_costs[ $remove_audio ] );
+				update_option( 'alorbach_audio_costs', $audio_costs );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_audio', 'model', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Add custom video model.
+		if ( isset( $_GET['alorbach_add_video'] ) && isset( $_GET['model'] ) ) {
+			$new_video = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			if ( ! empty( $new_video ) && wp_verify_nonce( $nonce, 'alorbach_add_video' ) ) {
+				$video_costs = get_option( 'alorbach_video_costs', array() );
+				$video_costs = is_array( $video_costs ) ? $video_costs : array();
+				if ( ! isset( $video_costs[ $new_video ] ) ) {
+					$video_costs[ $new_video ] = 400000;
+					update_option( 'alorbach_video_costs', $video_costs );
+				}
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_video', 'model', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+
+		// Remove custom video model.
+		if ( isset( $_GET['alorbach_remove_video'] ) && isset( $_GET['model'] ) ) {
+			$remove_video = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			if ( ! empty( $remove_video ) && wp_verify_nonce( $nonce, 'alorbach_remove_video' ) ) {
+				$video_costs = get_option( 'alorbach_video_costs', array() );
+				$video_costs = is_array( $video_costs ) ? $video_costs : array();
+				unset( $video_costs[ $remove_video ] );
+				update_option( 'alorbach_video_costs', $video_costs );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_video', 'model', '_wpnonce' ) ) );
+				exit;
+			}
+		}
+	}
+
+	/**
 	 * Render Cost Matrix page.
 	 */
 	public static function render() {
@@ -52,115 +185,6 @@ class Admin_Cost_Matrix {
 		$audio_costs = is_array( $audio_costs ) ? $audio_costs : array();
 		$stored_max_tokens = get_option( 'alorbach_model_max_tokens', array() );
 		$stored_max_tokens = is_array( $stored_max_tokens ) ? $stored_max_tokens : array();
-
-		// Add custom text model (GET).
-		if ( isset( $_GET['alorbach_add_model'] ) && isset( $_GET['model'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$new_model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
-			$entry_id  = isset( $_GET['entry_id'] ) ? sanitize_text_field( wp_unslash( $_GET['entry_id'] ) ) : '';
-			if ( ! empty( $new_model ) && wp_verify_nonce( $nonce, 'alorbach_add_model' ) && $new_model !== 'default' ) {
-				$models = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
-				if ( empty( $entry_id ) ) {
-					$provider = \Alorbach\AIGateway\API_Client::get_provider_for_model( $new_model );
-					$entry    = \Alorbach\AIGateway\API_Keys_Helper::get_entry_by_type( $provider );
-					$entry_id = $entry ? ( $entry['id'] ?? 'legacy' ) : 'legacy';
-				}
-				$models[] = array( 'model' => $new_model, 'entry_id' => $entry_id, 'input' => '', 'output' => '', 'cached' => '' );
-				\Alorbach\AIGateway\Cost_Matrix::save_cost_matrix( array( 'default' => $cost_matrix['default'] ?? array(), 'models' => $models ) );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_model', 'model', 'entry_id', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Remove custom text model (GET).
-		if ( isset( $_GET['alorbach_remove_model'] ) && isset( $_GET['model'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$remove_model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
-			$entry_id     = isset( $_GET['entry_id'] ) ? sanitize_text_field( wp_unslash( $_GET['entry_id'] ) ) : '';
-			if ( ! empty( $remove_model ) && wp_verify_nonce( $nonce, 'alorbach_remove_model' ) && $remove_model !== 'default' ) {
-				$models = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
-				$models = array_values( array_filter( $models, function ( $row ) use ( $remove_model, $entry_id ) {
-					$match_model = ( $row['model'] ?? '' ) === $remove_model;
-					$match_entry = empty( $entry_id ) || ( $row['entry_id'] ?? '' ) === $entry_id;
-					return ! ( $match_model && $match_entry );
-				} ) );
-				\Alorbach\AIGateway\Cost_Matrix::save_cost_matrix( array( 'default' => $cost_matrix['default'] ?? array(), 'models' => $models ) );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_model', 'model', 'entry_id', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Add custom image size (GET).
-		if ( isset( $_GET['alorbach_add_image'] ) && isset( $_GET['size'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$new_size = preg_replace( '/[^a-zA-Z0-9\-_x]/', '', sanitize_text_field( wp_unslash( $_GET['size'] ) ) );
-			if ( ! empty( $new_size ) && wp_verify_nonce( $nonce, 'alorbach_add_image' ) ) {
-				$image_costs[ $new_size ] = 40000;
-				update_option( 'alorbach_image_costs', $image_costs );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_image', 'size', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Remove custom image size (GET).
-		if ( isset( $_GET['alorbach_remove_image'] ) && isset( $_GET['size'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$remove_size = preg_replace( '/[^a-zA-Z0-9\-_x]/', '', sanitize_text_field( wp_unslash( $_GET['size'] ) ) );
-			if ( ! empty( $remove_size ) && wp_verify_nonce( $nonce, 'alorbach_remove_image' ) ) {
-				unset( $image_costs[ $remove_size ] );
-				update_option( 'alorbach_image_costs', $image_costs );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_image', 'size', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Add custom audio model (GET).
-		if ( isset( $_GET['alorbach_add_audio'] ) && isset( $_GET['model'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$new_audio = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
-			if ( ! empty( $new_audio ) && wp_verify_nonce( $nonce, 'alorbach_add_audio' ) && ! isset( $audio_costs[ $new_audio ] ) ) {
-				$audio_costs[ $new_audio ] = 100;
-				update_option( 'alorbach_audio_costs', $audio_costs );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_audio', 'model', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Remove custom audio model (GET).
-		if ( isset( $_GET['alorbach_remove_audio'] ) && isset( $_GET['model'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$remove_audio = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
-			if ( ! empty( $remove_audio ) && wp_verify_nonce( $nonce, 'alorbach_remove_audio' ) ) {
-				unset( $audio_costs[ $remove_audio ] );
-				update_option( 'alorbach_audio_costs', $audio_costs );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_audio', 'model', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Add custom video model (GET).
-		if ( isset( $_GET['alorbach_add_video'] ) && isset( $_GET['model'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$new_video = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
-			if ( ! empty( $new_video ) && wp_verify_nonce( $nonce, 'alorbach_add_video' ) && ! isset( $video_costs[ $new_video ] ) ) {
-				$video_costs[ $new_video ] = 400000;
-				update_option( 'alorbach_video_costs', $video_costs );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_add_video', 'model', '_wpnonce' ) ) );
-				exit;
-			}
-		}
-
-		// Remove custom video model (GET).
-		if ( isset( $_GET['alorbach_remove_video'] ) && isset( $_GET['model'] ) ) {
-			$nonce = isset( $_REQUEST['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_REQUEST['_wpnonce'] ) ) : '';
-			$remove_video = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
-			if ( ! empty( $remove_video ) && wp_verify_nonce( $nonce, 'alorbach_remove_video' ) ) {
-				unset( $video_costs[ $remove_video ] );
-				update_option( 'alorbach_video_costs', $video_costs );
-				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_video', 'model', '_wpnonce' ) ) );
-				exit;
-			}
-		}
 
 		if ( isset( $_POST['alorbach_cost_matrix_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_cost_matrix_nonce'] ) ), 'alorbach_cost_matrix' ) ) {
 			$default_tier = array(

@@ -134,13 +134,18 @@ class Model_Importer {
 			'azure'         => 'Azure OpenAI / Foundry',
 			'google'        => 'Google (Gemini)',
 			'github_models' => 'GitHub Models',
+			'codex'         => 'OpenAI Codex (ChatGPT)',
 		);
 
 		foreach ( $entries as $entry ) {
-			if ( empty( $entry['enabled'] ) || empty( $entry['api_key'] ) ) {
+			if ( empty( $entry['enabled'] ) ) {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
+			// Codex authenticates via OAuth, not an API key.
+			if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+				continue;
+			}
 			if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
 				continue;
 			}
@@ -148,7 +153,9 @@ class Model_Importer {
 			if ( ! $prov ) {
 				continue;
 			}
-			$creds = array( 'api_key' => $entry['api_key'] );
+			$creds = $type === 'codex'
+				? array()
+				: array( 'api_key' => $entry['api_key'] );
 			if ( ! empty( $entry['endpoint'] ) ) {
 				$creds['endpoint'] = $entry['endpoint'];
 			}
@@ -388,7 +395,11 @@ class Model_Importer {
 
 		if ( $selected_entries !== null ) {
 			foreach ( $entries as $entry ) {
-				if ( empty( $entry['enabled'] ) || empty( $entry['api_key'] ) ) {
+				if ( empty( $entry['enabled'] ) ) {
+					continue;
+				}
+				$type = $entry['type'] ?? '';
+				if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$entry_id = $entry['id'] ?? '';
@@ -423,10 +434,13 @@ class Model_Importer {
 		} else {
 			$text_models = array();
 			foreach ( $entries as $entry ) {
-				if ( empty( $entry['enabled'] ) || empty( $entry['api_key'] ) ) {
+				if ( empty( $entry['enabled'] ) ) {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
+				if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+					continue;
+				}
 				if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
 					continue;
 				}
@@ -434,7 +448,9 @@ class Model_Importer {
 				if ( ! $prov ) {
 					continue;
 				}
-				$creds = array( 'api_key' => $entry['api_key'] );
+				$creds = $type === 'codex'
+					? array()
+					: array( 'api_key' => $entry['api_key'] );
 				if ( ! empty( $entry['endpoint'] ) ) {
 					$creds['endpoint'] = $entry['endpoint'];
 				}

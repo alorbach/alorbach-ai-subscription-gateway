@@ -8,6 +8,7 @@
 namespace Alorbach\AIGateway\Admin;
 
 use Alorbach\AIGateway\API_Keys_Helper;
+use Alorbach\AIGateway\Codex_OAuth;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -28,18 +29,27 @@ class Admin_API_Keys {
 		'azure'         => 'Azure OpenAI / Foundry',
 		'google'        => 'Google (Gemini)',
 		'github_models' => 'GitHub Models',
+		'codex'         => 'OpenAI Codex (OAuth)',
 	);
 
 	/**
 	 * Render API Keys page.
 	 */
 	public static function render() {
+		// Show OAuth callback notices set by the admin_init handler.
+		$oauth_notice = get_transient( 'alorbach_codex_oauth_notice' );
+		if ( $oauth_notice ) {
+			delete_transient( 'alorbach_codex_oauth_notice' );
+			$notice_class = ( $oauth_notice['type'] === 'success' ) ? 'notice-success' : 'notice-error';
+			echo '<div class="notice ' . esc_attr( $notice_class ) . ' is-dismissible"><p>' . esc_html( $oauth_notice['message'] ) . '</p></div>';
+		}
+
 		if ( isset( $_POST['alorbach_api_keys_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_api_keys_nonce'] ) ), 'alorbach_api_keys' ) ) {
 			$entries = array();
 			$raw     = isset( $_POST['entries'] ) && is_array( $_POST['entries'] ) ? $_POST['entries'] : array();
 			foreach ( $raw as $e ) {
 				$type = isset( $e['type'] ) ? sanitize_text_field( $e['type'] ) : '';
-				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'github_models' ), true ) ) {
+				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'github_models', 'codex' ), true ) ) {
 					continue;
 				}
 				$entry = array(
@@ -58,9 +68,18 @@ class Admin_API_Keys {
 					}
 					$entry['free_pass_through'] = ! empty( $e['free_pass_through'] );
 				}
+				if ( $type === 'codex' ) {
+					// Auth is via OAuth; no API key stored in the entry.
+					$entry['api_key']           = '';
+					$entry['free_pass_through'] = ! empty( $e['free_pass_through'] );
+				}
 				$entries[] = $entry;
 			}
 			API_Keys_Helper::save_entries( $entries );
+			// Handle inline Codex disconnect.
+			if ( isset( $_POST['codex_disconnect'] ) && '1' === $_POST['codex_disconnect'] ) {
+				Codex_OAuth::revoke();
+			}
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'API keys saved.', 'alorbach-ai-gateway' ) . '</p></div>';
 		}
 
@@ -74,6 +93,7 @@ class Admin_API_Keys {
 
 			<form method="post" id="alorbach-api-keys-form">
 				<?php wp_nonce_field( 'alorbach_api_keys', 'alorbach_api_keys_nonce' ); ?>
+				<input type="hidden" name="codex_disconnect" value="0" id="alorbach-codex-disconnect-flag" />
 
 				<table class="widefat striped alorbach-api-keys-table">
 					<thead>
@@ -103,6 +123,13 @@ class Admin_API_Keys {
 				</p>
 			</form>
 
+			<?php /* Hidden form for Codex OAuth exchange — MUST be outside the main form (nested forms are invalid HTML). */ ?>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" id="alorbach-codex-exchange-form" style="display:none;">
+				<?php wp_nonce_field( 'alorbach_codex_exchange' ); ?>
+				<input type="hidden" name="action" value="alorbach_codex_exchange" />
+				<input type="hidden" name="codex_redirect_url" id="alorbach-codex-redirect-url-hidden" value="" />
+			</form>
+
 			<template id="alorbach-entry-row-tpl">
 				<?php self::render_entry_row( '{{INDEX}}', array( 'id' => '', 'type' => 'openai', 'api_key' => '', 'enabled' => true, 'name' => '', 'endpoint' => '', 'org' => '', 'free_pass_through' => false ) ); ?>
 			</template>
@@ -121,6 +148,13 @@ class Admin_API_Keys {
 			.alorbach-api-keys .entry-endpoint, .alorbach-api-keys .entry-org, .alorbach-api-keys .entry-free { visibility: hidden; }
 			.alorbach-api-keys tr[data-type="azure"] .entry-endpoint { visibility: visible; }
 			.alorbach-api-keys tr[data-type="github_models"] .entry-org, .alorbach-api-keys tr[data-type="github_models"] .entry-free { visibility: visible; }
+			.alorbach-api-keys tr[data-type="codex"] .entry-endpoint,
+			.alorbach-api-keys tr[data-type="codex"] .entry-org { display: none; }
+			.alorbach-api-keys tr[data-type="codex"] .input-with-actions { display: none; }
+			.alorbach-api-keys .codex-inline-ui { display: none; }
+			.alorbach-api-keys tr[data-type="codex"] .codex-inline-ui { display: block; }
+			.alorbach-api-keys .codex-inline-ui { font-size: 12px; max-width: 540px; }
+			.alorbach-api-keys tr[data-type="codex"] .entry-key { padding-right: 12px; }
 			.alorbach-api-keys .input-with-actions { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 			.alorbach-api-keys .input-with-actions input { flex: 1; min-width: 0; max-width: 100%; }
 			.alorbach-api-keys .alorbach-api-keys-table input,
@@ -195,6 +229,20 @@ class Admin_API_Keys {
 
 			document.querySelectorAll('#alorbach-entries-tbody tr').forEach(initRow);
 
+			var codexConnectBtn = document.getElementById('alorbach-codex-connect-btn');
+			if (codexConnectBtn) {
+				codexConnectBtn.addEventListener('click', function() {
+					var textarea = document.getElementById('alorbach-codex-redirect-url');
+					var hidden   = document.getElementById('alorbach-codex-redirect-url-hidden');
+					var form     = document.getElementById('alorbach-codex-exchange-form');
+					if (!textarea || !hidden || !form) return;
+					var val = textarea.value.trim();
+					if (!val) { alert('Please paste the callback URL first.'); return; }
+					hidden.value = val;
+					form.submit();
+				});
+			}
+
 			document.getElementById('alorbach-add-entry').addEventListener('click', function() {
 				var tpl = document.getElementById('alorbach-entry-row-tpl');
 				var tbody = document.getElementById('alorbach-entries-tbody');
@@ -222,6 +270,29 @@ class Admin_API_Keys {
 			});
 		})();
 		</script>
+
+		<?php self::render_codex_oauth_section(); ?>
+
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render the Codex OAuth onboarding section below the API keys table.
+	 */
+	private static function render_codex_oauth_section() {
+		?>
+		<hr style="margin:2rem 0;" />
+		<div class="alorbach-codex-oauth-section">
+			<h2><?php esc_html_e( 'Codex OAuth — ChatGPT Subscription Setup', 'alorbach-ai-gateway' ); ?></h2>
+			<p><?php esc_html_e( 'Codex models (gpt-5.x-codex) are powered by ChatGPT and require an active ChatGPT Plus or Pro subscription. No OAuth app registration is needed — just authorize with your ChatGPT account.', 'alorbach-ai-gateway' ); ?></p>
+			<ol>
+				<li><?php esc_html_e( 'Add a row with type "OpenAI Codex (OAuth)" in the table above.', 'alorbach-ai-gateway' ); ?></li>
+				<li><?php esc_html_e( 'Click "Get Authorization URL" in the Codex row.', 'alorbach-ai-gateway' ); ?></li>
+				<li><?php esc_html_e( 'Open the displayed URL in your local browser and sign in with your ChatGPT Plus/Pro account.', 'alorbach-ai-gateway' ); ?></li>
+				<li><?php esc_html_e( 'After sign-in, your browser will show "connection refused" on localhost:1455 — this is expected. Copy the full URL from the address bar.', 'alorbach-ai-gateway' ); ?></li>
+				<li><?php esc_html_e( 'Paste that URL into the field that appears in the Codex row and click "Submit &amp; Connect".', 'alorbach-ai-gateway' ); ?></li>
+			</ol>
 		</div>
 		<?php
 	}
@@ -255,20 +326,62 @@ class Admin_API_Keys {
 			<td class="entry-name">
 				<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][name]" value="<?php echo esc_attr( $name ); ?>" placeholder="<?php esc_attr_e( 'Optional', 'alorbach-ai-gateway' ); ?>" class="regular-text" />
 			</td>
-			<td class="entry-key">
+			<td class="entry-key"<?php if ( $type === 'codex' ) echo ' colspan="3"'; ?>>
 				<div class="input-with-actions">
 					<input type="password" id="<?php echo esc_attr( $key_id ); ?>" name="entries[<?php echo esc_attr( $index ); ?>][api_key]" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text" autocomplete="off" />
 					<button type="button" class="button alorbach-toggle-pw" data-target="<?php echo esc_attr( $key_id ); ?>"><?php esc_html_e( 'Show', 'alorbach-ai-gateway' ); ?></button>
 					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
 				</div>
+				<?php if ( $type === 'codex' ) : ?>
+				<?php
+				$codex_connected     = Codex_OAuth::is_connected();
+				$pending_auth_url    = get_transient( 'alorbach_codex_pending_auth_url' );
+				$authorize_url       = wp_nonce_url( admin_url( 'admin-post.php?action=alorbach_codex_authorize' ), 'alorbach_codex_authorize' );
+				?>
+				<div class="codex-inline-ui" style="margin-top:6px;">
+					<div style="margin-bottom:6px;">
+						<?php if ( $codex_connected ) : ?>
+							<span style="color:#00a32a;font-weight:600;">&#10003; <?php esc_html_e( 'Connected', 'alorbach-ai-gateway' ); ?></span>
+						<?php else : ?>
+							<span style="color:#d63638;font-weight:600;">&#9679; <?php esc_html_e( 'Not connected', 'alorbach-ai-gateway' ); ?></span>
+						<?php endif; ?>
+					</div>
+
+					<?php if ( $pending_auth_url && ! $codex_connected ) : ?>
+					<?php /* Step 2 UI: show URL to open + paste form */ ?>
+					<p style="margin:4px 0;font-size:12px;"><strong><?php esc_html_e( 'Step 1:', 'alorbach-ai-gateway' ); ?></strong>
+						<?php esc_html_e( 'Open this URL in your local browser and sign in with your ChatGPT Plus/Pro account:', 'alorbach-ai-gateway' ); ?>
+					</p>
+					<textarea readonly rows="3" style="width:100%;font-size:11px;word-break:break-all;margin-bottom:4px;" onclick="this.select();"><?php echo esc_textarea( $pending_auth_url ); ?></textarea>
+					<p style="margin:4px 0;font-size:12px;"><strong><?php esc_html_e( 'Step 2:', 'alorbach-ai-gateway' ); ?></strong>
+						<?php esc_html_e( 'After signing in, your browser will show a connection error (this is expected). Copy the full URL from the address bar and paste it below:', 'alorbach-ai-gateway' ); ?>
+					</p>
+					<div style="margin-top:4px;">
+						<textarea id="alorbach-codex-redirect-url" rows="2" placeholder="http://localhost:1455/auth/callback?code=...&amp;state=..." style="width:100%;font-size:11px;"></textarea>
+						<button type="button" class="button button-primary button-small" id="alorbach-codex-connect-btn" style="margin-top:4px;"><?php esc_html_e( 'Submit &amp; Connect', 'alorbach-ai-gateway' ); ?></button>
+					</div>
+					<?php else : ?>
+					<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;">
+						<?php if ( $codex_connected ) : ?>
+							<button type="button" class="button button-small" onclick="document.getElementById('alorbach-codex-disconnect-flag').value='1';document.getElementById('alorbach-api-keys-form').submit();"><?php esc_html_e( 'Disconnect', 'alorbach-ai-gateway' ); ?></button>
+							<a href="<?php echo esc_url( $authorize_url ); ?>" class="button button-small"><?php esc_html_e( 'Re-authorize', 'alorbach-ai-gateway' ); ?></a>
+						<?php else : ?>
+							<a href="<?php echo esc_url( $authorize_url ); ?>" class="button button-primary button-small"><?php esc_html_e( 'Get Authorization URL', 'alorbach-ai-gateway' ); ?></a>
+						<?php endif; ?>
+					</div>
+					<?php endif; ?>
+				</div>
+				<?php endif; ?>
 				<span class="alorbach-test-result"></span>
 			</td>
+			<?php if ( $type !== 'codex' ) : ?>
 			<td class="entry-endpoint">
 				<input type="url" name="entries[<?php echo esc_attr( $index ); ?>][endpoint]" value="<?php echo esc_attr( $endpoint ); ?>" placeholder="https://xxx.services.ai.azure.com" class="large-text" />
 			</td>
 			<td class="entry-org">
 				<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][org]" value="<?php echo esc_attr( $org ); ?>" placeholder="<?php esc_attr_e( 'Optional', 'alorbach-ai-gateway' ); ?>" class="regular-text" />
 			</td>
+			<?php endif; ?>
 			<td class="entry-free">
 				<span class="alorbach-tooltip-wrap" title="<?php echo esc_attr__( 'GitHub Pro: higher free limits. Use Free pass-through to skip charging credits.', 'alorbach-ai-gateway' ); ?>">
 					<input type="checkbox" name="entries[<?php echo esc_attr( $index ); ?>][free_pass_through]" value="1" <?php checked( $free ); ?> />

@@ -37,6 +37,11 @@ class API_Client {
 			return 'github_models';
 		}
 
+		// Codex models: route to the dedicated OAuth provider when available.
+		if ( strpos( $model, 'codex' ) !== false && $helper::has_provider( 'codex' ) ) {
+			return 'codex';
+		}
+
 		$gpt_like = ( strpos( $model, 'gpt' ) === 0 || strpos( $model, 'o1' ) === 0 || strpos( $model, 'o3' ) === 0 || strpos( $model, 'o4' ) === 0 );
 		if ( $gpt_like ) {
 			if ( $helper::has_provider( 'openai' ) ) {
@@ -148,6 +153,14 @@ class API_Client {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
 			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
 		}
+		if ( $provider === 'codex' ) {
+			$body_response = self::parse_codex_sse( $raw_body );
+			if ( is_wp_error( $body_response ) ) {
+				return $body_response;
+			}
+			$body_response = self::normalize_codex_response( $body_response );
+			return $body_response;
+		}
 		if ( $provider === 'google' ) {
 			// Check for prompt blocking (Gemini returns 200 with promptFeedback when prompt is blocked).
 			$feedback = $body_response['promptFeedback'] ?? null;
@@ -159,6 +172,39 @@ class API_Client {
 			$body_response = self::normalize_gemini_response( $body_response );
 		}
 		return $body_response;
+	}
+
+	/**
+	 * Parse a Codex SSE stream and return the completed response object.
+	 *
+	 * @param string $raw Raw SSE response body.
+	 * @return array|\WP_Error Completed response array or error.
+	 */
+	private static function parse_codex_sse( $raw ) {
+		$completed = null;
+		$lines = explode( "\n", $raw );
+		foreach ( $lines as $line ) {
+			$line = trim( $line );
+			if ( strncmp( $line, 'data: ', 6 ) !== 0 ) {
+				continue;
+			}
+			$json = substr( $line, 6 );
+			if ( $json === '[DONE]' ) {
+				break;
+			}
+			$event = json_decode( $json, true );
+			if ( ! is_array( $event ) ) {
+				continue;
+			}
+			// The response.completed event carries the full response object.
+			if ( isset( $event['type'] ) && $event['type'] === 'response.completed' && isset( $event['response'] ) ) {
+				$completed = $event['response'];
+			}
+		}
+		if ( $completed === null ) {
+			return new \WP_Error( 'codex_sse_error', __( 'No completed response in Codex SSE stream.', 'alorbach-ai-gateway' ) );
+		}
+		return $completed;
 	}
 
 	/**
@@ -267,6 +313,67 @@ class API_Client {
 				'prompt_tokens'     => isset( $usage['promptTokenCount'] ) ? (int) $usage['promptTokenCount'] : 0,
 				'completion_tokens'  => isset( $usage['candidatesTokenCount'] ) ? (int) $usage['candidatesTokenCount'] : 0,
 				'total_tokens'       => ( isset( $usage['promptTokenCount'] ) ? (int) $usage['promptTokenCount'] : 0 ) + ( isset( $usage['candidatesTokenCount'] ) ? (int) $usage['candidatesTokenCount'] : 0 ),
+			),
+		);
+	}
+
+	/**
+	 * Normalize an OpenAI Responses API response to Chat Completions format.
+	 *
+	 * @param array $body Decoded Responses API response body.
+	 * @return array Chat Completions-compatible response.
+	 */
+	private static function normalize_codex_response( $body ) {
+		if ( ! is_array( $body ) ) {
+			return $body;
+		}
+
+		// Extract assistant text from output[] items of type 'message'.
+		$content     = '';
+		$finish      = 'stop';
+		$output_list = isset( $body['output'] ) && is_array( $body['output'] ) ? $body['output'] : array();
+		foreach ( $output_list as $item ) {
+			if ( ! is_array( $item ) || ( isset( $item['type'] ) ? $item['type'] : '' ) !== 'message' ) {
+				continue;
+			}
+			$content_parts = isset( $item['content'] ) && is_array( $item['content'] ) ? $item['content'] : array();
+			foreach ( $content_parts as $part ) {
+				if ( is_array( $part ) && ( isset( $part['type'] ) ? $part['type'] : '' ) === 'output_text' ) {
+					$content .= isset( $part['text'] ) ? $part['text'] : '';
+				}
+			}
+		}
+
+		// Map Responses API status to finish_reason.
+		$status = isset( $body['status'] ) ? $body['status'] : 'completed';
+		if ( $status === 'incomplete' ) {
+			$finish = 'length';
+		}
+
+		// Normalize usage field names.
+		$usage     = isset( $body['usage'] ) && is_array( $body['usage'] ) ? $body['usage'] : array();
+		$input_tok = isset( $usage['input_tokens'] ) ? (int) $usage['input_tokens'] : 0;
+		$out_tok   = isset( $usage['output_tokens'] ) ? (int) $usage['output_tokens'] : 0;
+		$total_tok = isset( $usage['total_tokens'] ) ? (int) $usage['total_tokens'] : $input_tok + $out_tok;
+		$cached    = isset( $usage['input_tokens_details']['cached_tokens'] )
+			? (int) $usage['input_tokens_details']['cached_tokens'] : 0;
+
+		return array(
+			'id'      => isset( $body['id'] ) ? $body['id'] : '',
+			'object'  => 'chat.completion',
+			'model'   => isset( $body['model'] ) ? $body['model'] : '',
+			'choices' => array(
+				array(
+					'index'         => 0,
+					'message'       => array( 'role' => 'assistant', 'content' => $content ),
+					'finish_reason' => $finish,
+				),
+			),
+			'usage'   => array(
+				'prompt_tokens'         => $input_tok,
+				'completion_tokens'     => $out_tok,
+				'total_tokens'          => $total_tok,
+				'prompt_tokens_details' => array( 'cached_tokens' => $cached ),
 			),
 		);
 	}

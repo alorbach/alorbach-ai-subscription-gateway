@@ -32,6 +32,8 @@ require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/OpenAI_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Azure_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Google_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/GitHub_Models_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-codex-oauth.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Codex_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Registry.php';
 
 add_action( 'init', 'alorbach_load_textdomain' );
@@ -54,9 +56,68 @@ function alorbach_deactivate() {
 	wp_clear_scheduled_hook( 'alorbach_retry_wc_renewal' );
 }
 
+// Register Codex OAuth provider after the registry is initialised.
+add_action( 'alorbach_register_providers', function() {
+	Alorbach\AIGateway\Providers\Provider_Registry::register(
+		new Alorbach\AIGateway\Providers\Codex_Provider()
+	);
+} );
+
 add_action( 'rest_api_init', 'alorbach_register_rest_routes' );
 function alorbach_register_rest_routes() {
 	Alorbach\AIGateway\REST_Proxy::register_routes();
+}
+
+// Codex OAuth – Step 1: generate authorization URL and store it for display.
+add_action( 'admin_post_alorbach_codex_authorize', 'alorbach_codex_authorize_handler' );
+function alorbach_codex_authorize_handler() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+	}
+	check_admin_referer( 'alorbach_codex_authorize' );
+
+	$auth_url = Alorbach\AIGateway\Codex_OAuth::get_authorization_url();
+	// Store the URL for display on the next page load (5-minute TTL).
+	set_transient( 'alorbach_codex_pending_auth_url', $auth_url, 5 * MINUTE_IN_SECONDS );
+
+	wp_safe_redirect( admin_url( 'admin.php?page=alorbach-ai-gateway' ) );
+	exit;
+}
+
+// Codex OAuth – Step 2: exchange the pasted redirect URL for tokens.
+add_action( 'admin_post_alorbach_codex_exchange', 'alorbach_codex_exchange_handler' );
+function alorbach_codex_exchange_handler() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+	}
+	check_admin_referer( 'alorbach_codex_exchange' );
+
+	$pasted = isset( $_POST['codex_redirect_url'] ) ? wp_unslash( $_POST['codex_redirect_url'] ) : '';
+	$result = Alorbach\AIGateway\Codex_OAuth::exchange_code_from_input( $pasted );
+
+	if ( is_wp_error( $result ) ) {
+		// Keep the pending auth URL alive so Step 1 still shows on the next page load.
+		// (extend TTL by another 5 minutes)
+		$pending = get_transient( 'alorbach_codex_pending_auth_url' );
+		if ( $pending ) {
+			set_transient( 'alorbach_codex_pending_auth_url', $pending, 5 * MINUTE_IN_SECONDS );
+		}
+		set_transient(
+			'alorbach_codex_oauth_notice',
+			array( 'type' => 'error', 'message' => '[' . $result->get_error_code() . '] ' . $result->get_error_message() ),
+			60
+		);
+	} else {
+		delete_transient( 'alorbach_codex_pending_auth_url' );
+		set_transient(
+			'alorbach_codex_oauth_notice',
+			array( 'type' => 'success', 'message' => __( 'Codex OAuth connected successfully.', 'alorbach-ai-gateway' ) ),
+			60
+		);
+	}
+
+	wp_safe_redirect( admin_url( 'admin.php?page=alorbach-ai-gateway' ) );
+	exit;
 }
 
 add_action( 'admin_menu', 'alorbach_admin_menu' );

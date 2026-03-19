@@ -108,7 +108,11 @@ class API_Keys_Helper {
 		$entries = self::get_entries();
 		$result  = array();
 		foreach ( $entries as $entry ) {
-			if ( ( $entry['type'] ?? '' ) === $type && ! empty( $entry['enabled'] ) && ! empty( $entry['api_key'] ) ) {
+			if ( ( $entry['type'] ?? '' ) === $type && ! empty( $entry['enabled'] ) ) {
+				// Codex uses OAuth — no api_key required.
+				if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+					continue;
+				}
 				$result[] = $entry;
 			}
 		}
@@ -134,7 +138,11 @@ class API_Keys_Helper {
 	 */
 	public static function get_credentials_for_entry( $entry_id ) {
 		$entry = self::get_entry_by_id( $entry_id );
-		if ( ! $entry || empty( $entry['api_key'] ) ) {
+		if ( ! $entry ) {
+			return null;
+		}
+		// Codex uses OAuth — no api_key required.
+		if ( ( $entry['type'] ?? '' ) !== 'codex' && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		return self::entry_to_credentials( $entry );
@@ -147,10 +155,11 @@ class API_Keys_Helper {
 	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool}|null
 	 */
 	private static function entry_to_credentials( $entry ) {
-		if ( empty( $entry['api_key'] ) ) {
+		// Codex uses OAuth — no api_key required.
+		if ( ( $entry['type'] ?? '' ) !== 'codex' && empty( $entry['api_key'] ) ) {
 			return null;
 		}
-		$creds = array( 'api_key' => $entry['api_key'] );
+		$creds = array( 'api_key' => $entry['api_key'] ?? '' );
 		if ( ! empty( $entry['endpoint'] ) ) {
 			$creds['endpoint'] = $entry['endpoint'];
 		}
