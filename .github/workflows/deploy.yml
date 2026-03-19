@@ -1,4 +1,4 @@
-name: Deploy to WordPress.org
+name: Release and deploy
 
 on:
   push:
@@ -53,25 +53,79 @@ jobs:
           (cd "$BUILD_DIR" && zip -r "${SLUG}-${VERSION}.zip" "$SLUG")
           echo "zip_path=${PWD}/${BUILD_DIR}/${SLUG}-${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
+      - name: Get commits since last tag
+        id: commits
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
+          if [ -z "$PREV_TAG" ]; then
+            LOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            LOG=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD")
+          fi
+          [ -z "$LOG" ] && LOG="- Initial release"
+          {
+            echo "log<<EOF"
+            echo "$LOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes with AI
+        id: ai_body
+        env:
+          AI_MODEL_KEY: ${{ secrets.AI_MODEL_KEY }}
+        run: |
+          INSTALL_STEPS="### Installation\n1. Download \`alorbach-ai-subscription-gateway-${{ steps.vars.outputs.version }}.zip\` from Assets below\n2. In WordPress Admin go to **Plugins → Add New → Upload Plugin**\n3. Upload the ZIP and activate\n4. Go to **AI Gateway → API Keys** to configure your provider credentials"
+          if [ -z "${AI_MODEL_KEY}" ]; then
+            {
+              echo "body<<EOF"
+              printf '%b\n' "$INSTALL_STEPS"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PAYLOAD=$(jq -n \
+            --arg commits "${{ steps.commits.outputs.log }}" \
+            --arg version "${{ github.ref_name }}" \
+            '{
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "system",
+                  content: "You are a technical writer creating GitHub release notes for a WordPress plugin called \"Alorbach AI Subscription Gateway\". Write concise, developer-friendly release notes in Markdown. Group changes under ### What'\''s New, ### Improvements, and ### Bug Fixes headers as appropriate. Omit headers with no items. Be factual and base content only on the provided commits."
+                },
+                {
+                  role: "user",
+                  content: ("Generate release notes for version " + $version + ".\n\nCommits:\n" + $commits)
+                }
+              ],
+              max_tokens: 800,
+              temperature: 0.3
+            }')
+          RESPONSE=$(curl -sf -X POST \
+            "https://models.inference.ai.azure.com/chat/completions" \
+            -H "Authorization: Bearer ${AI_MODEL_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD") || RESPONSE=""
+          BODY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty' 2>/dev/null)
+          if [ -z "$BODY" ]; then
+            BODY="_AI release notes generation failed._"
+          else
+            BODY=$(printf '%s\n\n%b' "$BODY" "$INSTALL_STEPS")
+          fi
+          {
+            echo "body<<EOF"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release and upload asset
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
           files: ${{ steps.package.outputs.zip_path }}
-          generate_release_notes: true
-          body: |
-            ## Alorbach AI Subscription Gateway ${{ github.ref_name }}
-
-            Precise credit-based AI API billing layer for WordPress. Unified Credit (UC) system, BPE tokenization, immutable ledger, and multi-provider support (OpenAI, Azure, Google Gemini, GitHub Models, Codex).
-
-            ### Installation
-            1. Download `alorbach-ai-subscription-gateway-${{ steps.vars.outputs.version }}.zip` from Assets below
-            2. In WordPress Admin go to **Plugins → Add New → Upload Plugin**
-            3. Upload the ZIP and activate
-            4. Go to **AI Gateway → API Keys** to configure your provider credentials
-
-            ---
+          generate_release_notes: false
+          body: ${{ steps.ai_body.outputs.body }}
 
       - name: Skipping WP.org deploy (missing secrets)
         if: ${{ env.SVN_USERNAME == '' || env.SVN_PASSWORD == '' }}
