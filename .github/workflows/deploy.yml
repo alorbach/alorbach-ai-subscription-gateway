@@ -60,6 +60,18 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: ${{ steps.package.outputs.zip_path }}
           generate_release_notes: true
+          body: |
+            ## Alorbach AI Subscription Gateway ${{ github.ref_name }}
+
+            Precise credit-based AI API billing layer for WordPress. Unified Credit (UC) system, BPE tokenization, immutable ledger, and multi-provider support (OpenAI, Azure, Google Gemini, GitHub Models, Codex).
+
+            ### Installation
+            1. Download `alorbach-ai-subscription-gateway-${{ steps.vars.outputs.version }}.zip` from Assets below
+            2. In WordPress Admin go to **Plugins → Add New → Upload Plugin**
+            3. Upload the ZIP and activate
+            4. Go to **AI Gateway → API Keys** to configure your provider credentials
+
+            ---
 
       - name: Skipping WP.org deploy (missing secrets)
         if: ${{ env.SVN_USERNAME == '' || env.SVN_PASSWORD == '' }}
