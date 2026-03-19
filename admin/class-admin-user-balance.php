@@ -82,7 +82,6 @@ class Admin_User_Balance {
 				<tbody>
 					<?php foreach ( $users as $user ) :
 						$balance = isset( $all_balances[ $user->ID ] ) ? $all_balances[ $user->ID ] : 0;
-						$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $balance );
 						?>
 						<tr>
 							<td>
@@ -92,7 +91,7 @@ class Admin_User_Balance {
 								<a href="<?php echo esc_url( $user_transactions_url ); ?>"><?php echo esc_html( $user->user_login ); ?></a> (<?php echo esc_html( $user->user_email ); ?>)
 							</td>
 							<td><?php echo esc_html( number_format_i18n( $balance ) ); ?></td>
-							<td><?php echo esc_html( number_format_i18n( $credits, 2 ) ); ?></td>
+							<td><?php echo esc_html( self::format_credits_str( $balance ) ); ?></td>
 							<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?></td>
 							<td>
 								<form method="post" style="display:inline;">
@@ -128,13 +127,12 @@ class Admin_User_Balance {
 				</thead>
 				<tbody>
 					<?php foreach ( $users as $user ) :
-						$usage   = isset( $all_usage[ $user->ID ] ) ? $all_usage[ $user->ID ] : 0;
-						$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $usage );
+						$usage = isset( $all_usage[ $user->ID ] ) ? $all_usage[ $user->ID ] : 0;
 						?>
 						<tr>
 							<td><?php echo esc_html( $user->user_login ); ?> (<?php echo esc_html( $user->user_email ); ?>)</td>
 							<td><?php echo esc_html( number_format_i18n( $usage ) ); ?></td>
-							<td><?php echo esc_html( number_format_i18n( $credits, 2 ) ); ?></td>
+							<td><?php echo esc_html( self::format_credits_str( $usage ) ); ?></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>
@@ -195,35 +193,70 @@ class Admin_User_Balance {
 					</thead>
 					<tbody>
 						<?php foreach ( $rows as $row ) :
-							$user = $row['user_id'] ? get_user_by( 'id', $row['user_id'] ) : null;
-							$user_login = $user ? $user->user_login : '';
-							$user_email = $user ? $user->user_email : '';
-							$credits = \Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] );
-							$api_cost_uc = isset( $row['api_cost_uc'] ) ? $row['api_cost_uc'] : null;
+						$row_user   = self::resolve_row_user( $row );
+						$user_login = $row_user['login'];
+						$user_email = $row_user['email'];
+						$api_cost_uc = self::get_row_api_cost_uc( $row );
 							?>
 							<tr>
 								<td><?php echo esc_html( $row['transaction_id'] ); ?></td>
 								<td><?php echo esc_html( $user_login ? $user_login . ' (' . $user_email . ')' : $row['user_id'] ); ?></td>
 								<td><?php echo esc_html( Admin_Helper::get_transaction_type_label( $row['transaction_type'] ) ); ?></td>
 								<td><?php echo esc_html( $row['model_used'] ?? '—' ); ?></td>
-								<td><?php echo $api_cost_uc !== null && $api_cost_uc !== '' ? esc_html( number_format_i18n( (int) $api_cost_uc ) ) : '—'; ?></td>
+								<td><?php echo $api_cost_uc !== null ? esc_html( number_format_i18n( $api_cost_uc ) ) : '—'; ?></td>
 								<td><?php echo esc_html( number_format_i18n( $row['uc_amount'] ) ); ?></td>
-								<td><?php echo esc_html( number_format_i18n( $credits, 2 ) ); ?></td>
+								<td><?php echo esc_html( self::format_credits_str( $row['uc_amount'] ) ); ?></td>
 								<td><?php echo esc_html( $row['created_at'] ); ?></td>
 							</tr>
 						<?php endforeach; ?>
 					</tbody>
 				</table>
 				<?php
-				$pagination_base = add_query_arg( 'page', 'alorbach-user-balance', admin_url( 'admin.php' ) );
-				if ( $filter_user_id > 0 ) {
-					$pagination_base = add_query_arg( 'user_id', $filter_user_id, $pagination_base );
-				}
-				Admin_Helper::render_pagination( $page, $pages, $total, $pagination_base );
+				$pagination_url = $filter_user_id > 0 ? add_query_arg( 'user_id', $filter_user_id, $base_url ) : $base_url;
+				Admin_Helper::render_pagination( $page, $pages, $total, $pagination_url );
 				?>
 			<?php endif; ?>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Resolve user login/email from a transaction row.
+	 *
+	 * @param array $row Transaction row from Ledger::get_transactions().
+	 * @return array { login: string, email: string }
+	 */
+	private static function resolve_row_user( array $row ) : array {
+		$user  = $row['user_id'] ? get_user_by( 'id', $row['user_id'] ) : null;
+		return array(
+			'login' => $user ? $user->user_login : '',
+			'email' => $user ? $user->user_email : '',
+		);
+	}
+
+	/**
+	 * Convert a UC amount to a localised credits string (2 decimal places).
+	 *
+	 * @param int $uc Unit-Credits amount.
+	 * @return string e.g. "1,234.56"
+	 */
+	private static function format_credits_str( int $uc ) : string {
+		return number_format_i18n( \Alorbach\AIGateway\User_Display::uc_to_credits( $uc ), 2 );
+	}
+
+	/**
+	 * Extract the api_cost_uc value from a transaction row.
+	 *
+	 * Returns null when the field is absent or empty so callers can render '—' / '' consistently.
+	 *
+	 * @param array $row Transaction row from Ledger::get_transactions().
+	 * @return int|null
+	 */
+	private static function get_row_api_cost_uc( array $row ) : ?int {
+		if ( ! isset( $row['api_cost_uc'] ) || $row['api_cost_uc'] === null || $row['api_cost_uc'] === '' ) {
+			return null;
+		}
+		return (int) $row['api_cost_uc'];
 	}
 
 	/**
@@ -256,11 +289,10 @@ class Admin_User_Balance {
 			$rows   = $result['rows'];
 
 			foreach ( $rows as $row ) {
-				$user        = $row['user_id'] ? get_user_by( 'id', $row['user_id'] ) : null;
-				$user_login  = $user ? $user->user_login : '';
-				$user_email  = $user ? $user->user_email : '';
-				$credits     = \Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] );
-				$api_cost_uc = isset( $row['api_cost_uc'] ) && $row['api_cost_uc'] !== null && $row['api_cost_uc'] !== '' ? $row['api_cost_uc'] : '';
+				$row_user    = self::resolve_row_user( $row );
+				$user_login  = $row_user['login'];
+				$user_email  = $row_user['email'];
+				$api_cost_uc = self::get_row_api_cost_uc( $row );
 				fputcsv( $out, array(
 					$row['transaction_id'],
 					$row['user_id'],
@@ -268,9 +300,9 @@ class Admin_User_Balance {
 					$user_email,
 					$row['transaction_type'],
 					$row['model_used'] ?? '',
-					$api_cost_uc,
+					$api_cost_uc !== null ? $api_cost_uc : '',
 					$row['uc_amount'],
-					$credits,
+					\Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] ),
 					$row['created_at'],
 				) );
 			}
