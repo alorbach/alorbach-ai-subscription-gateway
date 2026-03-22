@@ -57,7 +57,7 @@ All pages are under the **AI Gateway** top-level menu.
 | Page | Purpose |
 |---|---|
 | **API Keys** | Manage credentials for OpenAI, Azure, Google, GitHub Models, Codex |
-| **Settings** | Rate limits, monthly quotas, cost multipliers |
+| **Settings** | Rate limits, monthly quotas, cost multipliers, canonical billing/account URLs |
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Configure default models for demo pages; create sample pages |
 | **Plans** | Create credit packages and subscription plans |
@@ -72,6 +72,7 @@ All pages are under the **AI Gateway** top-level menu.
 ```
 [alorbach_balance]           Display the current user's credit balance
 [alorbach_usage_month]       Display the current user's usage this month
+[alorbach_account_widget]    Embeddable downstream account widget
 
 [alorbach_demo_chat]         Interactive AI chat UI
 [alorbach_demo_image]        Image generator UI (prompt, size, quality, quantity)
@@ -94,12 +95,21 @@ Base URL: `/wp-json/alorbach/v1`
 | `POST` | `/chat` | Chat completion with credit deduction |
 | `GET` | `/me/balance` | Current user's balance (UC) |
 | `GET` | `/me/usage` | Usage for `period` (`month` or `week`) |
-| `GET` | `/me/models` | List available AI models |
+| `GET` | `/me/models` | Demo-facing model settings. Prefer `/integration/config` for downstream products |
 | `GET` | `/me/estimate` | Pre-flight cost estimate for image/video/audio |
+| `GET` | `/integration/account` | Canonical downstream account summary |
+| `GET` | `/integration/account/history` | Canonical downstream account history |
 | `POST` | `/images` | Generate images |
 | `POST` | `/transcribe` | Transcribe audio (base64) |
 | `POST` | `/video` | Generate video |
 | `POST` | `/stripe-webhook` | Stripe payment events _(public)_ |
+
+### Public Downstream Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/integration/config` | Canonical downstream config: backend defaults, capabilities, billing URLs |
+| `GET` | `/integration/plans` | Canonical downstream plan catalog (active plans by default) |
 
 ### Admin Endpoints _(requires `manage_options`)_
 
@@ -137,6 +147,8 @@ add_action( 'alorbach_register_providers', function() {
 // WooCommerce subscription events
 do_action( 'alorbach_subscription_payment_failed', $subscription, $last_order );
 do_action( 'alorbach_wc_renewal_retry_failed', $user_id, $credits_uc );
+do_action( 'alorbach_subscription_renewal_completed', $user_id, $credits_uc, $source, $subscription, $last_order );
+do_action( 'alorbach_generation_rejected_insufficient_balance', $user_id, $context, $details );
 
 // Stripe events (after signature verification)
 do_action( 'alorbach_stripe_webhook', $event_type, $event );
@@ -177,6 +189,12 @@ add_filter( 'alorbach_user_cost', function( $user_cost, $api_cost_uc, $model ) {
 // Video polling tuning
 add_filter( 'alorbach_video_poll_max',      fn() => 120 ); // double polling attempts
 add_filter( 'alorbach_video_poll_interval', fn() => 10  ); // poll every 10s
+
+// Downstream integration payloads
+add_filter( 'alorbach_integration_plans', fn( $plans, $args ) => $plans, 10, 2 );
+add_filter( 'alorbach_integration_config', fn( $config ) => $config, 10, 1 );
+add_filter( 'alorbach_integration_account_summary', fn( $summary, $user_id ) => $summary, 10, 2 );
+add_filter( 'alorbach_integration_account_history', fn( $history, $user_id, $args ) => $history, 10, 3 );
 ```
 
 ---

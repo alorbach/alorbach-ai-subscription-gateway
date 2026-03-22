@@ -93,6 +93,26 @@ class REST_Proxy {
 	}
 
 	/**
+	 * Build an insufficient credits error and fire a downstream hook.
+	 *
+	 * @param int    $user_id WordPress user ID.
+	 * @param string $context Request context such as chat or image.
+	 * @param array  $details Context details for observers.
+	 * @param string $message Error message.
+	 * @return \WP_Error
+	 */
+	private static function insufficient_credits_error( $user_id, $context, $details = array(), $message = '' ) {
+		$message = $message ?: __( 'Insufficient credits.', 'alorbach-ai-gateway' );
+		do_action( 'alorbach_generation_rejected_insufficient_balance', (int) $user_id, (string) $context, (array) $details );
+
+		return new \WP_Error(
+			'insufficient_credits',
+			$message,
+			array( 'status' => 402 )
+		);
+	}
+
+	/**
 	 * Register REST routes.
 	 */
 	public static function register_routes() {
@@ -161,6 +181,50 @@ class REST_Proxy {
 			'permission_callback' => function () {
 				return is_user_logged_in();
 			},
+		) );
+
+		register_rest_route( 'alorbach/v1', '/integration/config', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'integration_config' ),
+			'permission_callback' => '__return_true',
+		) );
+
+		register_rest_route( 'alorbach/v1', '/integration/plans', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'integration_plans' ),
+			'permission_callback' => '__return_true',
+			'args'                => array(
+				'include_inactive' => array(
+					'default'           => false,
+					'sanitize_callback' => 'rest_sanitize_boolean',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/integration/account', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'integration_account' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+		) );
+
+		register_rest_route( 'alorbach/v1', '/integration/account/history', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'integration_account_history' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args'                => array(
+				'page'     => array(
+					'default'           => 1,
+					'sanitize_callback' => 'absint',
+				),
+				'per_page' => array(
+					'default'           => 10,
+					'sanitize_callback' => 'absint',
+				),
+			),
 		) );
 
 		register_rest_route( 'alorbach/v1', '/me/estimate', array(
@@ -416,7 +480,15 @@ class REST_Proxy {
 
 			$balance = Ledger::get_balance( $user_id );
 			if ( $balance < $auth_hold ) {
-				return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
+				return self::insufficient_credits_error(
+					$user_id,
+					'chat',
+					array(
+						'model'        => $model,
+						'required_uc'  => $auth_hold,
+						'available_uc' => $balance,
+					)
+				);
 			}
 		}
 
@@ -530,38 +602,17 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function me_models( $request ) {
-		$admin = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
-		$text_options  = $admin::get_text_models();
-		$image_options = $admin::get_image_sizes();
-		$audio_options = $admin::get_audio_models();
-		$video_options = $admin::get_video_models();
-
-		$default_chat  = get_option( 'alorbach_demo_default_chat_model', $text_options[0] ?? 'gpt-4.1-mini' );
-		$default_image = get_option( 'alorbach_demo_default_image_model', $image_options[0] ?? '1024x1024' );
-		$default_audio = get_option( 'alorbach_demo_default_audio_model', $audio_options[0] ?? 'whisper-1' );
-		$default_video = get_option( 'alorbach_demo_default_video_model', $video_options[0] ?? 'sora-2' );
-
-		$allow_chat         = (bool) get_option( 'alorbach_demo_allow_chat_model_select', false );
-		$allow_image_size   = (bool) get_option( 'alorbach_demo_allow_image_size_select', false );
-		$allow_image_model  = (bool) get_option( 'alorbach_demo_allow_image_model_select', false );
-		$allow_image_quality = (bool) get_option( 'alorbach_demo_allow_image_quality_select', false );
-		$allow_audio        = (bool) get_option( 'alorbach_demo_allow_audio_model_select', false );
-		$allow_video        = (bool) get_option( 'alorbach_demo_allow_video_model_select', false );
-
-		$default_quality = get_option( 'alorbach_image_default_quality', 'medium' );
-		$quality_options = array( 'low', 'medium', 'high' );
-		$image_model_options = $admin::get_image_models();
-		$default_image_model = get_option( 'alorbach_image_default_model', $image_model_options[0] ?? 'dall-e-3' );
-
+		$config = Integration_Service::get_integration_config();
+		$admin  = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
 		$max_tokens_options = $admin::get_max_tokens_options();
-		$default_max_tokens  = get_option( 'alorbach_demo_default_max_tokens', '1024' );
+		$default_max_tokens = get_option( 'alorbach_demo_default_max_tokens', '1024' );
 		$default_max_tokens = in_array( $default_max_tokens, $max_tokens_options, true ) ? $default_max_tokens : ( $max_tokens_options[0] ?? '1024' );
 
 		return rest_ensure_response( array(
 			'text'  => array(
-				'default'      => in_array( $default_chat, $text_options, true ) ? $default_chat : ( $text_options[0] ?? 'gpt-4.1-mini' ),
-				'allow_select' => $allow_chat,
-				'options'      => $text_options,
+				'default'      => $config['defaults']['chat_model'],
+				'allow_select' => (bool) get_option( 'alorbach_demo_allow_chat_model_select', false ),
+				'options'      => $config['capabilities']['chat_models'],
 				'max_tokens'   => array(
 					'default' => $default_max_tokens,
 					'options' => $max_tokens_options,
@@ -569,42 +620,103 @@ class REST_Proxy {
 			),
 			'image' => array(
 				'size'    => array(
-					'default'      => in_array( $default_image, $image_options, true ) ? $default_image : ( $image_options[0] ?? '1024x1024' ),
-					'allow_select' => $allow_image_size,
-					'options'      => $image_options,
+					'default'      => $config['defaults']['image_size'],
+					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_size_select', false ),
+					'options'      => $config['capabilities']['image_sizes'],
 				),
 				'model'   => array(
-					'default'      => in_array( $default_image_model, $image_model_options, true ) ? $default_image_model : ( $image_model_options[0] ?? 'dall-e-3' ),
-					'allow_select' => $allow_image_model,
-					'options'      => $image_model_options,
+					'default'      => $config['defaults']['image_model'],
+					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_model_select', false ),
+					'options'      => $config['capabilities']['image_models'],
 				),
 				'quality' => array(
-					'default'      => in_array( $default_quality, $quality_options, true ) ? $default_quality : 'medium',
-					'allow_select' => $allow_image_quality,
-					'options'      => $quality_options,
+					'default'      => $config['defaults']['image_quality'],
+					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_quality_select', false ),
+					'options'      => $config['capabilities']['image_qualities'],
 				),
 			),
 			'audio' => array(
-				'default'      => in_array( $default_audio, $audio_options, true ) ? $default_audio : ( $audio_options[0] ?? 'whisper-1' ),
-				'allow_select' => $allow_audio,
-				'options'      => $audio_options,
+				'default'      => $config['defaults']['audio_model'],
+				'allow_select' => (bool) get_option( 'alorbach_demo_allow_audio_model_select', false ),
+				'options'      => $config['capabilities']['audio_models'],
 			),
 			'video' => array(
-				'default'      => in_array( $default_video, $video_options, true ) ? $default_video : ( $video_options[0] ?? 'sora-2' ),
-				'allow_select' => $allow_video,
-				'options'      => $video_options,
+				'default'      => $config['defaults']['video_model'],
+				'allow_select' => (bool) get_option( 'alorbach_demo_allow_video_model_select', false ),
+				'options'      => $config['capabilities']['video_models'],
 				'size'         => array(
 					'default'      => '1280x720',
 					'allow_select'  => true,
-					'options'       => array( '1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024' ),
+					'options'       => $config['capabilities']['video_sizes'],
 				),
 				'duration'      => array(
 					'default'      => '8',
 					'allow_select'  => true,
-					'options'       => array( '4', '8', '12' ),
+					'options'       => $config['capabilities']['video_durations'],
 				),
 			),
 		) );
+	}
+
+	/**
+	 * Get downstream integration config.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function integration_config( $request ) {
+		return rest_ensure_response( Integration_Service::get_integration_config() );
+	}
+
+	/**
+	 * Get downstream public plans.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function integration_plans( $request ) {
+		$include_inactive = (bool) $request->get_param( 'include_inactive' );
+		if ( $include_inactive && ! current_user_can( 'manage_options' ) ) {
+			$include_inactive = false;
+		}
+
+		return rest_ensure_response(
+			array(
+				'plans' => Integration_Service::get_public_plans(
+					array(
+						'include_inactive' => $include_inactive,
+					)
+				),
+			)
+		);
+	}
+
+	/**
+	 * Get downstream account summary.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function integration_account( $request ) {
+		return rest_ensure_response( Integration_Service::get_account_summary( get_current_user_id() ) );
+	}
+
+	/**
+	 * Get downstream account history.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function integration_account_history( $request ) {
+		return rest_ensure_response(
+			Integration_Service::get_account_history(
+				get_current_user_id(),
+				array(
+					'page'     => max( 1, (int) $request->get_param( 'page' ) ),
+					'per_page' => max( 1, min( 50, (int) $request->get_param( 'per_page' ) ) ),
+				)
+			)
+		);
 	}
 
 	/**
@@ -777,7 +889,17 @@ class REST_Proxy {
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
-			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
+			return self::insufficient_credits_error(
+				$user_id,
+				'image',
+				array(
+					'model'        => $model,
+					'size'         => $size,
+					'quality'      => $quality,
+					'required_uc'  => $cost,
+					'available_uc' => $balance,
+				)
+			);
 		}
 
 		$response = API_Client::images( $prompt, $size, $n, $model, $quality );
@@ -871,7 +993,16 @@ class REST_Proxy {
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
 			wp_delete_file( $tmp );
-			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
+			return self::insufficient_credits_error(
+				$user_id,
+				'audio',
+				array(
+					'model'        => $model,
+					'duration'     => $duration,
+					'required_uc'  => $cost,
+					'available_uc' => $balance,
+				)
+			);
 		}
 
 		$response = API_Client::transcribe( $tmp, $model, $prompt, $format );
@@ -928,7 +1059,17 @@ class REST_Proxy {
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
-			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
+			return self::insufficient_credits_error(
+				$user_id,
+				'video',
+				array(
+					'model'        => $model,
+					'size'         => $size,
+					'duration'     => $duration,
+					'required_uc'  => $cost,
+					'available_uc' => $balance,
+				)
+			);
 		}
 
 		$response = API_Client::video( $prompt, $model, $size, $duration );
@@ -1233,10 +1374,17 @@ class REST_Proxy {
 					$model
 				);
 				if ( $balance < $step_cost_estimate ) {
-					return new \WP_Error(
-						'insufficient_credits',
-						__( 'Insufficient credits to continue.', 'alorbach-ai-gateway' ),
-						array( 'status' => 402 )
+					return self::insufficient_credits_error(
+						$user_id,
+						'chat',
+						array(
+							'model'        => $model,
+							'multi_step'   => true,
+							'required_uc'  => $step_cost_estimate,
+							'available_uc' => $balance,
+							'step'         => $step,
+						),
+						__( 'Insufficient credits to continue.', 'alorbach-ai-gateway' )
 					);
 				}
 			}

@@ -37,6 +37,10 @@ class Admin_Settings {
 			$rate_limit_images    = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_images'] ) ) ) ) : 30;
 			$rate_limit_transcribe = isset( $_POST['alorbach_rate_limit_transcribe'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_transcribe'] ) ) ) ) : 30;
 			$rate_limit_video     = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_video'] ) ) ) ) : 10;
+			$billing_url_subscribe      = isset( $_POST['alorbach_billing_url_subscribe'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_subscribe'] ) ) : '';
+			$billing_url_top_up         = isset( $_POST['alorbach_billing_url_top_up'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_top_up'] ) ) : '';
+			$billing_url_manage_account = isset( $_POST['alorbach_billing_url_manage_account'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_manage_account'] ) ) : '';
+			$billing_url_account        = isset( $_POST['alorbach_billing_url_account_overview'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_account_overview'] ) ) : '';
 
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
 			update_option( 'alorbach_selling_multiplier', $selling_multiplier );
@@ -48,6 +52,10 @@ class Admin_Settings {
 			update_option( 'alorbach_rate_limit_images', $rate_limit_images );
 			update_option( 'alorbach_rate_limit_transcribe', $rate_limit_transcribe );
 			update_option( 'alorbach_rate_limit_video', $rate_limit_video );
+			update_option( 'alorbach_billing_url_subscribe', $billing_url_subscribe );
+			update_option( 'alorbach_billing_url_top_up', $billing_url_top_up );
+			update_option( 'alorbach_billing_url_manage_account', $billing_url_manage_account );
+			update_option( 'alorbach_billing_url_account_overview', $billing_url_account );
 			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_monthly_quota_uc'] ) ) ) : 0;
 			update_option( 'alorbach_monthly_quota_uc', $monthly_quota_uc );
 			Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
@@ -64,6 +72,10 @@ class Admin_Settings {
 		$rate_limit_transcribe  = (int) get_option( 'alorbach_rate_limit_transcribe', 30 );
 		$rate_limit_video       = (int) get_option( 'alorbach_rate_limit_video', 10 );
 		$monthly_quota_uc       = (int) get_option( 'alorbach_monthly_quota_uc', 0 );
+		$billing_url_subscribe      = (string) get_option( 'alorbach_billing_url_subscribe', '' );
+		$billing_url_top_up         = (string) get_option( 'alorbach_billing_url_top_up', '' );
+		$billing_url_manage_account = (string) get_option( 'alorbach_billing_url_manage_account', '' );
+		$billing_url_account        = (string) get_option( 'alorbach_billing_url_account_overview', '' );
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Settings', 'alorbach-ai-gateway' ); ?></h1>
@@ -171,6 +183,27 @@ class Admin_Settings {
 							<input type="number" name="alorbach_monthly_quota_uc" id="alorbach_monthly_quota_uc" value="<?php echo esc_attr( $monthly_quota_uc ); ?>" min="0" step="1000" class="regular-text" />
 							<p class="description"><?php esc_html_e( 'Maximum UC each user may spend per calendar month across all endpoints. 0 = unlimited. 1 Credit = 1,000 UC.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
+					</tr>
+				</table>
+
+				<h2><?php esc_html_e( 'Billing / Account URLs', 'alorbach-ai-gateway' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Canonical frontend destinations exposed to downstream plugins. Leave a field empty to hide that CTA in downstream integrations.', 'alorbach-ai-gateway' ); ?></p>
+				<table class="form-table">
+					<tr>
+						<th scope="row"><label for="alorbach_billing_url_subscribe"><?php esc_html_e( 'Subscribe URL', 'alorbach-ai-gateway' ); ?></label></th>
+						<td><input type="url" name="alorbach_billing_url_subscribe" id="alorbach_billing_url_subscribe" value="<?php echo esc_attr( $billing_url_subscribe ); ?>" class="regular-text code" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_billing_url_top_up"><?php esc_html_e( 'Top-up URL', 'alorbach-ai-gateway' ); ?></label></th>
+						<td><input type="url" name="alorbach_billing_url_top_up" id="alorbach_billing_url_top_up" value="<?php echo esc_attr( $billing_url_top_up ); ?>" class="regular-text code" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_billing_url_manage_account"><?php esc_html_e( 'Manage account URL', 'alorbach-ai-gateway' ); ?></label></th>
+						<td><input type="url" name="alorbach_billing_url_manage_account" id="alorbach_billing_url_manage_account" value="<?php echo esc_attr( $billing_url_manage_account ); ?>" class="regular-text code" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_billing_url_account_overview"><?php esc_html_e( 'Account overview URL', 'alorbach-ai-gateway' ); ?></label></th>
+						<td><input type="url" name="alorbach_billing_url_account_overview" id="alorbach_billing_url_account_overview" value="<?php echo esc_attr( $billing_url_account ); ?>" class="regular-text code" /></td>
 					</tr>
 				</table>
 

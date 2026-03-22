@@ -23,11 +23,15 @@ class Admin_Developer_Docs {
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Developer Documentation', 'alorbach-ai-gateway' ); ?></h1>
-			<p class="description"><?php esc_html_e( 'Code samples and API reference for integrating with the Alorbach AI Subscription Gateway.', 'alorbach-ai-gateway' ); ?></p>
+			<p class="description"><?php esc_html_e( 'Stable downstream integration APIs, demo endpoints, hooks, and example usage for the Alorbach AI Subscription Gateway.', 'alorbach-ai-gateway' ); ?></p>
 
 			<?php self::section_shortcodes(); ?>
 			<?php self::section_rest_api(); ?>
-			<?php self::section_hooks(); ?>		<?php self::section_custom_providers(); ?>			<?php self::section_php(); ?>
+			<?php self::section_payloads(); ?>
+			<?php self::section_hooks(); ?>
+			<?php self::section_php(); ?>
+			<?php self::section_downstream_example(); ?>
+			<?php self::section_custom_providers(); ?>
 		</div>
 		<?php
 	}
@@ -38,8 +42,8 @@ class Admin_Developer_Docs {
 	private static function section_shortcodes() {
 		?>
 		<h2><?php esc_html_e( 'Shortcodes', 'alorbach-ai-gateway' ); ?></h2>
-		<p><?php esc_html_e( 'Add demo pages to any post or page. Users must be logged in.', 'alorbach-ai-gateway' ); ?></p>
-		<table class="widefat striped" style="max-width: 800px;">
+		<p><?php esc_html_e( 'Demo shortcodes are intended for gateway-owned sample pages. The account widget shortcode is the stable downstream embeddable surface.', 'alorbach-ai-gateway' ); ?></p>
+		<table class="widefat striped" style="max-width: 900px;">
 			<thead>
 				<tr>
 					<th><?php esc_html_e( 'Shortcode', 'alorbach-ai-gateway' ); ?></th>
@@ -47,36 +51,32 @@ class Admin_Developer_Docs {
 				</tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td><code>[alorbach_demo_chat]</code></td>
-					<td><?php esc_html_e( 'AI Chat demo (text completions)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>[alorbach_demo_image]</code></td>
-					<td><?php esc_html_e( 'Image generation demo', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>[alorbach_demo_transcribe]</code></td>
-					<td><?php esc_html_e( 'Audio transcription demo (Whisper)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>[alorbach_demo_video]</code></td>
-					<td><?php esc_html_e( 'Video generation demo (Sora)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>[alorbach_balance]</code></td>
-					<td><?php esc_html_e( 'Display current user credit balance', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>[alorbach_usage_month]</code></td>
-					<td><?php esc_html_e( 'Display current user usage this month', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
+				<tr><td><code>[alorbach_account_widget]</code></td><td><?php esc_html_e( 'Embeddable account widget with balance, usage, billing links, and recent history', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>[alorbach_balance]</code></td><td><?php esc_html_e( 'Display current user credit balance', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>[alorbach_usage_month]</code></td><td><?php esc_html_e( 'Display current user usage this month', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>[alorbach_demo_chat]</code></td><td><?php esc_html_e( 'Gateway demo chat UI', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>[alorbach_demo_image]</code></td><td><?php esc_html_e( 'Gateway demo image UI', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>[alorbach_demo_transcribe]</code></td><td><?php esc_html_e( 'Gateway demo audio transcription UI', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>[alorbach_demo_video]</code></td><td><?php esc_html_e( 'Gateway demo video UI', 'alorbach-ai-gateway' ); ?></td></tr>
 			</tbody>
 		</table>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// Example: Add chat demo to a page
-[alorbach_demo_chat]
-
-// Example: Show balance and usage
+		<h3><?php esc_html_e( 'Account Widget Attributes', 'alorbach-ai-gateway' ); ?></h3>
+		<table class="widefat striped" style="max-width: 900px;">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Attribute', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Default', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Description', 'alorbach-ai-gateway' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr><td><code>history_items</code></td><td><code>5</code></td><td><?php esc_html_e( 'Number of recent history items to render', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>show_history</code></td><td><code>true</code></td><td><?php esc_html_e( 'Set to `false` to hide the recent activity list', 'alorbach-ai-gateway' ); ?></td></tr>
+			</tbody>
+		</table>
+		<p><?php esc_html_e( 'If the visitor is not logged in, the account widget returns an empty string. If billing/account URLs are unset, the corresponding CTA is omitted.', 'alorbach-ai-gateway' ); ?></p>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>[alorbach_account_widget history_items="5"]
+[alorbach_account_widget history_items="3" show_history="false"]
 [alorbach_balance]
 [alorbach_usage_month]</code></pre>
 		<?php
@@ -89,7 +89,9 @@ class Admin_Developer_Docs {
 		?>
 		<h2><?php esc_html_e( 'REST API Endpoints', 'alorbach-ai-gateway' ); ?></h2>
 		<p><?php esc_html_e( 'Base URL:', 'alorbach-ai-gateway' ); ?> <code><?php echo esc_html( rest_url( 'alorbach/v1' ) ); ?></code></p>
-		<p><?php esc_html_e( 'All endpoints require authentication (logged-in user). Send X-WP-Nonce header for nonce-based auth.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'Stable downstream contract: `/integration/config`, `/integration/plans`, `/integration/account`, `/integration/account/history`. The first two are public-readable; account endpoints require a logged-in user.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><?php esc_html_e( 'Downstream Contract', 'alorbach-ai-gateway' ); ?></h3>
 		<table class="widefat striped" style="max-width: 900px;">
 			<thead>
 				<tr>
@@ -99,159 +101,169 @@ class Admin_Developer_Docs {
 				</tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td>GET</td>
-					<td><code>/me/balance</code></td>
-					<td><?php esc_html_e( 'Current user balance (UC, credits, USD)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>GET</td>
-					<td><code>/me/usage</code></td>
-					<td><?php esc_html_e( 'Current user usage (period: month|week)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>GET</td>
-					<td><code>/me/models</code></td>
-					<td><?php esc_html_e( 'Configured models for demos (text, image, audio, video)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>GET</td>
-					<td><code>/me/estimate</code></td>
-					<td><?php esc_html_e( 'Cost estimate (type: image|video|audio, size, quality, n, etc.)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>POST</td>
-					<td><code>/chat</code></td>
-					<td><?php esc_html_e( 'Chat completion (messages, model, max_tokens). Supports optional multi-step mode: multi_step, max_steps, continue_message.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>POST</td>
-					<td><code>/images</code></td>
-					<td><?php esc_html_e( 'Image generation (prompt, size, n, quality)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>POST</td>
-					<td><code>/transcribe</code></td>
-					<td><?php esc_html_e( 'Audio transcription (audio_base64, duration_seconds, model, prompt)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td>POST</td>
-					<td><code>/video</code></td>
-					<td><?php esc_html_e( 'Video generation (prompt, model)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
+				<tr><td>GET</td><td><code>/integration/config</code></td><td><?php esc_html_e( 'Backend defaults, supported capabilities, canonical billing/account URLs. Public-readable.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/integration/plans</code></td><td><?php esc_html_e( 'Canonical plan catalog. Returns active plans by default. Public-readable.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/integration/account</code></td><td><?php esc_html_e( 'Current user account summary: balance, usage, billing URLs, renewal summary. Logged-in users only.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/integration/account/history</code></td><td><?php esc_html_e( 'Current user recent credit history in a frontend-safe shape. Logged-in users only.', 'alorbach-ai-gateway' ); ?></td></tr>
 			</tbody>
 		</table>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// JavaScript: Fetch balance
-const response = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/me/balance' ) ); ?>', {
-  headers: { 'X-WP-Nonce': alorbachDemo.nonce }
-});
-const { balance_uc, balance_credits } = await response.json();
-
-// JavaScript: Standard single-step chat completion
-const res = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/chat' ) ); ?>', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': alorbachDemo.nonce },
-  body: JSON.stringify({
-    messages: [{ role: 'user', content: 'Hello' }],
-    model: 'gpt-4.1-mini',
-    max_tokens: 256
-  })
-});
-const data = await res.json();
-console.log( data.choices[0].message.content );
-console.log( 'Cost: ' + data.cost_credits + ' credits' );</code></pre>
-
-		<h3><?php esc_html_e( 'Multi-Step Chat (Large Responses)', 'alorbach-ai-gateway' ); ?></h3>
-		<p><?php esc_html_e( 'AI models truncate output when a response exceeds max_tokens, returning finish_reason: "length". Enable multi_step mode to have the gateway automatically continue and concatenate all chunks server-side, returning a single combined response.', 'alorbach-ai-gateway' ); ?></p>
+		<h3><?php esc_html_e( 'Parameters', 'alorbach-ai-gateway' ); ?></h3>
 		<table class="widefat striped" style="max-width: 900px;">
 			<thead>
 				<tr>
-					<th><?php esc_html_e( 'Parameter', 'alorbach-ai-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Type', 'alorbach-ai-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Default', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Endpoint', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Parameters', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Notes', 'alorbach-ai-gateway' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<tr><td><code>/integration/config</code></td><td><code>none</code></td><td><?php esc_html_e( 'Read-only public config', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>/integration/plans</code></td><td><code>include_inactive</code> (boolean)</td><td><?php esc_html_e( 'Inactive plans are hidden by default. Downstream frontends should usually leave this unset.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>/integration/account</code></td><td><code>none</code></td><td><?php esc_html_e( 'Returns current logged-in user only', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>/integration/account/history</code></td><td><code>page</code>, <code>per_page</code></td><td><?php esc_html_e( 'Paginated current-user history. `per_page` defaults to 10.', 'alorbach-ai-gateway' ); ?></td></tr>
+			</tbody>
+		</table>
+
+		<h3><?php esc_html_e( 'Authentication', 'alorbach-ai-gateway' ); ?></h3>
+		<p><?php esc_html_e( 'Public endpoints do not require authentication. Logged-in account endpoints use standard WordPress REST authentication. In browser-based integrations, send the logged-in cookies plus an `X-WP-Nonce` header created with `wp_create_nonce( \'wp_rest\' )`.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'The nonce must come from your own frontend bootstrap or localized script data. Do not assume the demo UI nonce object exists in downstream products.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><?php esc_html_e( 'Legacy / Demo-Facing Endpoints', 'alorbach-ai-gateway' ); ?></h3>
+		<table class="widefat striped" style="max-width: 900px;">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Method', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Endpoint', 'alorbach-ai-gateway' ); ?></th>
 					<th><?php esc_html_e( 'Description', 'alorbach-ai-gateway' ); ?></th>
 				</tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td><code>multi_step</code></td>
-					<td><?php esc_html_e( 'bool', 'alorbach-ai-gateway' ); ?></td>
-					<td><code>false</code></td>
-					<td><?php esc_html_e( 'Enable automatic continuation. When true, the gateway loops until a non-length finish_reason is received or max_steps is reached.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>max_steps</code></td>
-					<td><?php esc_html_e( 'int', 'alorbach-ai-gateway' ); ?></td>
-					<td><code>5</code></td>
-					<td><?php esc_html_e( 'Maximum continuation steps. Clamped to 1–20 server-side regardless of the value sent.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>continue_message</code></td>
-					<td><?php esc_html_e( 'string', 'alorbach-ai-gateway' ); ?></td>
-					<td><?php esc_html_e( '"Continue exactly where you left off without any preamble or repetition."', 'alorbach-ai-gateway' ); ?></td>
-					<td><?php esc_html_e( 'Custom prompt injected as a user message after each truncated chunk to instruct the model how to continue.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
+				<tr><td>GET</td><td><code>/me/balance</code></td><td><?php esc_html_e( 'Current user balance', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/me/usage</code></td><td><?php esc_html_e( 'Current user usage (month|week)', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/me/models</code></td><td><?php esc_html_e( 'Gateway demo model settings. Prefer `/integration/config` for downstream products.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/me/estimate</code></td><td><?php esc_html_e( 'Pre-flight estimate for image/video/audio', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>POST</td><td><code>/chat</code></td><td><?php esc_html_e( 'Chat completion with credit deduction', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>POST</td><td><code>/images</code></td><td><?php esc_html_e( 'Image generation with credit deduction', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>POST</td><td><code>/transcribe</code></td><td><?php esc_html_e( 'Audio transcription with credit deduction', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>POST</td><td><code>/video</code></td><td><?php esc_html_e( 'Video generation with credit deduction', 'alorbach-ai-gateway' ); ?></td></tr>
 			</tbody>
 		</table>
-		<p><?php esc_html_e( 'The combined response includes all standard chat fields plus:', 'alorbach-ai-gateway' ); ?></p>
-		<table class="widefat striped" style="max-width: 900px;">
-			<thead>
-				<tr>
-					<th><?php esc_html_e( 'Response Field', 'alorbach-ai-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Type', 'alorbach-ai-gateway' ); ?></th>
-					<th><?php esc_html_e( 'Description', 'alorbach-ai-gateway' ); ?></th>
-				</tr>
-			</thead>
-			<tbody>
-				<tr>
-					<td><code>steps_count</code></td>
-					<td><?php esc_html_e( 'int', 'alorbach-ai-gateway' ); ?></td>
-					<td><?php esc_html_e( 'Number of API calls made (1 when no continuation was needed).', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>steps[]</code></td>
-					<td><?php esc_html_e( 'array', 'alorbach-ai-gateway' ); ?></td>
-					<td><?php esc_html_e( 'Per-step breakdown: { step, finish_reason, completion_tokens, cost_uc }. Useful for debugging and cost attribution.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>usage</code></td>
-					<td><?php esc_html_e( 'object', 'alorbach-ai-gateway' ); ?></td>
-					<td><?php esc_html_e( 'Token counts are summed across all steps (prompt_tokens, completion_tokens, total_tokens).', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>cost_uc / cost_credits / cost_usd</code></td>
-					<td><?php esc_html_e( 'int / string / string', 'alorbach-ai-gateway' ); ?></td>
-					<td><?php esc_html_e( 'Total cost across all steps. The ledger records one entry per step for a full audit trail.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-			</tbody>
-		</table>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// JavaScript: Multi-step chat — generate a long document automatically
-const res = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/chat' ) ); ?>', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': alorbachDemo.nonce },
-  body: JSON.stringify({
-    messages: [{ role: 'user', content: 'Write a comprehensive 2000-word article about renewable energy.' }],
-    model: 'gpt-4.1-mini',
-    max_tokens: 1024,
-    multi_step: true,
-    max_steps: 10
-    // continue_message: 'Keep going.' // optional custom prompt
-  })
-});
-const data = await res.json();
 
-// The full concatenated article is in choices[0].message.content
-console.log( data.choices[0].message.content );
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// Public plan + config fetch
+const config = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/config' ) ); ?>').then(r => r.json());
+const plans = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json());
 
-// Developer metadata
-console.log( 'Completed in ' + data.steps_count + ' step(s)' );
-console.log( 'Total tokens:', data.usage.total_tokens );
-console.log( 'Total cost:', data.cost_credits + ' credits' );
+// Logged-in account fetch using your own localized nonce
+const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/account' ) ); ?>', {
+  credentials: 'same-origin',
+  headers: { 'X-WP-Nonce': window.myGatewayData.restNonce }
+}).then(r => r.json());</code></pre>
+		<?php
+	}
 
-// Per-step breakdown
-data.steps.forEach( s => {
-  console.log( `Step ${s.step}: finish_reason=${s.finish_reason}, tokens=${s.completion_tokens}, cost=${s.cost_uc} UC` );
-});</code></pre>
+	/**
+	 * Payload shapes section.
+	 */
+	private static function section_payloads() {
+		?>
+		<h2><?php esc_html_e( 'Response Shapes', 'alorbach-ai-gateway' ); ?></h2>
+		<p><?php esc_html_e( 'These structures are the stable downstream contract. Prefer these payloads and PHP helpers over raw options or demo endpoint payloads.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><code>/integration/config</code></h3>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>{
+  "defaults": {
+    "chat_model": "gpt-4.1-mini",
+    "image_model": "dall-e-3",
+    "image_size": "1024x1024",
+    "image_quality": "medium",
+    "audio_model": "whisper-1",
+    "video_model": "sora-2"
+  },
+  "capabilities": {
+    "chat_models": ["..."],
+    "image_models": ["..."],
+    "image_sizes": ["..."],
+    "image_qualities": ["low", "medium", "high"],
+    "audio_models": ["..."],
+    "video_models": ["..."],
+    "video_sizes": ["..."],
+    "video_durations": ["4", "8", "12"]
+  },
+  "billing_urls": {
+    "subscribe": "",
+    "top_up": "",
+    "manage_account": "",
+    "account_overview": ""
+  }
+}</code></pre>
+		<p><?php esc_html_e( 'Billing URLs are returned exactly as configured by the admin. Empty strings mean the downstream UI should hide that CTA.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><code>/integration/plans</code></h3>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>[
+  {
+    "slug": "plan_10",
+    "public_name": "10 $/Monat",
+    "billing_interval": "month",
+    "price_usd": 10,
+    "included_credits_uc": 10000000,
+    "included_credits_display": "10,000 Credits",
+    "display_order": 10,
+    "is_active": true
+  }
+]</code></pre>
+		<p><?php esc_html_e( 'Plans are normalized from stored data. Legacy fields such as `name` and `credits_per_month` are internal storage compatibility details, not the public contract.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><code>/integration/account</code></h3>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>{
+  "user_id": 123,
+  "balance_uc": 450000,
+  "balance": {
+    "uc": 450000,
+    "credits": 450,
+    "display": "450 Credits",
+    "usd": 0.45
+  },
+  "usage_month": {
+    "uc": 1250000,
+    "credits": 1250,
+    "display": "1,250 Credits",
+    "usd": 1.25
+  },
+  "billing_urls": {
+    "subscribe": "",
+    "top_up": "",
+    "manage_account": "",
+    "account_overview": ""
+  },
+  "renewal": {
+    "status": "active",
+    "next_payment": "2026-04-01 10:00:00",
+    "status_label": "Subscription active. Next renewal: April 1, 2026"
+  }
+}</code></pre>
+		<p><?php esc_html_e( 'If WooCommerce Subscriptions is unavailable or no subscription metadata is found, `renewal` may be `null`.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><code>/integration/account/history</code></h3>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>{
+  "items": [
+    {
+      "transaction_id": 99,
+      "created_at": "2026-03-20 14:30:00",
+      "transaction_type": "chat_deduction",
+      "transaction_label": "Chat usage",
+      "model": "gpt-4.1-mini",
+      "amount": {
+        "uc": -5000,
+        "credits": -5,
+        "display": "-5 Credits",
+        "usd": -0.005
+      }
+    }
+  ],
+  "total": 42,
+  "page": 1,
+  "per_page": 10
+}</code></pre>
 		<?php
 	}
 
@@ -261,7 +273,8 @@ data.steps.forEach( s => {
 	private static function section_hooks() {
 		?>
 		<h2><?php esc_html_e( 'Hooks & Filters', 'alorbach-ai-gateway' ); ?></h2>
-		<h3><?php esc_html_e( 'Filters', 'alorbach-ai-gateway' ); ?></h3>
+
+		<h3><?php esc_html_e( 'Integration Filters', 'alorbach-ai-gateway' ); ?></h3>
 		<table class="widefat striped" style="max-width: 900px;">
 			<thead>
 				<tr>
@@ -271,214 +284,42 @@ data.steps.forEach( s => {
 				</tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td><code>alorbach_cost_matrix</code></td>
-					<td>$saved</td>
-					<td><?php esc_html_e( 'Modify cost matrix (text model costs)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_image_costs</code></td>
-					<td>$costs</td>
-					<td><?php esc_html_e( 'Modify DALL-E image costs by size', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_image_model_costs</code></td>
-					<td>$model_costs</td>
-					<td><?php esc_html_e( 'Modify GPT Image model costs (quality × size)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_video_costs</code></td>
-					<td>$costs</td>
-					<td><?php esc_html_e( 'Modify video model costs', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_audio_costs</code></td>
-					<td>$costs</td>
-					<td><?php esc_html_e( 'Modify audio model costs (per second)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_user_cost</code></td>
-					<td>$user_cost, $api_cost_uc, $model</td>
-					<td><?php esc_html_e( 'Modify user charge after markup applied. $user_cost is the marked-up UC amount; $api_cost_uc is the raw API cost.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_chat_request_body</code></td>
-					<td>$body, $user_id, $model</td>
-					<td><?php esc_html_e( 'Modify the request body sent to the AI provider for chat (inject temperature, tools, response_format, etc.)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_count_tokens</code></td>
-					<td>$count, $text, $model</td>
-					<td><?php esc_html_e( 'Override token count for a given text and model. Return an integer to short-circuit the tokenizer.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_uc_to_credit_ratio</code></td>
-					<td>—</td>
-					<td><?php esc_html_e( 'Override UC-to-credit ratio (default 1000)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_credits_label</code></td>
-					<td>$label, $uc_amount</td>
-					<td><?php esc_html_e( 'Override "Credits" label in display', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_balance_display</code></td>
-					<td>$html, $user_id, $balance</td>
-					<td><?php esc_html_e( 'Override balance shortcode output', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_usage_display</code></td>
-					<td>$html, $user_id, $usage, $period</td>
-					<td><?php esc_html_e( 'Override usage shortcode output', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_plans</code></td>
-					<td>$saved</td>
-					<td><?php esc_html_e( 'Modify subscription plans', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_create_sample_pages_on_activation</code></td>
-					<td>—</td>
-					<td><?php esc_html_e( 'Return true to create sample pages on plugin activation', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_video_poll_max</code></td>
-					<td>$max (int)</td>
-					<td><?php esc_html_e( 'Maximum polling iterations when waiting for video generation. Default: 60.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_video_poll_interval</code></td>
-					<td>$interval (int)</td>
-					<td><?php esc_html_e( 'Seconds between video generation poll requests. Default: 5.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
+				<tr><td><code>alorbach_integration_plans</code></td><td>$plans, $args</td><td><?php esc_html_e( 'Filter normalized downstream plan catalog', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_integration_billing_urls</code></td><td>$urls</td><td><?php esc_html_e( 'Filter canonical billing/account URLs', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_integration_config</code></td><td>$config</td><td><?php esc_html_e( 'Filter normalized downstream config payload', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_integration_account_summary</code></td><td>$summary, $user_id</td><td><?php esc_html_e( 'Filter normalized account summary', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_integration_account_history</code></td><td>$history, $user_id, $args</td><td><?php esc_html_e( 'Filter normalized account history', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_account_widget_html</code></td><td>$html, $summary, $history, $atts</td><td><?php esc_html_e( 'Filter embeddable account widget HTML', 'alorbach-ai-gateway' ); ?></td></tr>
 			</tbody>
 		</table>
-		<h3><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></h3>
+		<p><?php esc_html_e( 'Filter payloads use the same shapes documented above. For example, `alorbach_integration_plans` receives the normalized array returned by `/integration/plans`, and `alorbach_integration_account_summary` receives the `/integration/account` shape.', 'alorbach-ai-gateway' ); ?></p>
+
+		<h3><?php esc_html_e( 'Operational Hooks', 'alorbach-ai-gateway' ); ?></h3>
 		<table class="widefat striped" style="max-width: 900px;">
 			<thead>
 				<tr>
-					<th><?php esc_html_e( 'Action', 'alorbach-ai-gateway' ); ?></th>
+					<th><?php esc_html_e( 'Hook', 'alorbach-ai-gateway' ); ?></th>
 					<th><?php esc_html_e( 'Args', 'alorbach-ai-gateway' ); ?></th>
 					<th><?php esc_html_e( 'Description', 'alorbach-ai-gateway' ); ?></th>
 				</tr>
 			</thead>
 			<tbody>
-				<tr>
-					<td><code>alorbach_register_providers</code></td>
-					<td>—</td>
-					<td><?php esc_html_e( 'Fires after built-in providers are registered. Call Provider_Registry::register() here to add custom providers.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_credits_added</code></td>
-					<td>$user_id, $credits_uc, $source</td>
-					<td><?php esc_html_e( 'Fired when credits are added. $source: stripe | woocommerce | woocommerce_retry.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_stripe_webhook</code></td>
-					<td>$event_type, $event</td>
-					<td><?php esc_html_e( 'Fired on Stripe webhook (before processing)', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_stripe_payment_failed</code></td>
-					<td>$event</td>
-					<td><?php esc_html_e( 'Fired when Stripe payment fails', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_stripe_subscription_deleted</code></td>
-					<td>$event</td>
-					<td><?php esc_html_e( 'Fired when Stripe subscription is deleted', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_after_deduction</code></td>
-					<td>$user_id, $type, $model, $cost_uc, $api_cost_uc</td>
-					<td><?php esc_html_e( 'Fired after credits are deducted for any request (type: chat, image, audio, video). $cost_uc is the user charge; $api_cost_uc is the raw API cost.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_subscription_payment_failed</code></td>
-					<td>$subscription, $last_order</td>
-					<td><?php esc_html_e( 'Fired when WooCommerce subscription payment fails', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_wc_renewal_retry_failed</code></td>
-					<td>$user_id, $credits_uc</td>
-					<td><?php esc_html_e( 'Fired when the WooCommerce renewal retry (5 min after failure) also fails to credit the user.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
-				<tr>
-					<td><code>alorbach_video_poll_timeout</code></td>
-					<td>$video_id, $provider</td>
-					<td><?php esc_html_e( 'Fired when video generation polling times out without a completed or failed status.', 'alorbach-ai-gateway' ); ?></td>
-				</tr>
+				<tr><td><code>alorbach_credits_added</code></td><td>$user_id, $credits_uc, $source</td><td><?php esc_html_e( 'Credits granted to a user', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_after_deduction</code></td><td>$user_id, $type, $model, $cost_uc, $api_cost_uc</td><td><?php esc_html_e( 'Credits deducted after a successful generation request', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_subscription_payment_failed</code></td><td>$subscription, $last_order</td><td><?php esc_html_e( 'WooCommerce renewal payment failed', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_wc_renewal_retry_failed</code></td><td>$user_id, $credits_uc</td><td><?php esc_html_e( 'Scheduled renewal credit retry failed', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_subscription_renewal_completed</code></td><td>$user_id, $credits_uc, $source, $subscription, $last_order</td><td><?php esc_html_e( 'Renewal completed and credits were granted successfully', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td><code>alorbach_generation_rejected_insufficient_balance</code></td><td>$user_id, $context, $details</td><td><?php esc_html_e( 'Generation request rejected before execution because the user lacks credits', 'alorbach-ai-gateway' ); ?></td></tr>
 			</tbody>
 		</table>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// Example: Custom per-model markup
-add_filter( 'alorbach_user_cost', function( $user_cost, $api_cost_uc, $model ) {
-  // Free for certain models, 2× for everything else
-  if ( str_starts_with( $model, 'gpt-4.1-mini' ) ) return $api_cost_uc;
-  return (int) ( $api_cost_uc * 2 );
-}, 10, 3 );
+		<p><?php esc_html_e( 'For `alorbach_generation_rejected_insufficient_balance`, `$context` is typically `chat`, `image`, `audio`, or `video`. `$details` contains context-specific fields such as `model`, `required_uc`, `available_uc`, and request metadata like `size` or `duration` when relevant.', 'alorbach-ai-gateway' ); ?></p>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>add_filter( 'alorbach_integration_plans', function( $plans ) {
+  return array_values( array_filter( $plans, fn( $plan ) => $plan['slug'] !== 'legacy' ) );
+}, 10, 1 );
 
-// Example: Add a system prompt to every chat request
-add_filter( 'alorbach_chat_request_body', function( $body, $user_id, $model ) {
-  array_unshift( $body['messages'], [ 'role' => 'system', 'content' => 'Be concise.' ] );
-  return $body;
-}, 10, 3 );
-
-// Example: Register a custom AI provider
-add_action( 'alorbach_register_providers', function() {
-  \Alorbach\AIGateway\Providers\Provider_Registry::register( new My_Custom_Provider() );
-} );
-
-// Example: Override balance display
-add_filter( 'alorbach_balance_display', function( $html, $user_id, $balance ) {
-  return '<span class="my-balance">' . esc_html( $balance / 1000 ) . ' credits</span>';
+add_action( 'alorbach_subscription_renewal_completed', function( $user_id, $credits_uc, $source ) {
+  // Sync downstream account state here.
 }, 10, 3 );</code></pre>
-		<?php
-	}
-
-	/**
-	 * Custom providers section.
-	 */
-	private static function section_custom_providers() {
-		?>
-		<h2><?php esc_html_e( 'Custom AI Providers', 'alorbach-ai-gateway' ); ?></h2>
-		<p><?php esc_html_e( 'Add any AI backend by implementing Provider_Interface (or extending Provider_Base) and registering it on the alorbach_register_providers action.', 'alorbach-ai-gateway' ); ?></p>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>use Alorbach\AIGateway\Providers\Provider_Base;
-use Alorbach\AIGateway\Providers\Provider_Registry;
-
-class My_Custom_Provider extends Provider_Base {
-
-    public function get_type()      { return 'my_provider'; }
-    public function supports_chat() { return true; }
-
-    public function build_chat_request( $body, $credentials ) {
-        $api_key = $credentials['api_key'] ?? '';
-        if ( empty( $api_key ) ) {
-            return new \WP_Error( 'no_key', 'Missing API key.' );
-        }
-        $body = self::normalize_chat_body( $body, $body['model'] ?? '' );
-        return [
-            'url'     => 'https://api.my-provider.com/v1/chat/completions',
-            'headers' => [ 'Authorization' => 'Bearer ' . $api_key, 'Content-Type' => 'application/json' ],
-            'body'    => wp_json_encode( $body ),
-        ];
-    }
-
-    public function verify_key( $credentials )  { return true; }
-    public function fetch_models( $credentials ) { return [ 'my-model-v1' ]; }
-}
-
-add_action( 'alorbach_register_providers', function() {
-    Provider_Registry::register( new My_Custom_Provider() );
-} );</code></pre>
-		<p>
-			<?php
-			printf(
-				/* translators: %s: method list */
-				esc_html__( 'Provider_Base provides no-op stubs for %s so you only implement what your backend supports.', 'alorbach-ai-gateway' ),
-				'<code>supports_images()</code>, <code>supports_audio()</code>, <code>supports_video()</code>, <code>build_images_request()</code>, <code>build_transcribe_request()</code>, <code>build_video_request()</code>'
-			);
-			?>
-		</p>
 		<?php
 	}
 
@@ -488,38 +329,83 @@ add_action( 'alorbach_register_providers', function() {
 	private static function section_php() {
 		?>
 		<h2><?php esc_html_e( 'PHP Usage', 'alorbach-ai-gateway' ); ?></h2>
-		<h3><?php esc_html_e( 'Template tags', 'alorbach-ai-gateway' ); ?></h3>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>// Get user balance in UC
-$balance = alorbach_get_user_balance( $user_id ); // null = current user
+		<p><?php esc_html_e( 'Use these helpers for stable downstream integrations. Avoid reading raw options directly.', 'alorbach-ai-gateway' ); ?></p>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// Existing helpers
+$balance_uc = alorbach_get_user_balance( $user_id );
+$usage_uc   = alorbach_get_user_usage_this_month( $user_id );
+echo alorbach_format_credits( $balance_uc );
 
-// Get usage this month in UC
-$usage = alorbach_get_user_usage_this_month( $user_id );
+// Stable downstream helpers
+$config  = alorbach_get_integration_config();
+$plans   = alorbach_get_public_plans();
+$urls    = alorbach_get_billing_urls();
+$summary = alorbach_get_account_summary( $user_id );
+$history = alorbach_get_account_history( $user_id, array( 'per_page' => 5 ) );</code></pre>
+		<p><?php esc_html_e( 'Safe per-request overrides usually include generation choices like model, size, quality, duration, or max token settings when your frontend is calling the generation endpoints. Gateway-owned canonical data includes normalized plans, billing/account URLs, and global fallback defaults returned by `alorbach_get_integration_config()`.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'Avoid reading raw options like `alorbach_plans` or demo default options directly in downstream products. Use helpers or `/integration/*` instead so storage migrations remain internal to the gateway.', 'alorbach-ai-gateway' ); ?></p>
+		<?php
+	}
 
-// Format UC as credits string (e.g. "1,234.56")
-$credits_str = alorbach_format_credits( $uc_amount );</code></pre>
-		<h3><?php esc_html_e( 'Classes', 'alorbach-ai-gateway' ); ?></h3>
-		<pre style="background: #f6f7f7; padding: 1rem; border: 1px solid #c3c4c7; border-radius: 4px; overflow-x: auto;"><code>use Alorbach\AIGateway\Ledger;
-use Alorbach\AIGateway\User_Display;
-use Alorbach\AIGateway\Cost_Matrix;
+	/**
+	 * Downstream example section.
+	 */
+	private static function section_downstream_example() {
+		?>
+		<h2><?php esc_html_e( 'Downstream Integration Example', 'alorbach-ai-gateway' ); ?></h2>
+		<p><?php esc_html_e( 'A typical downstream product uses the public plan/config contract for pricing UI, uses logged-in account endpoints or PHP helpers for account state, and embeds the account widget where appropriate.', 'alorbach-ai-gateway' ); ?></p>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// PHP-rendered pricing page.
+$config = alorbach_get_integration_config();
+$plans  = alorbach_get_public_plans();
 
-// Get balance
-$balance = Ledger::get_balance( $user_id );
+foreach ( $plans as $plan ) {
+	printf(
+		'&lt;a href="%s"&gt;%s - $%s / %s&lt;/a&gt;',
+		esc_url( $config['billing_urls']['subscribe'] ),
+		esc_html( $plan['public_name'] ),
+		esc_html( $plan['price_usd'] ),
+		esc_html( $plan['billing_interval'] )
+	);
+}
 
-// Format for display
-$credits = User_Display::uc_to_credits( $balance );
-$usd     = User_Display::format_uc_as_usd( $balance );
+// Account area.
+if ( is_user_logged_in() ) {
+	echo do_shortcode( '[alorbach_account_widget history_items="5"]' );
+}</code></pre>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// Browser-rendered frontend bootstrapped by your plugin/theme.
+window.myGatewayData = {
+  restNonce: '<?php echo esc_js( wp_create_nonce( 'wp_rest' ) ); ?>'
+};
 
-// Get cost for a model (API cost in UC)
-$chat_cost = Cost_Matrix::calculate_chat_cost( $model, $prompt_tokens, $completion_tokens, $cached_tokens );
-$image_cost = Cost_Matrix::get_image_cost( $size, $model, $quality );
-$audio_cost = Cost_Matrix::get_audio_cost( $seconds, $model );
-$video_cost = Cost_Matrix::get_video_cost( $model );
+const [config, plans, account] = await Promise.all([
+  fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/config' ) ); ?>').then(r => r.json()),
+  fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json()),
+  fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/account' ) ); ?>', {
+    credentials: 'same-origin',
+    headers: { 'X-WP-Nonce': window.myGatewayData.restNonce }
+  }).then(r => r.json())
+]);</code></pre>
+		<p><?php esc_html_e( 'For WooCommerce-based subscriptions, treat account balance as reliable after the gateway has granted credits and the `alorbach_subscription_renewal_completed` action has fired. Downstream listeners should react to that event rather than inferring renewal state from order status alone.', 'alorbach-ai-gateway' ); ?></p>
+		<?php
+	}
 
-// Apply markup to get user charge
-$user_cost = Cost_Matrix::apply_user_cost( $api_cost );
+	/**
+	 * Custom providers section.
+	 */
+	private static function section_custom_providers() {
+		?>
+		<h2><?php esc_html_e( 'Custom AI Providers', 'alorbach-ai-gateway' ); ?></h2>
+		<p><?php esc_html_e( 'Provider extensibility remains unchanged. Downstream integration APIs are separate from provider registration.', 'alorbach-ai-gateway' ); ?></p>
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>use Alorbach\AIGateway\Providers\Provider_Base;
+use Alorbach\AIGateway\Providers\Provider_Registry;
 
-// Insert transaction (admin credit)
-Ledger::insert_transaction( $user_id, 'admin_credit', null, $uc_amount );</code></pre>
+class My_Custom_Provider extends Provider_Base {
+    public function get_type() { return 'my_provider'; }
+    public function supports_chat() { return true; }
+}
+
+add_action( 'alorbach_register_providers', function() {
+    Provider_Registry::register( new My_Custom_Provider() );
+} );</code></pre>
 		<?php
 	}
 }

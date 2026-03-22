@@ -26,6 +26,7 @@ require_once ALORBACH_PLUGIN_DIR . 'vendor/autoload.php';
 
 // Explicitly load Provider classes (in case autoload classmap is stale).
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-api-keys-helper.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-integration-service.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Interface.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Base.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/OpenAI_Provider.php';
@@ -146,6 +147,11 @@ function alorbach_usage_month_shortcode() {
 	return Alorbach\AIGateway\User_Display::render_usage_month();
 }
 
+add_shortcode( 'alorbach_account_widget', 'alorbach_account_widget_shortcode' );
+function alorbach_account_widget_shortcode( $atts = array() ) {
+	return Alorbach\AIGateway\Integration_Service::render_account_widget( $atts );
+}
+
 add_shortcode( 'alorbach_demo_chat', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_chat' ) );
 add_shortcode( 'alorbach_demo_image', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_image' ) );
 add_shortcode( 'alorbach_demo_transcribe', array( Alorbach\AIGateway\Demo_Shortcodes::class, 'render_transcribe' ) );
@@ -196,6 +202,55 @@ function alorbach_get_user_usage_this_month( $user_id = null ) {
  */
 function alorbach_format_credits( $uc_amount ) {
 	return Alorbach\AIGateway\User_Display::format_credits( $uc_amount );
+}
+
+/**
+ * Template tag: Get downstream integration config.
+ *
+ * @return array
+ */
+function alorbach_get_integration_config() {
+	return Alorbach\AIGateway\Integration_Service::get_integration_config();
+}
+
+/**
+ * Template tag: Get public plan catalog.
+ *
+ * @param array $args Optional arguments.
+ * @return array
+ */
+function alorbach_get_public_plans( $args = array() ) {
+	return Alorbach\AIGateway\Integration_Service::get_public_plans( $args );
+}
+
+/**
+ * Template tag: Get billing/account URLs.
+ *
+ * @return array
+ */
+function alorbach_get_billing_urls() {
+	return Alorbach\AIGateway\Integration_Service::get_billing_urls();
+}
+
+/**
+ * Template tag: Get normalized account summary.
+ *
+ * @param int|null $user_id Optional user ID.
+ * @return array
+ */
+function alorbach_get_account_summary( $user_id = null ) {
+	return Alorbach\AIGateway\Integration_Service::get_account_summary( $user_id );
+}
+
+/**
+ * Template tag: Get normalized account history.
+ *
+ * @param int|null $user_id Optional user ID.
+ * @param array    $args Optional history query args.
+ * @return array
+ */
+function alorbach_get_account_history( $user_id = null, $args = array() ) {
+	return Alorbach\AIGateway\Integration_Service::get_account_history( $user_id, $args );
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +358,7 @@ function alorbach_handle_retry_wc_renewal( $user_id, $credits_uc ) {
 	$result = Alorbach\AIGateway\Ledger::insert_transaction( (int) $user_id, 'subscription_credit', null, (int) $credits_uc );
 	if ( $result ) {
 		do_action( 'alorbach_credits_added', (int) $user_id, (int) $credits_uc, 'woocommerce_retry' );
+		do_action( 'alorbach_subscription_renewal_completed', (int) $user_id, (int) $credits_uc, 'woocommerce_retry', null, null );
 	} else {
 		error_log( sprintf(
 			'[alorbach-ai-gateway] WC renewal retry failed permanently for user %d (%d UC). Manual credit grant required.',

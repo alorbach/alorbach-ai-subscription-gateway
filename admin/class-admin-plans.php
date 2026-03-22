@@ -25,19 +25,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Admin_Plans {
 
 	/**
-	 * Default plans.
-	 *
-	 * @return array
-	 */
-	private static function get_defaults() {
-		return array(
-			'plan_10'  => array( 'name' => '10 $/Monat', 'price_usd' => 10, 'credits_per_month' => 10000000, 'slug' => 'plan_10' ),
-			'plan_20'  => array( 'name' => '20 $/Monat', 'price_usd' => 20, 'credits_per_month' => 20000000, 'slug' => 'plan_20' ),
-			'plan_50'  => array( 'name' => '50 $/Monat', 'price_usd' => 50, 'credits_per_month' => 50000000, 'slug' => 'plan_50' ),
-		);
-	}
-
-	/**
 	 * Render Plans page.
 	 */
 	public static function render() {
@@ -47,13 +34,14 @@ class Admin_Plans {
 		if ( Admin_Helper::verify_post_nonce( 'alorbach_plans_nonce', 'alorbach_plans' ) ) {
 			$plans = isset( $_POST['plans'] ) && is_array( $_POST['plans'] ) ? $_POST['plans'] : array();
 			$saved = array();
+			$order = 10;
 			foreach ( $plans as $slug => $p ) {
-				$saved[ sanitize_key( $slug ) ] = array(
-					'name'              => isset( $p['name'] ) ? sanitize_text_field( wp_unslash( $p['name'] ) ) : '',
-					'price_usd'         => isset( $p['price_usd'] ) ? (float) $p['price_usd'] : 0,
-					'credits_per_month' => isset( $p['credits_per_month'] ) ? (int) $p['credits_per_month'] : 0,
-					'slug'              => sanitize_key( $slug ),
-				);
+				$clean_slug = sanitize_key( $slug );
+				if ( '' === $clean_slug ) {
+					continue;
+				}
+				$saved[ $clean_slug ] = \Alorbach\AIGateway\Integration_Service::prepare_plan_for_storage( $clean_slug, $p, $order );
+				$order += 10;
 			}
 			update_option( 'alorbach_plans', apply_filters( 'alorbach_plans', $saved ) );
 
@@ -72,11 +60,10 @@ class Admin_Plans {
 			Admin_Helper::render_notice( __( 'Plans saved.', 'alorbach-ai-gateway' ) );
 		}
 
-		$plans = get_option( 'alorbach_plans', self::get_defaults() );
-		$plans = is_array( $plans ) ? $plans : self::get_defaults();
+		$plans = \Alorbach\AIGateway\Integration_Service::get_normalized_plans();
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'Abonnement Plans', 'alorbach-ai-gateway' ); ?></h1>
+			<h1><?php esc_html_e( 'Subscription Plans', 'alorbach-ai-gateway' ); ?></h1>
 			<p><?php esc_html_e( '1000 UC = 1 Credit (user display).', 'alorbach-ai-gateway' ); ?></p>
 			<form method="post">
 				<?php wp_nonce_field( 'alorbach_plans', 'alorbach_plans_nonce' ); ?>
@@ -84,18 +71,30 @@ class Admin_Plans {
 					<thead>
 						<tr>
 							<th><?php esc_html_e( 'Slug', 'alorbach-ai-gateway' ); ?></th>
-							<th><?php esc_html_e( 'Name', 'alorbach-ai-gateway' ); ?></th>
-							<th><?php esc_html_e( 'Price (USD/month)', 'alorbach-ai-gateway' ); ?></th>
-							<th><?php esc_html_e( 'Credits (UC/month)', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'Public name', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'Billing interval', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'Price (USD)', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'Included credits (UC)', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'Display order', 'alorbach-ai-gateway' ); ?></th>
+							<th><?php esc_html_e( 'Active', 'alorbach-ai-gateway' ); ?></th>
 						</tr>
 					</thead>
 					<tbody>
 						<?php foreach ( $plans as $slug => $plan ) : ?>
 							<tr>
 								<td><code><?php echo esc_html( $slug ); ?></code></td>
-								<td><input type="text" name="plans[<?php echo esc_attr( $slug ); ?>][name]" value="<?php echo esc_attr( isset( $plan['name'] ) ? $plan['name'] : '' ); ?>" class="regular-text" /></td>
+								<td><input type="text" name="plans[<?php echo esc_attr( $slug ); ?>][public_name]" value="<?php echo esc_attr( isset( $plan['public_name'] ) ? $plan['public_name'] : '' ); ?>" class="regular-text" /></td>
+								<td>
+									<select name="plans[<?php echo esc_attr( $slug ); ?>][billing_interval]">
+										<option value="month" <?php selected( $plan['billing_interval'], 'month' ); ?>><?php esc_html_e( 'Month', 'alorbach-ai-gateway' ); ?></option>
+										<option value="year" <?php selected( $plan['billing_interval'], 'year' ); ?>><?php esc_html_e( 'Year', 'alorbach-ai-gateway' ); ?></option>
+										<option value="week" <?php selected( $plan['billing_interval'], 'week' ); ?>><?php esc_html_e( 'Week', 'alorbach-ai-gateway' ); ?></option>
+									</select>
+								</td>
 								<td><input type="number" name="plans[<?php echo esc_attr( $slug ); ?>][price_usd]" value="<?php echo esc_attr( isset( $plan['price_usd'] ) ? $plan['price_usd'] : '' ); ?>" step="0.01" min="0" /></td>
-								<td><input type="number" name="plans[<?php echo esc_attr( $slug ); ?>][credits_per_month]" value="<?php echo esc_attr( isset( $plan['credits_per_month'] ) ? $plan['credits_per_month'] : '' ); ?>" min="0" /></td>
+								<td><input type="number" name="plans[<?php echo esc_attr( $slug ); ?>][included_credits_uc]" value="<?php echo esc_attr( isset( $plan['included_credits_uc'] ) ? $plan['included_credits_uc'] : '' ); ?>" min="0" step="1000" /></td>
+								<td><input type="number" name="plans[<?php echo esc_attr( $slug ); ?>][display_order]" value="<?php echo esc_attr( isset( $plan['display_order'] ) ? $plan['display_order'] : '' ); ?>" step="1" /></td>
+								<td><input type="checkbox" name="plans[<?php echo esc_attr( $slug ); ?>][is_active]" value="1" <?php checked( ! empty( $plan['is_active'] ) ); ?> /></td>
 							</tr>
 						<?php endforeach; ?>
 					</tbody>
@@ -124,7 +123,7 @@ class Admin_Plans {
 										<option value=""><?php esc_html_e( '— None —', 'alorbach-ai-gateway' ); ?></option>
 										<?php foreach ( $plans as $slug => $plan ) : ?>
 											<option value="<?php echo esc_attr( $slug ); ?>" <?php selected( isset( $product_mapping[ $product->get_id() ] ) ? $product_mapping[ $product->get_id() ] : '', $slug ); ?>>
-												<?php echo esc_html( isset( $plan['name'] ) ? $plan['name'] : $slug ); ?>
+												<?php echo esc_html( isset( $plan['public_name'] ) ? $plan['public_name'] : $slug ); ?>
 											</option>
 										<?php endforeach; ?>
 									</select>
