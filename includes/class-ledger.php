@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Ledger {
 
 	const TABLE_NAME = 'alorbach_ledger';
-	const DB_VERSION = '1.2';
+	const DB_VERSION = '1.3';
 
 	/**
 	 * Create the ledger table.
@@ -38,12 +38,12 @@ class Ledger {
 			cached_tokens int(11) DEFAULT NULL,
 			raw_output_tokens int(11) DEFAULT NULL,
 			created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			request_signature varchar(255) DEFAULT NULL,
+			request_signature varchar(191) DEFAULT NULL,
 			PRIMARY KEY (transaction_id),
 			KEY user_id (user_id),
 			KEY created_at (created_at),
 			KEY transaction_type (transaction_type),
-			KEY request_signature (request_signature(64))
+			UNIQUE KEY request_signature (request_signature)
 		) {$charset_collate};";
 
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -287,5 +287,26 @@ class Ledger {
 			$signature
 		) );
 		return (int) $count > 0;
+	}
+
+	/**
+	 * Delete a transaction row by request signature.
+	 *
+	 * Intended for transient claim rows that should be rolled back after a
+	 * failed operation so a retry can proceed.
+	 *
+	 * @param string $signature Request signature.
+	 * @return bool
+	 */
+	public static function delete_by_signature( $signature ) {
+		global $wpdb;
+		$table = self::get_table_name();
+		$deleted = $wpdb->delete(
+			$table,
+			array( 'request_signature' => sanitize_text_field( $signature ) ),
+			array( '%s' )
+		);
+
+		return false !== $deleted;
 	}
 }

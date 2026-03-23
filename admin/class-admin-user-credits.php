@@ -44,11 +44,13 @@ class Admin_User_Credits {
 
 		$per_page = 20;
 		$page     = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1;
-		$result   = \Alorbach\AIGateway\Ledger::get_transactions( array(
-			'per_page' => $per_page,
-			'page'     => $page,
-			'user_id'  => $user_id,
-		) );
+		$result   = \Alorbach\AIGateway\Ledger::get_transactions(
+			array(
+				'per_page' => $per_page,
+				'page'     => $page,
+				'user_id'  => $user_id,
+			)
+		);
 		$rows     = $result['rows'];
 		$total    = $result['total'];
 		$pages    = $total > 0 ? (int) ceil( $total / $per_page ) : 0;
@@ -80,11 +82,12 @@ class Admin_User_Credits {
 						</tr>
 					</thead>
 					<tbody>
-						<?php foreach ( $rows as $row ) :
-						$type_label = Admin_Helper::get_transaction_type_label( $row['transaction_type'] );
-							$amount    = (int) $row['uc_amount'];
-							$credits   = \Alorbach\AIGateway\User_Display::uc_to_credits( $amount );
-							$usd       = \Alorbach\AIGateway\User_Display::format_uc_as_usd( abs( $amount ) );
+						<?php foreach ( $rows as $row ) : ?>
+							<?php
+							$type_label = Admin_Helper::get_transaction_type_label( $row['transaction_type'] );
+							$amount     = (int) $row['uc_amount'];
+							$credits    = \Alorbach\AIGateway\User_Display::uc_to_credits( $amount );
+							$usd        = \Alorbach\AIGateway\User_Display::format_uc_as_usd( abs( $amount ) );
 							$amount_str = $amount >= 0
 								? '+' . number_format_i18n( $credits, 2 ) . ' ' . _x( 'Credits', 'unit', 'alorbach-ai-gateway' )
 								: number_format_i18n( $credits, 2 ) . ' ' . _x( 'Credits', 'unit', 'alorbach-ai-gateway' );
@@ -93,7 +96,7 @@ class Admin_User_Credits {
 							<tr>
 								<td><?php echo esc_html( $row['created_at'] ); ?></td>
 								<td><?php echo esc_html( $type_label ); ?></td>
-								<td><?php echo esc_html( $row['model_used'] ?? '—' ); ?></td>
+								<td><?php echo esc_html( $row['model_used'] ?? '-' ); ?></td>
 								<td><?php echo esc_html( $amount_str ); ?></td>
 							</tr>
 						<?php endforeach; ?>

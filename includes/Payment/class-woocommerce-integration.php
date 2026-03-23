@@ -37,14 +37,21 @@ class WooCommerce_Integration {
 			return;
 		}
 
-		$result = \Alorbach\AIGateway\Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
+		$signature = self::get_renewal_signature( $subscription, $last_order, $user_id, $credits );
+		$result    = \Alorbach\AIGateway\Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits, null, null, null, $signature );
 		if ( $result ) {
 			do_action( 'alorbach_credits_added', $user_id, $credits, 'woocommerce' );
 			do_action( 'alorbach_subscription_renewal_completed', $user_id, $credits, 'woocommerce', $subscription, $last_order );
 			return;
 		}
 
-		wp_schedule_single_event( time() + 300, 'alorbach_retry_wc_renewal', array( $user_id, $credits ) );
+		if ( \Alorbach\AIGateway\Ledger::signature_exists( $signature ) ) {
+			return;
+		}
+
+		if ( ! wp_next_scheduled( 'alorbach_retry_wc_renewal', array( $user_id, $credits, $signature ) ) ) {
+			wp_schedule_single_event( time() + 300, 'alorbach_retry_wc_renewal', array( $user_id, $credits, $signature ) );
+		}
 	}
 
 	/**
@@ -82,5 +89,31 @@ class WooCommerce_Integration {
 		}
 
 		return 0;
+	}
+
+	/**
+	 * Build an idempotent renewal signature from the subscription/order pair.
+	 *
+	 * @param \WC_Subscription $subscription Subscription object.
+	 * @param \WC_Order|null   $last_order   Last renewal order.
+	 * @param int              $user_id      User ID.
+	 * @param int              $credits      Granted credits.
+	 * @return string
+	 */
+	private static function get_renewal_signature( $subscription, $last_order, $user_id, $credits ) {
+		$subscription_id = method_exists( $subscription, 'get_id' ) ? (int) $subscription->get_id() : 0;
+		$order_id        = ( is_object( $last_order ) && method_exists( $last_order, 'get_id' ) ) ? (int) $last_order->get_id() : 0;
+
+		return 'wc_renewal:' . hash(
+			'sha256',
+			wp_json_encode(
+				array(
+					'subscription_id' => $subscription_id,
+					'order_id'        => $order_id,
+					'user_id'         => (int) $user_id,
+					'credits'         => (int) $credits,
+				)
+			)
+		);
 	}
 }

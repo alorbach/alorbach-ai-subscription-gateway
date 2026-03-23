@@ -522,7 +522,8 @@ class REST_Proxy {
 		}
 
 		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model ) ) );
-		if ( Ledger::signature_exists( $request_signature ) ) {
+		$multi_step_lock   = 'alorbach_chat_inflight_' . $request_signature;
+		if ( Ledger::signature_exists( $request_signature ) || ( $multi_step && get_transient( $multi_step_lock ) ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 
@@ -579,7 +580,8 @@ class REST_Proxy {
 				$max_steps,
 				$continue_message,
 				$free_pass_through,
-				$request_signature
+				$request_signature,
+				$multi_step_lock
 			);
 		}
 
@@ -871,14 +873,16 @@ class REST_Proxy {
 			return new \WP_Error( 'invalid_payload', __( 'Invalid payload.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
-		// Idempotency: avoid processing same event twice.
+		// Idempotency: claim the event up front so concurrent deliveries cannot
+		// both credit the same invoice.
 		$event_id = isset( $event['id'] ) ? sanitize_text_field( $event['id'] ) : '';
 		$sig_key  = 'stripe:' . $event_id;
-		if ( $event_id && Ledger::signature_exists( $sig_key ) ) {
-			return rest_ensure_response( array( 'received' => true ) );
+		if ( $event_id ) {
+			$claimed = Ledger::insert_transaction( 0, 'stripe_idempotency', null, 0, null, null, null, $sig_key );
+			if ( ! $claimed ) {
+				return rest_ensure_response( array( 'received' => true ) );
+			}
 		}
-		// Note: the idempotency row is stored only after successful processing (below)
-		// so that a DB failure on credit insert allows Stripe to retry the webhook.
 
 		do_action( 'alorbach_stripe_webhook', $event['type'], $event );
 
@@ -897,8 +901,9 @@ class REST_Proxy {
 				if ( $credits > 0 ) {
 					$inserted = Ledger::insert_transaction( $user_id, 'subscription_credit', null, $credits );
 					if ( ! $inserted ) {
-						// Signal failure so Stripe automatically retries the webhook.
-						// Do NOT store the idempotency row so the retry is not blocked.
+						if ( $event_id ) {
+							Ledger::delete_by_signature( $sig_key );
+						}
 						return new \WP_Error( 'db_error', __( 'Failed to record transaction. Please retry.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
 					}
 					do_action( 'alorbach_credits_added', $user_id, $credits, 'stripe' );
@@ -908,12 +913,6 @@ class REST_Proxy {
 			do_action( 'alorbach_stripe_payment_failed', $event );
 		} elseif ( $event['type'] === 'customer.subscription.deleted' ) {
 			do_action( 'alorbach_stripe_subscription_deleted', $event );
-		}
-
-		// Store idempotency row only on the success path so that a failed credit
-		// insert (above) allows Stripe to retry the webhook without being blocked.
-		if ( $event_id ) {
-			Ledger::insert_transaction( 0, 'stripe_idempotency', null, 0, null, null, null, $sig_key );
 		}
 
 		return rest_ensure_response( array( 'received' => true ) );
@@ -1368,7 +1367,7 @@ class REST_Proxy {
 	public static function admin_verify_api_key( $request ) {
 		$provider = self::get_json_or_query_param( $request, 'provider' );
 		$entry_id = self::get_json_or_query_param( $request, 'entry_id' );
-		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'github_models' ), true ) ) {
+		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'github_models', 'codex' ), true ) ) {
 			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
 		}
 		$result = API_Validator::verify_key( $provider, $entry_id );
@@ -1593,6 +1592,7 @@ class REST_Proxy {
 	 * @param string $continue_message Continuation prompt injected between steps.
 	 * @param bool   $free_pass_through Skip billing when true.
 	 * @param string $base_signature   Idempotency base; each step appends "_step_N".
+	 * @param string $lock_key         Transient key guarding in-flight retries.
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	private static function execute_multi_step_chat(
@@ -1604,7 +1604,8 @@ class REST_Proxy {
 		$max_steps,
 		$continue_message,
 		$free_pass_through,
-		$base_signature
+		$base_signature,
+		$lock_key
 	) {
 		// Long-running jobs may exceed the default PHP execution time limit.
 		// Use a configurable hard cap to prevent unbounded blocking requests (DoS).
@@ -1625,11 +1626,7 @@ class REST_Proxy {
 		$steps                   = array();
 		$last_response           = null;
 		$current_messages        = $messages;
-
-		// Mark this multi-step request as in-flight so any retry from the client
-		// hits the outer signature_exists() check and receives 409 instead of
-		// re-executing (and double-billing) already-completed steps.
-		Ledger::insert_transaction( $user_id, 'chat_deduction', $model, 0, null, null, null, $base_signature );
+		set_transient( $lock_key, 1, $timeout + 30 );
 
 		for ( $step = 1; $step <= $max_steps; $step++ ) {
 			// Abort gracefully if we are approaching the wall-clock deadline.
@@ -1648,6 +1645,7 @@ class REST_Proxy {
 					$model
 				);
 				if ( $balance < $step_cost_estimate ) {
+					delete_transient( $lock_key );
 					return self::insufficient_credits_error(
 						$user_id,
 						'chat',
@@ -1666,6 +1664,7 @@ class REST_Proxy {
 			$body['messages'] = $current_messages;
 			$response         = API_Client::chat( $provider, $body );
 			if ( is_wp_error( $response ) ) {
+				delete_transient( $lock_key );
 				return $response;
 			}
 
@@ -1722,6 +1721,11 @@ class REST_Proxy {
 		}
 
 		// Merge all chunks into the final choices content.
+		if ( ! $last_response ) {
+			delete_transient( $lock_key );
+			return new \WP_Error( 'chat_timeout', __( 'Multi-step chat timed out before a response was completed.', 'alorbach-ai-gateway' ), array( 'status' => 504 ) );
+		}
+
 		$combined_content = implode( '', $content_chunks );
 		if ( isset( $last_response['choices'][0]['message']['content'] ) ) {
 			$last_response['choices'][0]['message']['content'] = $combined_content;
@@ -1744,6 +1748,8 @@ class REST_Proxy {
 
 		$last_response['steps_count'] = count( $steps );
 		$last_response['steps']       = $steps;
+		Ledger::insert_transaction( $user_id, 'chat_deduction', $model, 0, null, null, null, $base_signature );
+		delete_transient( $lock_key );
 
 		return rest_ensure_response( $last_response );
 	}

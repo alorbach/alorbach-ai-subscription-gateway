@@ -2,7 +2,7 @@
 
 A precise credit-based AI API billing layer for WordPress. Bridges fixed-price subscriptions with variable AI API costs using a Unified Credit (UC) system, BPE tokenization, and an immutable SQL ledger.
 
-**Version:** 1.0.0 · **License:** GPL-2.0-or-later · **Requires:** PHP 7.4+, WordPress 5.8+
+**Version:** 1.0.0 | **License:** GPL-2.0-or-later | **Requires:** PHP 7.4+, WordPress 5.8+
 
 ---
 
@@ -300,14 +300,14 @@ echo alorbach_format_credits( $uc );
 
 All transactions are written to `wp_alorbach_ledger` as immutable rows.
 
-**Transaction types:** `subscription_credit` · `chat_deduction` · `image_deduction` · `audio_deduction` · `video_deduction` · `admin_credit` · `balance_forward`
+**Transaction types:** `subscription_credit` | `chat_deduction` | `image_deduction` | `audio_deduction` | `video_deduction` | `admin_credit` | `balance_forward`
 
 ```php
 use Alorbach\AIGateway\Ledger;
 
 $balance_uc = Ledger::get_balance( $user_id );
 $usage_uc   = Ledger::get_usage_this_month( $user_id );
-$rows       = Ledger::get_transactions( [ 'user_id' => $user_id, 'limit' => 20, 'offset' => 0 ] );
+$rows       = Ledger::get_transactions( [ 'user_id' => $user_id, 'per_page' => 20, 'page' => 1 ] );
 ```
 
 ---

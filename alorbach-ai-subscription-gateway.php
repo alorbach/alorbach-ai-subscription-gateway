@@ -355,13 +355,16 @@ function alorbach_admin_notify_payment_failed( $subscription, $last_order ) {
 // ---------------------------------------------------------------------------
 // WooCommerce renewal retry: scheduled event handler
 // ---------------------------------------------------------------------------
-add_action( 'alorbach_retry_wc_renewal', 'alorbach_handle_retry_wc_renewal', 10, 2 );
-function alorbach_handle_retry_wc_renewal( $user_id, $credits_uc ) {
-	$result = Alorbach\AIGateway\Ledger::insert_transaction( (int) $user_id, 'subscription_credit', null, (int) $credits_uc );
+add_action( 'alorbach_retry_wc_renewal', 'alorbach_handle_retry_wc_renewal', 10, 3 );
+function alorbach_handle_retry_wc_renewal( $user_id, $credits_uc, $request_signature = '' ) {
+	$result = Alorbach\AIGateway\Ledger::insert_transaction( (int) $user_id, 'subscription_credit', null, (int) $credits_uc, null, null, null, $request_signature );
 	if ( $result ) {
 		do_action( 'alorbach_credits_added', (int) $user_id, (int) $credits_uc, 'woocommerce_retry' );
 		do_action( 'alorbach_subscription_renewal_completed', (int) $user_id, (int) $credits_uc, 'woocommerce_retry', null, null );
 	} else {
+		if ( $request_signature && Alorbach\AIGateway\Ledger::signature_exists( (string) $request_signature ) ) {
+			return;
+		}
 		error_log( sprintf(
 			'[alorbach-ai-gateway] WC renewal retry failed permanently for user %d (%d UC). Manual credit grant required.',
 			(int) $user_id,

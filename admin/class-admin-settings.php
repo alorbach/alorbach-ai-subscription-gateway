@@ -24,23 +24,23 @@ class Admin_Settings {
 			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
 		}
 		if ( Admin_Helper::verify_post_nonce( 'alorbach_settings_nonce', 'alorbach_settings' ) ) {
-			$selling_enabled   = isset( $_POST['alorbach_selling_enabled'] );
-			$selling_multiplier = isset( $_POST['alorbach_selling_multiplier'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['alorbach_selling_multiplier'] ) ) : 2.0;
-			$selling_multiplier = max( 1.0, $selling_multiplier );
-			$debug_enabled     = isset( $_POST['alorbach_debug_enabled'] );
-			$google_import_default = isset( $_POST['alorbach_google_import_default'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_google_import_default'] ) ) : 'all';
-			$google_import_default = in_array( $google_import_default, array( 'all', 'none' ), true ) ? $google_import_default : 'all';
+			$selling_enabled        = isset( $_POST['alorbach_selling_enabled'] );
+			$selling_multiplier     = isset( $_POST['alorbach_selling_multiplier'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['alorbach_selling_multiplier'] ) ) : 2.0;
+			$selling_multiplier     = max( 1.0, $selling_multiplier );
+			$debug_enabled          = isset( $_POST['alorbach_debug_enabled'] );
+			$google_import_default  = isset( $_POST['alorbach_google_import_default'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_google_import_default'] ) ) : 'all';
+			$google_import_default  = in_array( $google_import_default, array( 'all', 'none' ), true ) ? $google_import_default : 'all';
 			$google_model_whitelist = isset( $_POST['alorbach_google_model_whitelist'] ) ? sanitize_textarea_field( wp_unslash( $_POST['alorbach_google_model_whitelist'] ) ) : '';
 
-			$rate_limit_window    = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_window'] ) ) ) ) : 60;
-			$rate_limit_chat      = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_chat'] ) ) ) ) : 100;
-			$rate_limit_images    = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_images'] ) ) ) ) : 30;
+			$rate_limit_window     = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_window'] ) ) ) ) : 60;
+			$rate_limit_chat       = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_chat'] ) ) ) ) : 100;
+			$rate_limit_images     = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_images'] ) ) ) ) : 30;
 			$rate_limit_transcribe = isset( $_POST['alorbach_rate_limit_transcribe'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_transcribe'] ) ) ) ) : 30;
-			$rate_limit_video     = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_video'] ) ) ) ) : 10;
-			$billing_url_subscribe      = isset( $_POST['alorbach_billing_url_subscribe'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_subscribe'] ) ) : '';
-			$billing_url_top_up         = isset( $_POST['alorbach_billing_url_top_up'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_top_up'] ) ) : '';
+			$rate_limit_video      = isset( $_POST['alorbach_rate_limit_video'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_video'] ) ) ) ) : 10;
+			$billing_url_subscribe = isset( $_POST['alorbach_billing_url_subscribe'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_subscribe'] ) ) : '';
+			$billing_url_top_up    = isset( $_POST['alorbach_billing_url_top_up'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_top_up'] ) ) : '';
 			$billing_url_manage_account = isset( $_POST['alorbach_billing_url_manage_account'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_manage_account'] ) ) : '';
-			$billing_url_account        = isset( $_POST['alorbach_billing_url_account_overview'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_account_overview'] ) ) : '';
+			$billing_url_account   = isset( $_POST['alorbach_billing_url_account_overview'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_account_overview'] ) ) : '';
 
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
 			update_option( 'alorbach_selling_multiplier', $selling_multiplier );
@@ -61,17 +61,17 @@ class Admin_Settings {
 			Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
 		}
 
-		$selling_enabled        = (bool) get_option( 'alorbach_selling_enabled', false );
-		$selling_multiplier     = (float) get_option( 'alorbach_selling_multiplier', 2.0 );
-		$debug_enabled          = (bool) get_option( 'alorbach_debug_enabled', false );
-		$google_import_default  = get_option( 'alorbach_google_import_default', 'all' );
-		$google_model_whitelist = get_option( 'alorbach_google_model_whitelist', \Alorbach\AIGateway\Model_Importer::GOOGLE_MODEL_WHITELIST_DEFAULT );
-		$rate_limit_window      = (int) get_option( 'alorbach_rate_limit_window', 60 );
-		$rate_limit_chat        = (int) get_option( 'alorbach_rate_limit_chat', 100 );
-		$rate_limit_images      = (int) get_option( 'alorbach_rate_limit_images', 30 );
-		$rate_limit_transcribe  = (int) get_option( 'alorbach_rate_limit_transcribe', 30 );
-		$rate_limit_video       = (int) get_option( 'alorbach_rate_limit_video', 10 );
-		$monthly_quota_uc       = (int) get_option( 'alorbach_monthly_quota_uc', 0 );
+		$selling_enabled            = (bool) get_option( 'alorbach_selling_enabled', false );
+		$selling_multiplier         = (float) get_option( 'alorbach_selling_multiplier', 2.0 );
+		$debug_enabled              = (bool) get_option( 'alorbach_debug_enabled', false );
+		$google_import_default      = get_option( 'alorbach_google_import_default', 'all' );
+		$google_model_whitelist     = get_option( 'alorbach_google_model_whitelist', \Alorbach\AIGateway\Model_Importer::GOOGLE_MODEL_WHITELIST_DEFAULT );
+		$rate_limit_window          = (int) get_option( 'alorbach_rate_limit_window', 60 );
+		$rate_limit_chat            = (int) get_option( 'alorbach_rate_limit_chat', 100 );
+		$rate_limit_images          = (int) get_option( 'alorbach_rate_limit_images', 30 );
+		$rate_limit_transcribe      = (int) get_option( 'alorbach_rate_limit_transcribe', 30 );
+		$rate_limit_video           = (int) get_option( 'alorbach_rate_limit_video', 10 );
+		$monthly_quota_uc           = (int) get_option( 'alorbach_monthly_quota_uc', 0 );
 		$billing_url_subscribe      = (string) get_option( 'alorbach_billing_url_subscribe', '' );
 		$billing_url_top_up         = (string) get_option( 'alorbach_billing_url_top_up', '' );
 		$billing_url_manage_account = (string) get_option( 'alorbach_billing_url_manage_account', '' );
@@ -99,7 +99,7 @@ class Admin_Settings {
 						<th scope="row"><label for="alorbach_selling_multiplier"><?php esc_html_e( 'Markup multiplier', 'alorbach-ai-gateway' ); ?></label></th>
 						<td>
 							<input type="number" name="alorbach_selling_multiplier" id="alorbach_selling_multiplier" value="<?php echo esc_attr( $selling_multiplier ); ?>" min="1" max="100" step="0.1" class="small-text" />
-							<p class="description"><?php esc_html_e( '2.0 = 100% profit (user pays 2× API cost).', 'alorbach-ai-gateway' ); ?></p>
+							<p class="description"><?php esc_html_e( '2.0 = 100% profit (user pays 2x API cost).', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 				</table>
@@ -146,7 +146,7 @@ class Admin_Settings {
 						<th scope="row"><label for="alorbach_rate_limit_window"><?php esc_html_e( 'Window (seconds)', 'alorbach-ai-gateway' ); ?></label></th>
 						<td>
 							<input type="number" name="alorbach_rate_limit_window" id="alorbach_rate_limit_window" value="<?php echo esc_attr( $rate_limit_window ); ?>" min="10" max="3600" step="1" class="small-text" />
-							<p class="description"><?php esc_html_e( 'Rolling time window in seconds (10–3600). Default: 60.', 'alorbach-ai-gateway' ); ?></p>
+							<p class="description"><?php esc_html_e( 'Rolling time window in seconds (10-3600). Default: 60.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 					<tr>
@@ -157,17 +157,17 @@ class Admin_Settings {
 						</td>
 					</tr>
 					<tr>
-					<th scope="row"><label for="alorbach_rate_limit_images"><?php esc_html_e( 'Image requests / window', 'alorbach-ai-gateway' ); ?></label></th>
-					<td>
-						<input type="number" name="alorbach_rate_limit_images" id="alorbach_rate_limit_images" value="<?php echo esc_attr( $rate_limit_images ); ?>" min="1" max="9999" step="1" class="small-text" />
-						<p class="description"><?php esc_html_e( 'Max image generation requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
-					</td>
-				</tr>
-				<tr>
-					<th scope="row"><label for="alorbach_rate_limit_transcribe"><?php esc_html_e( 'Transcribe requests / window', 'alorbach-ai-gateway' ); ?></label></th>
-					<td>
-						<input type="number" name="alorbach_rate_limit_transcribe" id="alorbach_rate_limit_transcribe" value="<?php echo esc_attr( $rate_limit_transcribe ); ?>" min="1" max="9999" step="1" class="small-text" />
-						<p class="description"><?php esc_html_e( 'Max audio transcription requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
+						<th scope="row"><label for="alorbach_rate_limit_images"><?php esc_html_e( 'Image requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_rate_limit_images" id="alorbach_rate_limit_images" value="<?php echo esc_attr( $rate_limit_images ); ?>" min="1" max="9999" step="1" class="small-text" />
+							<p class="description"><?php esc_html_e( 'Max image generation requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_rate_limit_transcribe"><?php esc_html_e( 'Transcribe requests / window', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="number" name="alorbach_rate_limit_transcribe" id="alorbach_rate_limit_transcribe" value="<?php echo esc_attr( $rate_limit_transcribe ); ?>" min="1" max="9999" step="1" class="small-text" />
+							<p class="description"><?php esc_html_e( 'Max audio transcription requests per user per window. Default: 30.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 					<tr>
