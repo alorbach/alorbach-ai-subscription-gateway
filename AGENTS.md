@@ -18,6 +18,14 @@ WordPress plugin for credit-based AI API billing. Unified Credit (UC) system, BP
 | `includes/` | Ledger, Tokenizer, Cost-Matrix, REST-Proxy, API-Client, User-Display |
 | `includes/Payment/` | WooCommerce integration |
 | `admin/` | Admin menu, API keys, cost matrix, plans, balance, usage, user credits, Stripe webhook |
+| `README.md` | External plugin overview and high-level endpoint summary |
+| `DEVELOPER-GUIDE.md` | External developer API reference and integration guide |
+
+## Documentation Boundaries
+
+- `README.md` should stay high-level and public-facing
+- `DEVELOPER-GUIDE.md` should document the external APIs, shortcodes, integration flows, and supported downstream usage
+- Internal maintainer setup and repository workflows belong in the root repository `docs/`, not in plugin-facing developer docs
 
 ## Conventions
 

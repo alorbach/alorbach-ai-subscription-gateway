@@ -8,16 +8,17 @@ A precise credit-based AI API billing layer for WordPress. Bridges fixed-price s
 
 ## Features
 
-- **Unified Credit (UC) system** — 1 UC = 0.000001 USD; users see Credits (1 Credit = 1000 UC)
+- **Unified Credit (UC) system** - 1 UC = 0.000001 USD; users see Credits (1 Credit = 1000 UC)
 - **BPE tokenization** via [tiktoken](https://github.com/yethee/tiktoken-php) for pre-flight cost estimation
 - **Post-flight reconciliation** with actual token counts from the API response
-- **Immutable SQL ledger** — every credit and deduction is written as an append-only row
-- **Multi-provider support** — OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex (OAuth)
-- **AI capabilities** — Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
-- **WooCommerce Subscriptions** — auto-credit on renewal, failed payment handling with retry scheduler
+- **Immutable SQL ledger** - every credit and deduction is written as an append-only row
+- **Multi-provider support** - OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex (OAuth)
+- **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
+- **WooCommerce Subscriptions** - auto-credit on renewal, failed payment handling with retry scheduler
 - **Stripe webhook** support
-- **Demo shortcodes** — ready-to-deploy chat, image, audio, and video UI components
-- **Admin panel** — API keys, cost matrix, model importer, plans, user balance, usage, developer docs
+- **Async image jobs** - provider-backed progress, streamed preview frames, and queue visibility
+- **Demo shortcodes** - ready-to-deploy chat, image, audio, and video UI components
+- **Admin panel** - API keys, cost matrix, model importer, plans, user balance, usage, developer docs
 
 ---
 
@@ -48,6 +49,8 @@ composer install --no-dev --optimize-autoloader
 
 Then go to **AI Gateway -> API Keys** to add your provider credentials.
 
+For detailed downstream integration guidance, see [DEVELOPER-GUIDE.md](./DEVELOPER-GUIDE.md).
+
 ---
 
 ## Admin Pages
@@ -60,6 +63,7 @@ All pages are under the **AI Gateway** top-level menu.
 | **Settings** | Rate limits, monthly quotas, cost multipliers, canonical billing/account URLs |
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Configure default models for demo pages; create sample pages |
+| **Image Queue** | Monitor recent image jobs, prompts, progress, previews, and final outputs |
 | **Plans** | Create credit packages and subscription plans |
 | **User Balance** | Manually credit or adjust individual users |
 | **Stripe Webhook** | Webhook integration log and status |
@@ -75,12 +79,77 @@ All pages are under the **AI Gateway** top-level menu.
 [alorbach_account_widget]    Embeddable downstream account widget
 
 [alorbach_demo_chat]         Interactive AI chat UI
-[alorbach_demo_image]        Image generator UI (prompt, size, quality, quantity)
+[alorbach_demo_image]        Image generator UI (prompt, size, quality, quantity, live previews)
 [alorbach_demo_transcribe]   Audio transcription UI (drag-and-drop)
 [alorbach_demo_video]        Video generator UI (prompt, duration, resolution)
 ```
 
 Demo pages can also be created automatically via **AI Gateway -> Demo Defaults -> Create sample pages**.
+
+---
+
+## Model Types
+
+The gateway currently exposes model configuration in these functional categories.
+
+### Text Models
+
+Used for chat-style generation via `/chat`.
+
+- Typical use cases: chat assistants, text generation, structured output, multi-step flows
+- Main providers: OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex
+- Demo surface: `[alorbach_demo_chat]`
+
+### Image Models
+
+Used for image generation via `/images` or the async image-job endpoints.
+
+- Typical use cases: image generation, preview frames, downloadable final artwork
+- Main providers: OpenAI, Azure OpenAI, Google
+- Demo surface: `[alorbach_demo_image]`
+- Supports both:
+  - synchronous generation with `/images`
+  - async generation with `/images/jobs`, `/images/jobs/<job_id>`, and `/images/jobs/<job_id>/stream`
+- Preview-capable models expose progress metadata through `/me/models`
+
+### Audio Models
+
+Used for speech-to-text transcription via `/transcribe`.
+
+- Typical use cases: transcription, dictated notes, uploaded audio processing
+- Main providers: OpenAI, Azure OpenAI
+- Demo surface: `[alorbach_demo_transcribe]`
+
+### Video Models
+
+Used for video generation via `/video`.
+
+- Typical use cases: prompt-to-video generation
+- Main providers: OpenAI, Azure OpenAI
+- Demo surface: `[alorbach_demo_video]`
+- Video generation is polled until completion rather than streamed frame-by-frame
+
+### Codex Models
+
+Codex models are a specialized text-model path for coding and agent-style responses.
+
+- Typical use cases: coding assistants, code transformation, developer workflows
+- Provider path: Codex OAuth and Azure Codex-compatible deployments
+- Request behavior: uses a Responses/SSE-style backend flow instead of a plain chat-completions path when required
+- Notes:
+  - Codex is still a text model category from an integration point of view
+  - it is documented separately because provider authentication and request handling differ from standard text models
+
+### Capability Discovery
+
+Use `/me/models` when building frontend pages so the UI can discover the currently configured defaults and supported options for:
+
+- `text`
+- `image`
+- `audio`
+- `video`
+
+For image pages specifically, `/me/models` also includes progress and preview capability metadata so the frontend can decide whether to use the async preview flow.
 
 ---
 
@@ -100,6 +169,9 @@ Base URL: `/wp-json/alorbach/v1`
 | `GET` | `/integration/account` | Canonical downstream account summary |
 | `GET` | `/integration/account/history` | Canonical downstream account history |
 | `POST` | `/images` | Generate images |
+| `POST` | `/images/jobs` | Create an async image generation job |
+| `GET` | `/images/jobs/<job_id>` | Read image job status, progress, previews, and final images |
+| `GET` | `/images/jobs/<job_id>/stream` | Stream provider-backed image job updates |
 | `POST` | `/transcribe` | Transcribe audio (base64) |
 | `POST` | `/video` | Generate video |
 | `POST` | `/stripe-webhook` | Stripe payment events _(public)_ |
@@ -125,6 +197,16 @@ Base URL: `/wp-json/alorbach/v1`
 | `POST` | `/admin/reset-models` | Reset models to defaults |
 | `POST` | `/admin/refresh-azure-prices` | Refresh Azure retail pricing |
 | `POST` | `/admin/save-google-whitelist` | Configure Google API whitelist |
+| `GET` | `/admin/image-jobs` | List recent image jobs for queue monitoring |
+| `GET` | `/admin/image-jobs/<job_id>` | Read one image job detail payload |
+
+### Image Job Notes
+
+- `/images` remains the compatibility path for synchronous callers.
+- The image sample page now prefers `/images/jobs` and uses `/images/jobs/<job_id>/stream` plus status polling for preview-capable models.
+- `/me/models` includes image preview/progress capability metadata used by the sample UI.
+- Credits are checked before job creation and deducted only after successful completion.
+- Preview images can be inspected in both the sample page and the Image Queue admin screen.
 
 ---
 
@@ -208,7 +290,7 @@ $uc = alorbach_get_user_balance( $user_id );
 // Get this month's usage in UC
 $used = alorbach_get_user_usage_this_month( $user_id );
 
-// Format UC as a human-readable Credits string — e.g. "1.50 Credits"
+// Format UC as a human-readable Credits string - e.g. "1.50 Credits"
 echo alorbach_format_credits( $uc );
 ```
 
@@ -280,4 +362,4 @@ The CI workflow builds a clean plugin ZIP and publishes a GitHub Release with au
 
 ## License
 
-GPL-2.0-or-later — Copyright (c) Andre Lorbach
+GPL-2.0-or-later - Copyright (c) Andre Lorbach

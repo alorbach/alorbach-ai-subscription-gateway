@@ -135,7 +135,7 @@ class Admin_Demo_Defaults {
 			array(
 				'title'   => __( 'Image Generator', 'alorbach-ai-gateway' ),
 				'slug'    => 'image-generator',
-				'content' => '[alorbach_demo_image]',
+				'content' => '<p>' . esc_html__( 'This demo shows generation progress while your image is being created. It uses estimated progress by default and can surface live previews when the provider supports them.', 'alorbach-ai-gateway' ) . '</p>' . "\n\n" . '[alorbach_demo_image]',
 			),
 			array(
 				'title'   => __( 'Audio Transcription', 'alorbach-ai-gateway' ),

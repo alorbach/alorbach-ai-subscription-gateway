@@ -269,6 +269,47 @@ class REST_Proxy {
 			),
 		) );
 
+		register_rest_route( 'alorbach/v1', '/images/jobs', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'images_job_create_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args'                => array(
+				'prompt'  => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'size'    => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
+				'n'       => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
+				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/images/jobs/(?P<job_id>[a-zA-Z0-9\-]+)', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'images_job_status_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+		) );
+
+		register_rest_route( 'alorbach/v1', '/images/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/stream', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'images_job_stream_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+		) );
+
+		register_rest_route( 'alorbach/v1', '/internal/images/jobs/process', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'images_job_process_handler' ),
+			'permission_callback' => '__return_true',
+			'args'                => array(
+				'job_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'token'  => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
 		register_rest_route( 'alorbach/v1', '/transcribe', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'transcribe_handler' ),
@@ -409,6 +450,24 @@ class REST_Proxy {
 		register_rest_route( 'alorbach/v1', '/admin/save-google-whitelist', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'admin_save_google_whitelist' ),
+			'permission_callback' => $admin_permission,
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/image-jobs', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'admin_image_jobs_list' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'limit' => array(
+					'default'           => 50,
+					'sanitize_callback' => 'absint',
+				),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/image-jobs/(?P<job_id>[a-zA-Z0-9\-]+)', array(
+			'methods'             => 'GET',
+			'callback'            => array( __CLASS__, 'admin_image_job_detail' ),
 			'permission_callback' => $admin_permission,
 		) );
 	}
@@ -607,6 +666,12 @@ class REST_Proxy {
 		$max_tokens_options = $admin::get_max_tokens_options();
 		$default_max_tokens = get_option( 'alorbach_demo_default_max_tokens', '1024' );
 		$default_max_tokens = in_array( $default_max_tokens, $max_tokens_options, true ) ? $default_max_tokens : ( $max_tokens_options[0] ?? '1024' );
+		$image_models = isset( $config['capabilities']['image_models'] ) && is_array( $config['capabilities']['image_models'] ) ? $config['capabilities']['image_models'] : array();
+		$streamable_image_models = array_values( array_filter( $image_models, function ( $model ) {
+			return API_Client::supports_partial_image_streaming( $model );
+		} ) );
+		$default_image_model = isset( $config['defaults']['image_model'] ) ? $config['defaults']['image_model'] : '';
+		$default_supports_stream = API_Client::supports_partial_image_streaming( $default_image_model );
 
 		return rest_ensure_response( array(
 			'text'  => array(
@@ -618,11 +683,11 @@ class REST_Proxy {
 					'options' => $max_tokens_options,
 				),
 			),
-			'image' => array(
-				'size'    => array(
-					'default'      => $config['defaults']['image_size'],
-					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_size_select', false ),
-					'options'      => $config['capabilities']['image_sizes'],
+ 			'image' => array(
+ 				'size'    => array(
+ 					'default'      => $config['defaults']['image_size'],
+ 					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_size_select', false ),
+ 					'options'      => $config['capabilities']['image_sizes'],
 				),
 				'model'   => array(
 					'default'      => $config['defaults']['image_model'],
@@ -630,11 +695,16 @@ class REST_Proxy {
 					'options'      => $config['capabilities']['image_models'],
 				),
 				'quality' => array(
-					'default'      => $config['defaults']['image_quality'],
-					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_quality_select', false ),
-					'options'      => $config['capabilities']['image_qualities'],
-				),
-			),
+ 					'default'      => $config['defaults']['image_quality'],
+ 					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_quality_select', false ),
+ 					'options'      => $config['capabilities']['image_qualities'],
+ 				),
+				'supports_progress'       => true,
+				'supports_preview_images' => ! empty( $streamable_image_models ),
+				'progress_mode'           => $default_supports_stream ? 'provider' : 'estimated',
+				'job_endpoint'            => rest_url( 'alorbach/v1/images/jobs' ),
+				'preview_models'          => $streamable_image_models,
+ 			),
 			'audio' => array(
 				'default'      => $config['defaults']['audio_model'],
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_audio_model_select', false ),
@@ -913,6 +983,210 @@ class REST_Proxy {
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
 		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Create an async image job.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function images_job_create_handler( $request ) {
+		$user_id = get_current_user_id();
+		$json    = $request->get_json_params();
+		$raw_prompt = '';
+
+		if ( is_array( $json ) && isset( $json['prompt'] ) ) {
+			$raw_prompt = is_scalar( $json['prompt'] ) ? (string) $json['prompt'] : '';
+		} else {
+			$raw_param = $request->get_body_params();
+			if ( is_array( $raw_param ) && isset( $raw_param['prompt'] ) && is_scalar( $raw_param['prompt'] ) ) {
+				$raw_prompt = (string) $raw_param['prompt'];
+			}
+		}
+
+		$rate_error = self::check_rate_limit( $user_id, 'images' );
+		if ( $rate_error ) {
+			return $rate_error;
+		}
+
+		$quota_error = self::check_monthly_quota( $user_id );
+		if ( $quota_error ) {
+			return $quota_error;
+		}
+
+		$result = Image_Jobs::create_job(
+			$user_id,
+			array(
+				'prompt'          => $request->get_param( 'prompt' ),
+				'original_prompt' => $raw_prompt,
+				'size'            => $request->get_param( 'size' ),
+				'n'               => $request->get_param( 'n' ),
+				'quality'         => $request->get_param( 'quality' ),
+				'model'           => $request->get_param( 'model' ),
+			)
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Get image job status.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function images_job_status_handler( $request ) {
+		$job_id = (string) $request->get_param( 'job_id' );
+		$job    = Image_Jobs::get_job_for_user( $job_id, get_current_user_id() );
+
+		if ( ! $job ) {
+			return new \WP_Error( 'job_not_found', __( 'Image job not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+
+		if ( $job['status'] === 'queued' && ! empty( $job['dispatched_at'] ) && ( time() - (int) $job['dispatched_at'] ) >= 4 ) {
+			Image_Jobs::dispatch_job( $job );
+			$job = Image_Jobs::get_job_for_user( $job_id, get_current_user_id() );
+			if ( ! $job ) {
+				return new \WP_Error( 'job_not_found', __( 'Image job not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+			}
+		}
+
+		return rest_ensure_response( Image_Jobs::public_job_payload( $job ) );
+	}
+
+	/**
+	 * Stream provider-backed image job updates to the browser.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return void|\WP_REST_Response|\WP_Error
+	 */
+	public static function images_job_stream_handler( $request ) {
+		$job_id = (string) $request->get_param( 'job_id' );
+		$job    = Image_Jobs::get_job_for_user( $job_id, get_current_user_id() );
+
+		if ( ! $job ) {
+			return new \WP_Error( 'job_not_found', __( 'Image job not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+
+		@ini_set( 'zlib.output_compression', '0' );
+		@ini_set( 'output_buffering', 'off' );
+		@ini_set( 'implicit_flush', '1' );
+		nocache_headers();
+		header( 'Content-Type: text/event-stream' );
+		header( 'Cache-Control: no-cache, no-transform' );
+		header( 'Connection: keep-alive' );
+		header( 'X-Accel-Buffering: no' );
+
+		while ( ob_get_level() > 0 ) {
+			ob_end_clean();
+		}
+
+		echo ':' . str_repeat( ' ', 2048 ) . "\n\n";
+		if ( function_exists( 'flush' ) ) {
+			flush();
+		}
+
+		self::emit_sse_image_job( 'job', Image_Jobs::public_job_payload( $job ) );
+
+		if ( $job['status'] === 'completed' || $job['status'] === 'failed' ) {
+			self::emit_sse_image_job( 'done', Image_Jobs::public_job_payload( $job ) );
+			exit;
+		}
+
+		$result = Image_Jobs::process_job(
+			$job_id,
+			(string) $job['dispatch_token'],
+			function ( $payload ) {
+				self::emit_sse_image_job( 'job', $payload );
+			}
+		);
+
+		if ( is_wp_error( $result ) ) {
+			$latest = Image_Jobs::get_job_for_user( $job_id, get_current_user_id() );
+			$payload = $latest ? Image_Jobs::public_job_payload( $latest ) : array(
+				'job_id' => $job_id,
+				'status' => 'failed',
+				'error'  => $result->get_error_message(),
+			);
+			self::emit_sse_image_job( 'error', $payload );
+			exit;
+		}
+
+		self::emit_sse_image_job( 'done', $result );
+		exit;
+	}
+
+	/**
+	 * Internal loopback endpoint that processes an image job.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function images_job_process_handler( $request ) {
+		$result = Image_Jobs::process_job(
+			(string) $request->get_param( 'job_id' ),
+			(string) $request->get_param( 'token' )
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Emit one SSE image job event.
+	 *
+	 * @param string $event   Event name.
+	 * @param array  $payload Event payload.
+	 * @return void
+	 */
+	private static function emit_sse_image_job( $event, $payload ) {
+		echo 'event: ' . sanitize_key( $event ) . "\n";
+		echo 'data: ' . wp_json_encode( $payload ) . "\n\n";
+		echo ':' . str_repeat( ' ', 1024 ) . "\n\n";
+		if ( function_exists( 'flush' ) ) {
+			flush();
+		}
+	}
+
+	/**
+	 * List recent image jobs for the admin queue page.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_image_jobs_list( $request ) {
+		$jobs = Image_Jobs::list_jobs_for_admin( (int) $request->get_param( 'limit' ) );
+		$payload = array_map( array( Image_Jobs::class, 'admin_job_summary_payload' ), $jobs );
+
+		return rest_ensure_response(
+			array(
+				'stats' => Image_Jobs::summarize_jobs( $jobs ),
+				'jobs'  => $payload,
+			)
+		);
+	}
+
+	/**
+	 * Get a single image job detail payload for admin monitoring.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function admin_image_job_detail( $request ) {
+		$job = Image_Jobs::get_job_for_admin( (string) $request->get_param( 'job_id' ) );
+		if ( ! $job ) {
+			return new \WP_Error( 'job_not_found', __( 'Image job not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+
+		return rest_ensure_response( Image_Jobs::admin_job_payload( $job ) );
 	}
 
 	/**

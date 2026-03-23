@@ -25,7 +25,9 @@ define( 'ALORBACH_UC_TO_CREDIT', 1000 );
 require_once ALORBACH_PLUGIN_DIR . 'vendor/autoload.php';
 
 // Explicitly load Provider classes (in case autoload classmap is stale).
+require_once ALORBACH_PLUGIN_DIR . 'admin/class-admin-image-queue.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-api-keys-helper.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-jobs.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-integration-service.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Interface.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Base.php';

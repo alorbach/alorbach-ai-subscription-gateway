@@ -19,6 +19,28 @@ if ( ! defined( 'ABSPATH' ) ) {
 class API_Client {
 
 	/**
+	 * Whether a model/provider combination supports partial image streaming.
+	 *
+	 * @param string      $model    Model ID.
+	 * @param string|null $provider Optional provider override.
+	 * @return bool
+	 */
+	public static function supports_partial_image_streaming( $model, $provider = null ) {
+		$model    = (string) $model;
+		$provider = $provider ?: self::get_provider_for_model( $model );
+
+		if ( strpos( $model, 'gpt-image' ) !== 0 ) {
+			return false;
+		}
+
+		if ( ! in_array( $provider, array( 'openai', 'azure' ), true ) ) {
+			return false;
+		}
+
+		return function_exists( 'curl_init' );
+	}
+
+	/**
 	 * Get the provider to use for a model based on configured API keys.
 	 * GPT models work with OpenAI, Azure, or GitHub Models; uses whichever is configured (priority: openai > azure > github_models).
 	 *
@@ -435,6 +457,305 @@ class API_Client {
 			$body_response = array( 'data' => $data );
 		}
 		return $body_response;
+	}
+
+	/**
+	 * Stream image generation and emit partial previews when available.
+	 *
+	 * @param string        $prompt        Prompt.
+	 * @param string        $size          Size.
+	 * @param int           $n             Number of images.
+	 * @param string|null   $model         Model.
+	 * @param string|null   $quality       Quality.
+	 * @param string|null   $output_format Output format.
+	 * @param callable|null $on_event      Optional callback receiving event payloads.
+	 * @return array|\WP_Error
+	 */
+	public static function stream_images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $on_event = null ) {
+		$n             = min( 10, max( 1, (int) $n ) );
+		$model         = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$quality       = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
+		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
+		$provider      = self::get_provider_for_model( $model );
+
+		if ( ! self::supports_partial_image_streaming( $model, $provider ) ) {
+			return new \WP_Error( 'stream_not_supported', __( 'Partial image streaming is not supported for this model.', 'alorbach-ai-gateway' ) );
+		}
+
+		$prov = Provider_Registry::get( $provider );
+		if ( ! $prov || ! $prov->supports_images() ) {
+			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
+		}
+
+		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		if ( ! $creds ) {
+			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
+		}
+
+		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds );
+		if ( ! $request || is_wp_error( $request ) ) {
+			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
+		}
+
+		$body = json_decode( $request['body'], true );
+		if ( ! is_array( $body ) ) {
+			return new \WP_Error( 'invalid_stream_request', __( 'Could not prepare streaming image request.', 'alorbach-ai-gateway' ) );
+		}
+		$body['stream']         = true;
+		$body['partial_images'] = 3;
+		$request['body']        = wp_json_encode( $body );
+		$request['headers']['Accept'] = 'text/event-stream';
+
+		$state = array(
+			'preview_images' => array(),
+			'final_images'   => array(),
+			'usage'          => null,
+			'raw'            => '',
+		);
+		$buffer = '';
+
+		$ch = curl_init( $request['url'] );
+		curl_setopt( $ch, CURLOPT_POST, true );
+		curl_setopt( $ch, CURLOPT_HTTPHEADER, self::curl_headers( $request['headers'] ) );
+		curl_setopt( $ch, CURLOPT_POSTFIELDS, $request['body'] );
+		curl_setopt( $ch, CURLOPT_RETURNTRANSFER, false );
+		curl_setopt( $ch, CURLOPT_HEADER, false );
+		curl_setopt( $ch, CURLOPT_TIMEOUT, 180 );
+		curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
+		curl_setopt(
+			$ch,
+			CURLOPT_WRITEFUNCTION,
+			function ( $curl, $chunk ) use ( &$buffer, &$state, $on_event ) {
+				$state['raw'] .= $chunk;
+				$buffer       .= $chunk;
+
+				while ( null !== ( $event = self::shift_stream_block( $buffer ) ) ) {
+					self::consume_image_stream_event( $event, $state, $on_event );
+				}
+
+				return strlen( $chunk );
+			}
+		);
+
+		$ok = curl_exec( $ch );
+		$errno = curl_errno( $ch );
+		$error = curl_error( $ch );
+		$code  = (int) curl_getinfo( $ch, CURLINFO_RESPONSE_CODE );
+		curl_close( $ch );
+
+		if ( $buffer !== '' ) {
+			self::consume_image_stream_event( $buffer, $state, $on_event );
+		}
+
+		if ( false === $ok || $errno ) {
+			return new \WP_Error( 'curl_stream_error', $error ?: __( 'Image stream failed.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
+		}
+
+		if ( $code >= 400 ) {
+			$body_response = json_decode( $state['raw'], true );
+			$msg = self::extract_api_error_message( $body_response, $state['raw'], $code );
+			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+		}
+
+		if ( empty( $state['final_images'] ) ) {
+			$decoded = json_decode( trim( $state['raw'] ), true );
+			if ( is_array( $decoded ) ) {
+				$final = self::extract_image_items_from_payload( $decoded );
+				if ( ! empty( $final ) ) {
+					$state['final_images'] = $final;
+				}
+				if ( isset( $decoded['usage'] ) && is_array( $decoded['usage'] ) ) {
+					$state['usage'] = $decoded['usage'];
+				}
+			}
+		}
+
+		return array(
+			'data'           => $state['final_images'],
+			'preview_images' => $state['preview_images'],
+			'usage'          => $state['usage'],
+		);
+	}
+
+	/**
+	 * Shift one SSE block from a stream buffer.
+	 *
+	 * @param string $buffer Mutable buffer.
+	 * @return string|null
+	 */
+	private static function shift_stream_block( &$buffer ) {
+		$positions = array();
+		foreach ( array( "\r\n\r\n", "\n\n" ) as $delimiter ) {
+			$pos = strpos( $buffer, $delimiter );
+			if ( false !== $pos ) {
+				$positions[] = array(
+					'pos' => $pos,
+					'len' => strlen( $delimiter ),
+				);
+			}
+		}
+		if ( empty( $positions ) ) {
+			return null;
+		}
+		usort( $positions, function ( $a, $b ) {
+			return $a['pos'] - $b['pos'];
+		} );
+		$first = $positions[0];
+		$block = substr( $buffer, 0, $first['pos'] );
+		$buffer = substr( $buffer, $first['pos'] + $first['len'] );
+		return $block;
+	}
+
+	/**
+	 * Convert headers array into cURL header lines.
+	 *
+	 * @param array $headers Header map.
+	 * @return array
+	 */
+	private static function curl_headers( $headers ) {
+		$lines = array();
+		foreach ( $headers as $key => $value ) {
+			$lines[] = $key . ': ' . $value;
+		}
+		return $lines;
+	}
+
+	/**
+	 * Consume a streamed image event block.
+	 *
+	 * @param string        $block    Raw event block.
+	 * @param array         $state    Mutable state.
+	 * @param callable|null $on_event Optional callback.
+	 * @return void
+	 */
+	private static function consume_image_stream_event( $block, &$state, $on_event = null ) {
+		$block = trim( (string) $block );
+		if ( '' === $block ) {
+			return;
+		}
+
+		$data_lines = array();
+		foreach ( preg_split( "/\r?\n/", $block ) as $line ) {
+			$line = trim( $line );
+			if ( strncmp( $line, 'data:', 5 ) === 0 ) {
+				$data_lines[] = trim( substr( $line, 5 ) );
+			}
+		}
+
+		if ( empty( $data_lines ) ) {
+			return;
+		}
+
+		$json = trim( implode( "\n", $data_lines ) );
+		if ( $json === '[DONE]' ) {
+			return;
+		}
+
+		$payload = json_decode( $json, true );
+		if ( ! is_array( $payload ) ) {
+			return;
+		}
+
+		$images = self::extract_image_items_from_payload( $payload );
+		if ( ! empty( $images ) ) {
+			$is_preview = self::payload_looks_like_partial_image( $payload );
+			$target_key = $is_preview ? 'preview_images' : 'final_images';
+			$existing   = self::image_item_hashes( $state[ $target_key ] );
+			$new_images = array();
+
+			foreach ( $images as $image ) {
+				$hash = md5( wp_json_encode( $image ) );
+				if ( isset( $existing[ $hash ] ) ) {
+					continue;
+				}
+				$existing[ $hash ] = true;
+				$state[ $target_key ][] = $image;
+				$new_images[] = $image;
+			}
+
+			if ( ! empty( $new_images ) && is_callable( $on_event ) ) {
+				call_user_func(
+					$on_event,
+					array(
+						'type'   => $is_preview ? 'preview_image' : 'final_image',
+						'images' => $new_images,
+						'raw'    => $payload,
+					)
+				);
+			}
+		}
+
+		if ( isset( $payload['usage'] ) && is_array( $payload['usage'] ) ) {
+			$state['usage'] = $payload['usage'];
+		}
+	}
+
+	/**
+	 * Determine whether a stream payload looks like a partial image update.
+	 *
+	 * @param array $payload Event payload.
+	 * @return bool
+	 */
+	private static function payload_looks_like_partial_image( $payload ) {
+		$joined = strtolower( wp_json_encode( $payload ) );
+		return ( strpos( $joined, 'partial' ) !== false || strpos( $joined, 'preview' ) !== false );
+	}
+
+	/**
+	 * Extract image items from a payload recursively.
+	 *
+	 * @param mixed $payload Event payload.
+	 * @return array
+	 */
+	private static function extract_image_items_from_payload( $payload ) {
+		$items = array();
+
+		if ( is_array( $payload ) ) {
+			if ( isset( $payload['b64_json'] ) && is_string( $payload['b64_json'] ) && $payload['b64_json'] !== '' ) {
+				$items[] = array( 'b64_json' => $payload['b64_json'] );
+			}
+			if ( isset( $payload['url'] ) && is_string( $payload['url'] ) && $payload['url'] !== '' ) {
+				$items[] = array( 'url' => $payload['url'] );
+			}
+			if ( isset( $payload['bytesBase64Encoded'] ) && is_string( $payload['bytesBase64Encoded'] ) && $payload['bytesBase64Encoded'] !== '' ) {
+				$items[] = array( 'b64_json' => $payload['bytesBase64Encoded'] );
+			}
+			if ( isset( $payload['image_base64'] ) && is_string( $payload['image_base64'] ) && $payload['image_base64'] !== '' ) {
+				$items[] = array( 'b64_json' => $payload['image_base64'] );
+			}
+			foreach ( $payload as $value ) {
+				if ( is_array( $value ) ) {
+					$items = array_merge( $items, self::extract_image_items_from_payload( $value ) );
+				}
+			}
+		}
+
+		$unique = array();
+		$seen   = array();
+		foreach ( $items as $item ) {
+			$hash = md5( wp_json_encode( $item ) );
+			if ( isset( $seen[ $hash ] ) ) {
+				continue;
+			}
+			$seen[ $hash ] = true;
+			$unique[] = $item;
+		}
+
+		return $unique;
+	}
+
+	/**
+	 * Build a hash set for image items.
+	 *
+	 * @param array $items Existing items.
+	 * @return array
+	 */
+	private static function image_item_hashes( $items ) {
+		$hashes = array();
+		foreach ( $items as $item ) {
+			$hashes[ md5( wp_json_encode( $item ) ) ] = true;
+		}
+		return $hashes;
 	}
 
 	/**

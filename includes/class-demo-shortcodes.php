@@ -112,6 +112,23 @@ class Demo_Shortcodes {
 					<button type="button" class="button button-primary alorbach-demo-generate"><?php esc_html_e( 'Generate', 'alorbach-ai-gateway' ); ?></button>
 				</div>
 			</div>
+			<div class="alorbach-demo-progress-card" style="display:none;" aria-live="polite">
+				<div class="alorbach-demo-progress-copy">
+					<strong class="alorbach-demo-progress-title"><?php esc_html_e( 'Generating image...', 'alorbach-ai-gateway' ); ?></strong>
+					<span class="alorbach-demo-progress-mode"><?php esc_html_e( 'Estimated progress based on generation stage.', 'alorbach-ai-gateway' ); ?></span>
+				</div>
+				<div class="alorbach-demo-progress-meta">
+					<span class="alorbach-demo-progress-stage"><?php esc_html_e( 'Queued', 'alorbach-ai-gateway' ); ?></span>
+					<span class="alorbach-demo-progress-value">0%</span>
+				</div>
+				<div class="alorbach-demo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+					<span class="alorbach-demo-progress-fill"></span>
+				</div>
+				<div class="alorbach-demo-preview-rail" style="display:none;">
+					<div class="alorbach-demo-preview-label"><?php esc_html_e( 'Live previews', 'alorbach-ai-gateway' ); ?></div>
+					<div class="alorbach-demo-preview-images"></div>
+				</div>
+			</div>
 			<div class="alorbach-demo-images"></div>
 			<div class="alorbach-demo-usage" aria-live="polite"></div>
 		</div>
@@ -240,10 +257,22 @@ class Demo_Shortcodes {
 		wp_enqueue_style( 'alorbach-demo-pages', $url . 'assets/css/demo-pages.css', array(), $ver );
 		wp_enqueue_script( 'alorbach-demo-pages', $url . 'assets/js/demo-pages.js', array(), $ver, true );
 		wp_localize_script( 'alorbach-demo-pages', 'alorbachDemo', array(
-			'restUrl'     => rest_url( 'alorbach/v1' ),
-			'nonce'       => wp_create_nonce( 'wp_rest' ),
-			'creditsLabel' => __( 'Credits', 'alorbach-ai-gateway' ),
-			'costLabel'    => __( 'Cost: ', 'alorbach-ai-gateway' ),
+			'restUrl'              => rest_url( 'alorbach/v1' ),
+			'nonce'                => wp_create_nonce( 'wp_rest' ),
+			'creditsLabel'         => __( 'Credits', 'alorbach-ai-gateway' ),
+			'costLabel'            => __( 'Cost: ', 'alorbach-ai-gateway' ),
+			'imageProgressLabels'  => array(
+				'generating' => __( 'Generating image...', 'alorbach-ai-gateway' ),
+				'estimated'  => __( 'Estimated progress based on generation stage.', 'alorbach-ai-gateway' ),
+				'provider'   => __( 'Provider-backed progress updates.', 'alorbach-ai-gateway' ),
+				'queued'     => __( 'Queued', 'alorbach-ai-gateway' ),
+				'drafting'   => __( 'Drafting', 'alorbach-ai-gateway' ),
+				'refining'   => __( 'Refining', 'alorbach-ai-gateway' ),
+				'finalizing' => __( 'Finalizing', 'alorbach-ai-gateway' ),
+				'completed'  => __( 'Completed', 'alorbach-ai-gateway' ),
+				'failed'     => __( 'Failed', 'alorbach-ai-gateway' ),
+				'previews'   => __( 'Live previews', 'alorbach-ai-gateway' ),
+			),
 		) );
 	}
 }

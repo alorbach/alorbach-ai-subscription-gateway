@@ -10,14 +10,23 @@
 	var config = window.alorbachDemo || {};
 	var restUrl = config.restUrl || '';
 	var nonce = config.nonce || '';
+	var lightboxState = {
+		items: [],
+		index: 0,
+		keyHandlerBound: false
+	};
 
-	function apiFetch(endpoint, options) {
+	function buildApiUrl(endpoint) {
 		var base = restUrl.replace(/\/$/, '');
 		// When using index.php?rest_route=..., endpoint query params must use & not ?
 		// Otherwise rest_route value gets corrupted (e.g. /me/estimate?type=image)
-		var url = base + (base.indexOf('?') !== -1 && endpoint.indexOf('?') !== -1
+		return base + (base.indexOf('?') !== -1 && endpoint.indexOf('?') !== -1
 			? endpoint.replace('?', '&')
 			: endpoint);
+	}
+
+	function apiFetch(endpoint, options) {
+		var url = buildApiUrl(endpoint);
 		var opts = Object.assign({
 			headers: {
 				'Content-Type': 'application/json',
@@ -83,20 +92,71 @@
 		if (el) el.style.display = 'none';
 	}
 
-	function openLightbox(src) {
-		var lb = document.getElementById('alorbach-demo-lightbox');
-		if (!lb) {
-			lb = document.createElement('div');
-			lb.id = 'alorbach-demo-lightbox';
-			lb.className = 'alorbach-demo-lightbox';
-			lb.innerHTML = '<div class="alorbach-demo-lightbox-backdrop"></div><img class="alorbach-demo-lightbox-img" src="" alt="">';
-			lb.querySelector('.alorbach-demo-lightbox-backdrop').addEventListener('click', closeLightbox);
-			document.addEventListener('keydown', function lightboxKey(e) {
-				if (e.key === 'Escape') { closeLightbox(); document.removeEventListener('keydown', lightboxKey); }
-			});
-			document.body.appendChild(lb);
+	function downloadFileName(item, fallback) {
+		if (item && item.downloadName) {
+			return item.downloadName;
 		}
-		lb.querySelector('.alorbach-demo-lightbox-img').src = src;
+		return fallback || 'image.png';
+	}
+
+	function updateLightboxView() {
+		var lb = document.getElementById('alorbach-demo-lightbox');
+		var item = lightboxState.items[lightboxState.index];
+		if (!lb || !item) return;
+		lb.querySelector('.alorbach-demo-lightbox-img').src = item.src;
+		lb.querySelector('.alorbach-demo-lightbox-img').alt = item.alt || '';
+		lb.querySelector('.alorbach-demo-lightbox-download').href = item.src;
+		lb.querySelector('.alorbach-demo-lightbox-download').download = downloadFileName(item, 'image-' + (lightboxState.index + 1) + '.png');
+		lb.querySelector('.alorbach-demo-lightbox-count').textContent = (lightboxState.index + 1) + ' / ' + lightboxState.items.length;
+		lb.querySelector('.alorbach-demo-lightbox-prev').disabled = lightboxState.items.length <= 1;
+		lb.querySelector('.alorbach-demo-lightbox-next').disabled = lightboxState.items.length <= 1;
+	}
+
+	function navigateLightbox(direction) {
+		if (!lightboxState.items.length) return;
+		var total = lightboxState.items.length;
+		lightboxState.index = (lightboxState.index + direction + total) % total;
+		updateLightboxView();
+	}
+
+	function ensureLightbox() {
+		var lb = document.getElementById('alorbach-demo-lightbox');
+		if (lb) {
+			return lb;
+		}
+		lb = document.createElement('div');
+		lb.id = 'alorbach-demo-lightbox';
+		lb.className = 'alorbach-demo-lightbox';
+		lb.innerHTML = '<div class="alorbach-demo-lightbox-backdrop"></div><div class="alorbach-demo-lightbox-shell"><button type="button" class="alorbach-demo-lightbox-nav alorbach-demo-lightbox-prev" aria-label="Previous image">‹</button><img class="alorbach-demo-lightbox-img" src="" alt=""><button type="button" class="alorbach-demo-lightbox-nav alorbach-demo-lightbox-next" aria-label="Next image">›</button><div class="alorbach-demo-lightbox-toolbar"><span class="alorbach-demo-lightbox-count"></span><a class="alorbach-demo-lightbox-download button button-primary" href="" download>Download</a></div></div>';
+		lb.querySelector('.alorbach-demo-lightbox-backdrop').addEventListener('click', closeLightbox);
+		lb.querySelector('.alorbach-demo-lightbox-prev').addEventListener('click', function () { navigateLightbox(-1); });
+		lb.querySelector('.alorbach-demo-lightbox-next').addEventListener('click', function () { navigateLightbox(1); });
+		if (!lightboxState.keyHandlerBound) {
+			document.addEventListener('keydown', function (e) {
+				if (!lb.classList.contains('open')) return;
+				if (e.key === 'Escape') {
+					closeLightbox();
+				} else if (e.key === 'ArrowLeft') {
+					e.preventDefault();
+					navigateLightbox(-1);
+				} else if (e.key === 'ArrowRight') {
+					e.preventDefault();
+					navigateLightbox(1);
+				}
+			});
+			lightboxState.keyHandlerBound = true;
+		}
+		document.body.appendChild(lb);
+		return lb;
+	}
+
+	function openLightbox(items, index) {
+		var galleryItems = Array.isArray(items) ? items.filter(function (item) { return item && item.src; }) : [];
+		if (!galleryItems.length) return;
+		lightboxState.items = galleryItems;
+		lightboxState.index = Math.max(0, Math.min(index || 0, galleryItems.length - 1));
+		var lb = ensureLightbox();
+		updateLightboxView();
 		lb.classList.add('open');
 		document.body.style.overflow = 'hidden';
 	}
@@ -233,9 +293,26 @@
 
 		var modelSelect = container.querySelector('.alorbach-demo-model-select');
 		var modelWrap = container.querySelector('.alorbach-demo-model-wrap');
+		var progressCard = container.querySelector('.alorbach-demo-progress-card');
+		var progressTitle = container.querySelector('.alorbach-demo-progress-title');
+		var progressMode = container.querySelector('.alorbach-demo-progress-mode');
+		var progressStage = container.querySelector('.alorbach-demo-progress-stage');
+		var progressValue = container.querySelector('.alorbach-demo-progress-value');
+		var progressBar = container.querySelector('.alorbach-demo-progress-bar');
+		var progressFill = container.querySelector('.alorbach-demo-progress-fill');
+		var previewRail = container.querySelector('.alorbach-demo-preview-rail');
+		var previewImages = container.querySelector('.alorbach-demo-preview-images');
+		var labels = config.imageProgressLabels || {};
+		var progressTimer = null;
+		var pollTimer = null;
+		var currentProgress = 0;
+		var imageConfig = null;
+		var activeJobId = null;
+		var streamSettled = false;
 
 		getModels(container).then(function (models) {
 			var img = models.image || {};
+			imageConfig = img;
 			var sizeOpts = img.size || {};
 			var modelOpts = img.model || {};
 			var q = img.quality || {};
@@ -297,6 +374,362 @@
 		if (nInput) nInput.addEventListener('change', refreshImageCost);
 		if (nInput) nInput.addEventListener('input', refreshImageCost);
 
+		function stageLabel(stage) {
+			return labels[stage] || stage || (labels.queued || 'Queued');
+		}
+
+		function setProgress(percent, stage, mode, showCard) {
+			var safePercent = Math.max(0, Math.min(100, percent || 0));
+			currentProgress = safePercent;
+			if (progressCard) progressCard.style.display = showCard === false ? 'none' : '';
+			if (progressTitle) progressTitle.textContent = labels.generating || 'Generating image...';
+			if (progressMode) progressMode.textContent = mode === 'provider' ? (labels.provider || 'Provider-backed progress updates.') : (labels.estimated || 'Estimated progress based on generation stage.');
+			if (progressStage) progressStage.textContent = stageLabel(stage);
+			if (progressValue) progressValue.textContent = safePercent + '%';
+			if (progressBar) progressBar.setAttribute('aria-valuenow', String(safePercent));
+			if (progressFill) progressFill.style.width = safePercent + '%';
+		}
+
+		function resetProgress() {
+			if (progressTimer) {
+				window.clearInterval(progressTimer);
+				progressTimer = null;
+			}
+			if (pollTimer) {
+				window.clearTimeout(pollTimer);
+				pollTimer = null;
+			}
+			currentProgress = 0;
+			activeJobId = null;
+			streamSettled = false;
+			setProgress(0, 'queued', 'estimated', false);
+			if (previewRail) previewRail.style.display = 'none';
+			if (previewImages) previewImages.innerHTML = '';
+		}
+
+		function beginEstimatedProgress() {
+			var steps = [
+				{ percent: 10, stage: 'queued' },
+				{ percent: 35, stage: 'drafting' },
+				{ percent: 65, stage: 'refining' },
+				{ percent: 90, stage: 'finalizing' }
+			];
+			var index = 0;
+			setProgress(steps[0].percent, steps[0].stage, 'estimated', true);
+			if (progressTimer) window.clearInterval(progressTimer);
+			progressTimer = window.setInterval(function () {
+				if (index >= steps.length - 1) return;
+				index += 1;
+				setProgress(steps[index].percent, steps[index].stage, 'estimated', true);
+			}, 1400);
+		}
+
+		function providerProgressFromJob(job) {
+			var previewCount = (job.preview_images || []).length;
+			var stage = job.progress_stage || 'queued';
+			var percent = job.progress_percent || 10;
+
+			if (job.status === 'completed') {
+				return { percent: 100, stage: 'completed' };
+			}
+
+			if (job.status === 'queued') {
+				return { percent: 10, stage: 'queued' };
+			}
+
+			if (previewCount >= 3) {
+				return { percent: 90, stage: 'finalizing' };
+			}
+
+			if (previewCount === 2) {
+				return { percent: 75, stage: 'refining' };
+			}
+
+			if (previewCount === 1) {
+				return { percent: 55, stage: 'drafting' };
+			}
+
+			if (job.status === 'in_progress') {
+				return { percent: 35, stage: 'drafting' };
+			}
+
+			return { percent: percent, stage: stage };
+		}
+
+		function renderPreviewRail(images, prompt) {
+			if (!previewRail || !previewImages) return;
+			previewImages.innerHTML = '';
+			if (!images || !images.length) {
+				previewRail.style.display = 'none';
+				return;
+			}
+			previewRail.style.display = '';
+			var galleryItems = [];
+			images.forEach(function (item, idx) {
+				var url = item.url || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : '');
+				if (!url) return;
+				var fileName = ((prompt || 'preview').replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'preview') + '-preview-' + (idx + 1) + '.png';
+				galleryItems.push({
+					src: url,
+					alt: (prompt || 'Preview') + ' ' + (idx + 1),
+					downloadName: fileName
+				});
+				var img = document.createElement('img');
+				img.src = url;
+				img.alt = (prompt || 'Preview') + ' ' + (idx + 1);
+				img.setAttribute('tabindex', '0');
+				img.className = 'alorbach-demo-preview-image';
+				img.addEventListener('click', function () { openLightbox(galleryItems, idx); });
+				img.addEventListener('keydown', function (e) {
+					if (e.key === 'Enter' || e.key === ' ') {
+						e.preventDefault();
+						openLightbox(galleryItems, idx);
+					}
+				});
+				previewImages.appendChild(img);
+			});
+		}
+
+		function renderFinalImages(items, prompt) {
+			if (!resultEl) return;
+			resultEl.innerHTML = '';
+			if (!items || !items.length) return;
+			var baseName = (prompt || 'image').replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'image';
+			var galleryItems = [];
+			items.forEach(function (item, idx) {
+				var url = item.url || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : '');
+				if (!url) return;
+				galleryItems.push({
+					src: url,
+					alt: prompt,
+					downloadName: baseName + '-' + (idx + 1) + '.png'
+				});
+				var itemWrap = document.createElement('div');
+				itemWrap.className = 'alorbach-demo-image-item';
+				var img = document.createElement('img');
+				img.src = url;
+				img.alt = prompt;
+				img.setAttribute('tabindex', '0');
+				var actions = document.createElement('div');
+				actions.className = 'alorbach-demo-image-actions';
+				var downloadLink = document.createElement('a');
+				downloadLink.href = url;
+				downloadLink.download = baseName + '-' + (idx + 1) + '.png';
+				downloadLink.className = 'alorbach-demo-download';
+				downloadLink.textContent = 'Download';
+				actions.appendChild(downloadLink);
+				itemWrap.appendChild(img);
+				itemWrap.appendChild(actions);
+				resultEl.appendChild(itemWrap);
+			});
+			resultEl.querySelectorAll('.alorbach-demo-image-item img').forEach(function (imgEl) {
+				var index = Array.prototype.indexOf.call(resultEl.querySelectorAll('.alorbach-demo-image-item img'), imgEl);
+				imgEl.addEventListener('click', function () { openLightbox(galleryItems, index); });
+				imgEl.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox(galleryItems, index); } });
+			});
+		}
+
+		function renderUsage(data) {
+			var usageEl = container.querySelector('.alorbach-demo-usage');
+			if (!usageEl) return;
+			var usageParts = [];
+			if (data.usage && (data.usage.total_tokens || data.usage.output_tokens)) {
+				var tok = data.usage.total_tokens || (data.usage.output_tokens || 0);
+				if (tok) usageParts.push(tok + ' tokens');
+			}
+			if (data.cost_credits !== undefined) {
+				var costTxt = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
+				if (data.cost_usd !== undefined) costTxt += ' ($' + data.cost_usd.toFixed(2) + ')';
+				usageParts.push(costTxt);
+			}
+			usageEl.textContent = usageParts.length ? usageParts.join(' | ') : '';
+			usageEl.style.display = usageParts.length ? '' : 'none';
+		}
+
+		function finishGenerate() {
+			if (progressTimer) {
+				window.clearInterval(progressTimer);
+				progressTimer = null;
+			}
+			if (pollTimer) {
+				window.clearTimeout(pollTimer);
+				pollTimer = null;
+			}
+			container.classList.remove('alorbach-demo-loading');
+			if (genBtn) genBtn.disabled = false;
+			activeJobId = null;
+			streamSettled = true;
+		}
+
+		function applyJobUpdate(job, prompt) {
+			var progressState = job.progress_mode === 'provider'
+				? providerProgressFromJob(job)
+				: { percent: job.progress_percent || 10, stage: job.progress_stage || 'queued' };
+
+			if (job.progress_mode !== 'estimated' && progressTimer) {
+				window.clearInterval(progressTimer);
+				progressTimer = null;
+			}
+
+			renderPreviewRail(job.preview_images || [], prompt);
+			setProgress(progressState.percent, progressState.stage, job.progress_mode || 'estimated', true);
+		}
+
+		function pollJob(jobId, prompt) {
+			if (!jobId || activeJobId !== jobId) {
+				return;
+			}
+			apiFetch('/images/jobs/' + encodeURIComponent(jobId)).then(function (r) {
+				if (!r.ok) return r.json().then(function (d) { throw d; });
+				return r.json();
+			}).then(function (job) {
+				if (activeJobId !== jobId) {
+					return;
+				}
+				applyJobUpdate(job, prompt);
+
+				if (job.status === 'completed') {
+					setProgress(100, 'completed', job.progress_mode || 'estimated', true);
+					renderFinalImages(job.final_images || [], prompt);
+					renderUsage(job);
+					getBalance(container);
+					finishGenerate();
+					return;
+				}
+				if (job.status === 'failed') {
+					throw { message: job.error || 'Image generation failed' };
+				}
+
+				pollTimer = window.setTimeout(function () {
+					pollJob(jobId, prompt);
+				}, job.progress_mode === 'provider' ? 450 : 1200);
+			}).catch(function (err) {
+				if (activeJobId !== jobId) {
+					return;
+				}
+				finishGenerate();
+				handleError(err, container);
+			});
+		}
+
+		function streamJob(jobId, prompt) {
+			var endpoint = buildApiUrl('/images/jobs/' + encodeURIComponent(jobId) + '/stream');
+			var buffer = '';
+			activeJobId = jobId;
+			streamSettled = false;
+
+			if (pollTimer) {
+				window.clearTimeout(pollTimer);
+				pollTimer = null;
+			}
+
+			pollTimer = window.setTimeout(function () {
+				if (container.classList.contains('alorbach-demo-loading') && activeJobId === jobId) {
+					pollJob(jobId, prompt);
+				}
+			}, 350);
+
+			function handlePayload(payload) {
+				if (!payload) return;
+				streamSettled = true;
+				applyJobUpdate(payload, prompt);
+
+				if (payload.status === 'completed') {
+					setProgress(100, 'completed', payload.progress_mode || 'provider', true);
+					renderFinalImages(payload.final_images || [], prompt);
+					renderUsage(payload);
+					getBalance(container);
+					finishGenerate();
+					return true;
+				}
+
+				if (payload.status === 'failed') {
+					finishGenerate();
+					handleError({ message: payload.error || 'Image generation failed' }, container);
+					return true;
+				}
+
+				return false;
+			}
+
+			function consumeStreamChunk(chunk) {
+				buffer += chunk;
+				var boundaryMatch = buffer.match(/\r?\n\r?\n/);
+				while (boundaryMatch) {
+					var boundary = boundaryMatch.index;
+					var separatorLength = boundaryMatch[0].length;
+					var block = buffer.slice(0, boundary);
+					buffer = buffer.slice(boundary + separatorLength);
+
+					var eventName = 'message';
+					var dataLines = [];
+					block.split(/\r?\n/).forEach(function (line) {
+						if (line.indexOf('event:') === 0) {
+							eventName = line.slice(6).trim();
+						} else if (line.indexOf('data:') === 0) {
+							dataLines.push(line.slice(5).trim());
+						}
+					});
+
+					if (dataLines.length) {
+						var payload = null;
+						try {
+							payload = JSON.parse(dataLines.join('\n'));
+						} catch (e) {}
+						if (payload && (eventName === 'job' || eventName === 'done' || eventName === 'error')) {
+							handlePayload(payload);
+						}
+					}
+
+					boundaryMatch = buffer.match(/\r?\n\r?\n/);
+				}
+			}
+
+			fetch(endpoint, {
+				method: 'GET',
+				headers: {
+					'X-WP-Nonce': nonce
+				},
+				credentials: 'same-origin'
+			}).then(function (response) {
+				if (!response.ok) {
+					throw new Error('Stream request failed');
+				}
+				if (!response.body || !response.body.getReader) {
+					throw new Error('Streaming not supported');
+				}
+
+				var reader = response.body.getReader();
+				var decoder = new TextDecoder();
+
+				function readNext() {
+					reader.read().then(function (result) {
+						if (result.done) {
+							if (!container.classList.contains('alorbach-demo-loading') || activeJobId !== jobId) {
+								return;
+							}
+							if (!streamSettled) {
+								pollJob(jobId, prompt);
+							}
+							return;
+						}
+						consumeStreamChunk(decoder.decode(result.value, { stream: true }));
+						if (container.classList.contains('alorbach-demo-loading')) {
+							readNext();
+						}
+					}).catch(function () {
+						if (container.classList.contains('alorbach-demo-loading')) {
+							pollJob(jobId, prompt);
+						}
+					});
+				}
+
+				readNext();
+			}).catch(function () {
+				pollJob(jobId, prompt);
+			});
+		}
+
 		function generate() {
 			var prompt = (promptEl && promptEl.value || '').trim();
 			if (!prompt) return;
@@ -309,6 +742,9 @@
 			container.classList.add('alorbach-demo-loading');
 			if (genBtn) genBtn.disabled = true;
 			if (resultEl) resultEl.innerHTML = '';
+			resetProgress();
+			activeJobId = null;
+			streamSettled = false;
 			var usageEl = container.querySelector('.alorbach-demo-usage');
 			if (usageEl) { usageEl.textContent = ''; usageEl.style.display = 'none'; }
 
@@ -316,6 +752,63 @@
 			if (modelWrap && modelWrap.style.display !== 'none') body.model = model;
 			if (qualityWrap && qualityWrap.style.display !== 'none') body.quality = quality;
 
+			var supportsJobs = !imageConfig || imageConfig.supports_progress !== false;
+			var jobsEndpoint = '/images/jobs';
+
+			if (supportsJobs) {
+				setProgress(10, 'queued', 'estimated', true);
+				apiFetch(jobsEndpoint, {
+					method: 'POST',
+					body: body,
+				}).then(function (r) {
+					if (!r.ok) return r.json().then(function (d) { throw d; });
+					return r.json();
+				}).then(function (job) {
+					if (job.progress_mode === 'estimated') {
+						beginEstimatedProgress();
+					} else if (progressTimer) {
+						window.clearInterval(progressTimer);
+						progressTimer = null;
+					}
+					if (job.progress_mode === 'provider') {
+						var providerState = providerProgressFromJob(job);
+						setProgress(providerState.percent, providerState.stage, 'provider', true);
+						streamJob(job.job_id, prompt);
+					} else {
+						setProgress(job.progress_percent || 10, job.progress_stage || 'queued', job.progress_mode || 'estimated', true);
+						pollJob(job.job_id, prompt);
+					}
+					renderPreviewRail(job.preview_images || [], prompt);
+				}).catch(function (err) {
+					var status = err && err.data && err.data.status;
+					var shouldFallback = status === 404 || err.code === 'rest_no_route';
+					if (!shouldFallback) {
+						handleError(err, container);
+						finishGenerate();
+						return;
+					}
+					beginEstimatedProgress();
+					apiFetch('/images', {
+						method: 'POST',
+						body: body,
+					}).then(function (r) {
+						if (!r.ok) return r.json().then(function (d) { throw d; });
+						return r.json();
+					}).then(function (data) {
+						setProgress(100, 'completed', 'estimated', true);
+						renderFinalImages(data.data || [], prompt);
+						renderUsage(data);
+						getBalance(container);
+					}).catch(function (err) {
+						handleError(err, container);
+					}).finally(function () {
+						finishGenerate();
+					});
+				});
+				return;
+			}
+
+			beginEstimatedProgress();
 			apiFetch('/images', {
 				method: 'POST',
 				body: body,
@@ -323,57 +816,14 @@
 				if (!r.ok) return r.json().then(function (d) { throw d; });
 				return r.json();
 			}).then(function (data) {
-				if (resultEl && data.data && data.data.length) {
-					var baseName = (prompt || 'image').replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'image';
-					data.data.forEach(function (item, idx) {
-						var url = item.url || (item.b64_json ? 'data:image/png;base64,' + item.b64_json : '');
-						if (url) {
-							var itemWrap = document.createElement('div');
-							itemWrap.className = 'alorbach-demo-image-item';
-							var img = document.createElement('img');
-							img.src = url;
-							img.alt = prompt;
-							img.setAttribute('tabindex', '0');
-							var actions = document.createElement('div');
-							actions.className = 'alorbach-demo-image-actions';
-							var downloadLink = document.createElement('a');
-							downloadLink.href = url;
-							downloadLink.download = baseName + '-' + (idx + 1) + '.png';
-							downloadLink.className = 'alorbach-demo-download';
-							downloadLink.textContent = 'Download';
-							actions.appendChild(downloadLink);
-							itemWrap.appendChild(img);
-							itemWrap.appendChild(actions);
-							resultEl.appendChild(itemWrap);
-						}
-					});
-					// Lightbox: click image to expand
-					resultEl.querySelectorAll('.alorbach-demo-image-item img').forEach(function (imgEl) {
-						imgEl.addEventListener('click', function () { openLightbox(imgEl.src); });
-						imgEl.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox(imgEl.src); } });
-					});
-				}
-				var usageEl = container.querySelector('.alorbach-demo-usage');
-				if (usageEl) {
-					var usageParts = [];
-					if (data.usage && (data.usage.total_tokens || data.usage.output_tokens)) {
-						var tok = data.usage.total_tokens || (data.usage.output_tokens || 0);
-						if (tok) usageParts.push(tok + ' tokens');
-					}
-					if (data.cost_credits !== undefined) {
-						var costTxt = data.cost_credits.toFixed(2) + ' ' + (config.creditsLabel || 'Credits');
-						if (data.cost_usd !== undefined) costTxt += ' ($' + data.cost_usd.toFixed(2) + ')';
-						usageParts.push(costTxt);
-					}
-					usageEl.textContent = usageParts.length ? usageParts.join(' | ') : '';
-					usageEl.style.display = usageParts.length ? '' : 'none';
-				}
+				setProgress(100, 'completed', 'estimated', true);
+				renderFinalImages(data.data || [], prompt);
+				renderUsage(data);
 				getBalance(container);
 			}).catch(function (err) {
 				handleError(err, container);
 			}).finally(function () {
-				container.classList.remove('alorbach-demo-loading');
-				if (genBtn) genBtn.disabled = false;
+				finishGenerate();
 			});
 		}
 

@@ -183,6 +183,97 @@
 	border: 1px solid #c5d9ed;
 }
 
+.alorbach-demo-progress-card {
+	margin-top: 1rem;
+	padding: 1rem 1.25rem;
+	background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+	border: 1px solid #c5d9ed;
+	border-radius: 10px;
+}
+
+.alorbach-demo-progress-copy {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 0.5rem 1rem;
+	margin-bottom: 0.75rem;
+}
+
+.alorbach-demo-progress-title {
+	color: #1d2327;
+}
+
+.alorbach-demo-progress-mode {
+	font-size: 0.85rem;
+	color: #5b6470;
+}
+
+.alorbach-demo-progress-meta {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 1rem;
+	margin-bottom: 0.5rem;
+	font-weight: 600;
+	color: #1e40af;
+}
+
+.alorbach-demo-progress-bar {
+	width: 100%;
+	height: 10px;
+	background: rgba(30, 64, 175, 0.12);
+	border-radius: 999px;
+	overflow: hidden;
+}
+
+.alorbach-demo-progress-fill {
+	display: block;
+	height: 100%;
+	width: 0;
+	background: linear-gradient(90deg, #2271b1 0%, #1e40af 100%);
+	border-radius: inherit;
+	transition: width 0.6s ease;
+}
+
+.alorbach-demo-preview-rail {
+	margin-top: 1rem;
+	padding-top: 0.9rem;
+	border-top: 1px solid rgba(34, 113, 177, 0.18);
+}
+
+.alorbach-demo-preview-label {
+	margin-bottom: 0.5rem;
+	font-size: 0.85rem;
+	font-weight: 600;
+	color: #334155;
+}
+
+.alorbach-demo-preview-images {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+	gap: 0.75rem;
+}
+
+.alorbach-demo-preview-images img {
+	display: block;
+	width: 100%;
+	aspect-ratio: 1 / 1;
+	object-fit: cover;
+	border-radius: 8px;
+	border: 1px solid #bfdbfe;
+	background: #fff;
+	cursor: pointer;
+	transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.alorbach-demo-preview-images img:hover,
+.alorbach-demo-preview-images img:focus {
+	transform: translateY(-1px);
+	box-shadow: 0 10px 24px rgba(30, 64, 175, 0.14);
+	border-color: #60a5fa;
+	outline: none;
+}
+
 @media (max-width: 520px) {
 	.alorbach-demo-image-options {
 		flex-direction: column;
@@ -190,6 +281,11 @@
 	}
 	.alorbach-demo-image-options .alorbach-demo-cost-wrap {
 		text-align: center;
+	}
+	.alorbach-demo-progress-copy,
+	.alorbach-demo-progress-meta {
+		flex-direction: column;
+		align-items: flex-start;
 	}
 	.alorbach-demo-video-options {
 		grid-template-columns: 1fr;
@@ -423,13 +519,86 @@
 	cursor: pointer;
 }
 
+.alorbach-demo-lightbox-shell {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 1rem;
+	max-width: min(96vw, 1400px);
+	max-height: 92vh;
+	width: 100%;
+}
+
 .alorbach-demo-lightbox-img {
 	position: relative;
-	max-width: 100%;
-	max-height: 100%;
+	max-width: min(82vw, 1200px);
+	max-height: 82vh;
 	object-fit: contain;
 	border-radius: 4px;
 	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.alorbach-demo-lightbox-nav {
+	position: relative;
+	z-index: 1;
+	width: 3rem;
+	height: 3rem;
+	border: 0;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.92);
+	color: #0f172a;
+	font-size: 2rem;
+	line-height: 1;
+	cursor: pointer;
+	box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.alorbach-demo-lightbox-nav:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.alorbach-demo-lightbox-toolbar {
+	position: absolute;
+	left: 50%;
+	bottom: 1rem;
+	transform: translateX(-50%);
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.65rem 0.85rem;
+	border-radius: 999px;
+	background: rgba(15, 23, 42, 0.82);
+	color: #fff;
+	z-index: 1;
+}
+
+.alorbach-demo-lightbox-count {
+	font-weight: 600;
+	min-width: 3.5rem;
+	text-align: center;
+}
+
+@media (max-width: 640px) {
+	.alorbach-demo-lightbox-shell {
+		gap: 0.5rem;
+	}
+
+	.alorbach-demo-lightbox-nav {
+		width: 2.5rem;
+		height: 2.5rem;
+		font-size: 1.65rem;
+	}
+
+	.alorbach-demo-lightbox-img {
+		max-width: min(78vw, 1200px);
+		max-height: 76vh;
+	}
+
+	.alorbach-demo-lightbox-toolbar {
+		bottom: 0.5rem;
+	}
 }
 
 .alorbach-demo-dropzone {
