@@ -287,7 +287,8 @@ class Integration_Service {
 	 * @return array
 	 */
 	public static function get_integration_config( $user_id = null ) {
-		$admin = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
+		$admin          = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
+		$settings_admin = \Alorbach\AIGateway\Admin\Admin_Settings::class;
 
 		$text_models   = $admin::get_text_models();
 		$image_models  = $admin::get_image_models();
@@ -300,12 +301,12 @@ class Integration_Service {
 
 		$config = array(
 			'defaults'          => array(
-				'chat_model'    => get_option( 'alorbach_demo_default_chat_model', $text_models[0] ?? 'gpt-4.1-mini' ),
+				'chat_model'    => $settings_admin::get_default_chat_model( $text_models ),
 				'image_model'   => get_option( 'alorbach_image_default_model', $image_models[0] ?? 'dall-e-3' ),
-				'image_size'    => get_option( 'alorbach_demo_default_image_model', $image_sizes[0] ?? '1024x1024' ),
+				'image_size'    => $settings_admin::get_default_image_size( $image_sizes ),
 				'image_quality' => get_option( 'alorbach_image_default_quality', 'medium' ),
-				'audio_model'   => get_option( 'alorbach_demo_default_audio_model', $audio_models[0] ?? 'whisper-1' ),
-				'video_model'   => get_option( 'alorbach_demo_default_video_model', $video_models[0] ?? 'sora-2' ),
+				'audio_model'   => $settings_admin::get_default_audio_model( $audio_models ),
+				'video_model'   => $settings_admin::get_default_video_model( $video_models ),
 			),
 			'capabilities'      => array(
 				'chat_models'     => array_values( $text_models ),

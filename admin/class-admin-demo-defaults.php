@@ -22,14 +22,7 @@ class Admin_Demo_Defaults {
 	 * @return array Token values (integers as strings for option values).
 	 */
 	public static function get_max_tokens_options() {
-		$opts = get_option( 'alorbach_demo_max_tokens_options', '' );
-		if ( is_string( $opts ) && $opts !== '' ) {
-			$parsed = array_filter( array_map( 'absint', explode( ',', $opts ) ) );
-			if ( ! empty( $parsed ) ) {
-				return array_map( 'strval', array_values( array_unique( array_filter( $parsed ) ) ) );
-			}
-		}
-		return array( '256', '512', '1024', '2048', '4096', '8192', '16384' );
+		return Admin_Settings::get_max_tokens_options();
 	}
 
 	/**
@@ -211,20 +204,6 @@ class Admin_Demo_Defaults {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
 		}
-		$text_models   = self::get_text_models();
-		$image_sizes   = self::get_image_sizes();
-		$image_models  = self::get_image_models();
-		$audio_models  = self::get_audio_models();
-		$video_models  = self::get_video_models();
-
-		$default_chat   = get_option( 'alorbach_demo_default_chat_model', $text_models[0] ?? 'gpt-4.1-mini' );
-		$default_image  = get_option( 'alorbach_demo_default_image_model', $image_sizes[0] ?? '1024x1024' );
-		$max_tokens_opts = self::get_max_tokens_options();
-		$default_max_tokens = get_option( 'alorbach_demo_default_max_tokens', '1024' );
-		$default_max_tokens = in_array( $default_max_tokens, $max_tokens_opts, true ) ? $default_max_tokens : ( $max_tokens_opts[0] ?? '1024' );
-		$default_image_model = get_option( 'alorbach_image_default_model', $image_models[0] ?? 'dall-e-3' );
-		$default_audio  = get_option( 'alorbach_demo_default_audio_model', $audio_models[0] ?? 'whisper-1' );
-		$default_video  = get_option( 'alorbach_demo_default_video_model', $video_models[0] ?? 'sora-2' );
 		// One-time migration: alorbach_demo_allow_image_model_select used to control size.
 		if ( ! get_option( 'alorbach_demo_image_options_migrated', false ) ) {
 			$old_model_opt = get_option( 'alorbach_demo_allow_image_model_select', false );
@@ -242,13 +221,6 @@ class Admin_Demo_Defaults {
 
 		// Handle form submission.
 		if ( isset( $_POST['alorbach_demo_defaults_nonce'] ) && wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['alorbach_demo_defaults_nonce'] ) ), 'alorbach_demo_defaults' ) ) {
-			$default_chat  = isset( $_POST['alorbach_demo_default_chat_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_chat_model'] ) ) : $default_chat;
-			$default_image = isset( $_POST['alorbach_demo_default_image_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_image_model'] ) ) : $default_image;
-			$default_max_tokens = isset( $_POST['alorbach_demo_default_max_tokens'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_max_tokens'] ) ) : $default_max_tokens;
-			$max_tokens_opts_raw = isset( $_POST['alorbach_demo_max_tokens_options'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_max_tokens_options'] ) ) : '';
-			$default_image_model = isset( $_POST['alorbach_image_default_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_model'] ) ) : $default_image_model;
-			$default_audio = isset( $_POST['alorbach_demo_default_audio_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_audio_model'] ) ) : $default_audio;
-			$default_video = isset( $_POST['alorbach_demo_default_video_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_demo_default_video_model'] ) ) : $default_video;
 			$allow_chat         = ! empty( $_POST['alorbach_demo_allow_chat_model_select'] );
 			$allow_image_size   = ! empty( $_POST['alorbach_demo_allow_image_size_select'] );
 			$allow_image_model  = ! empty( $_POST['alorbach_demo_allow_image_model_select'] );
@@ -256,13 +228,6 @@ class Admin_Demo_Defaults {
 			$allow_audio        = ! empty( $_POST['alorbach_demo_allow_audio_model_select'] );
 			$allow_video        = ! empty( $_POST['alorbach_demo_allow_video_model_select'] );
 
-			update_option( 'alorbach_demo_default_chat_model', $default_chat );
-			update_option( 'alorbach_demo_default_image_model', $default_image );
-			update_option( 'alorbach_demo_default_max_tokens', $default_max_tokens );
-			update_option( 'alorbach_demo_max_tokens_options', $max_tokens_opts_raw );
-			update_option( 'alorbach_image_default_model', $default_image_model );
-			update_option( 'alorbach_demo_default_audio_model', $default_audio );
-			update_option( 'alorbach_demo_default_video_model', $default_video );
 			update_option( 'alorbach_demo_allow_chat_model_select', $allow_chat );
 			update_option( 'alorbach_demo_allow_image_size_select', $allow_image_size );
 			update_option( 'alorbach_demo_allow_image_model_select', $allow_image_model );
@@ -299,76 +264,14 @@ class Admin_Demo_Defaults {
 			<form method="post" style="max-width: 600px; margin-top: 20px;">
 				<?php wp_nonce_field( 'alorbach_demo_defaults', 'alorbach_demo_defaults_nonce' ); ?>
 
-				<h2><?php esc_html_e( 'Default models', 'alorbach-ai-gateway' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Select the default model for each demo. Users will use these unless you allow model selection below.', 'alorbach-ai-gateway' ); ?></p>
+				<h2><?php esc_html_e( 'Demo behavior', 'alorbach-ai-gateway' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Demo pages inherit the gateway-wide defaults from AI Gateway -> Settings. Use this page only for demo-specific UI behavior and sample page creation.', 'alorbach-ai-gateway' ); ?></p>
 
 				<table class="form-table">
 					<tr>
-						<th scope="row"><label for="alorbach_demo_default_chat_model"><?php esc_html_e( 'Default chat model', 'alorbach-ai-gateway' ); ?></label></th>
+						<th scope="row"><?php esc_html_e( 'Gateway defaults', 'alorbach-ai-gateway' ); ?></th>
 						<td>
-							<select name="alorbach_demo_default_chat_model" id="alorbach_demo_default_chat_model">
-								<?php foreach ( $text_models as $m ) : ?>
-									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $default_chat, $m ); ?>><?php echo esc_html( $m ); ?></option>
-								<?php endforeach; ?>
-							</select>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="alorbach_demo_default_max_tokens"><?php esc_html_e( 'Default max tokens', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<select name="alorbach_demo_default_max_tokens" id="alorbach_demo_default_max_tokens">
-								<?php foreach ( $max_tokens_opts as $v ) : ?>
-									<option value="<?php echo esc_attr( $v ); ?>" <?php selected( $default_max_tokens, $v ); ?>><?php echo esc_html( $v ); ?></option>
-								<?php endforeach; ?>
-							</select>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="alorbach_demo_max_tokens_options"><?php esc_html_e( 'Max tokens options', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<input type="text" name="alorbach_demo_max_tokens_options" id="alorbach_demo_max_tokens_options" value="<?php echo esc_attr( get_option( 'alorbach_demo_max_tokens_options', '' ) ); ?>" class="regular-text" placeholder="256,512,1024,2048,4096,8192">
-							<p class="description"><?php esc_html_e( 'Comma-separated values. Leave empty for defaults.', 'alorbach-ai-gateway' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="alorbach_image_default_model"><?php esc_html_e( 'Default image model', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<select name="alorbach_image_default_model" id="alorbach_image_default_model">
-								<?php foreach ( $image_models as $m ) : ?>
-									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $default_image_model, $m ); ?>><?php echo esc_html( $m ); ?></option>
-								<?php endforeach; ?>
-							</select>
-							<p class="description"><?php esc_html_e( 'e.g. dall-e-3, gpt-image-1.5', 'alorbach-ai-gateway' ); ?></p>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="alorbach_demo_default_image_model"><?php esc_html_e( 'Default image size', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<select name="alorbach_demo_default_image_model" id="alorbach_demo_default_image_model">
-								<?php foreach ( $image_sizes as $s ) : ?>
-									<option value="<?php echo esc_attr( $s ); ?>" <?php selected( $default_image, $s ); ?>><?php echo esc_html( $s ); ?></option>
-								<?php endforeach; ?>
-							</select>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="alorbach_demo_default_audio_model"><?php esc_html_e( 'Default audio model', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<select name="alorbach_demo_default_audio_model" id="alorbach_demo_default_audio_model">
-								<?php foreach ( $audio_models as $m ) : ?>
-									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $default_audio, $m ); ?>><?php echo esc_html( $m ); ?></option>
-								<?php endforeach; ?>
-							</select>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="alorbach_demo_default_video_model"><?php esc_html_e( 'Default video model', 'alorbach-ai-gateway' ); ?></label></th>
-						<td>
-							<select name="alorbach_demo_default_video_model" id="alorbach_demo_default_video_model">
-								<?php foreach ( $video_models as $m ) : ?>
-									<option value="<?php echo esc_attr( $m ); ?>" <?php selected( $default_video, $m ); ?>><?php echo esc_html( $m ); ?></option>
-								<?php endforeach; ?>
-							</select>
+							<p style="margin-top: 0;"><?php esc_html_e( 'Manage the default chat, image, audio, and video settings in AI Gateway -> Settings -> General Defaults.', 'alorbach-ai-gateway' ); ?></p>
 						</td>
 					</tr>
 				</table>

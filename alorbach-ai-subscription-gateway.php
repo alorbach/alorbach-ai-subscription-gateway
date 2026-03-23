@@ -45,6 +45,7 @@ function alorbach_load_textdomain() {
 }
 
 add_action( 'init', array( 'Alorbach\AIGateway\Ledger', 'maybe_upgrade' ), 5 );
+add_action( 'init', array( 'Alorbach\AIGateway\Admin\Admin_Settings', 'maybe_migrate_general_defaults' ), 6 );
 
 register_activation_hook( __FILE__, 'alorbach_activate' );
 function alorbach_activate() {

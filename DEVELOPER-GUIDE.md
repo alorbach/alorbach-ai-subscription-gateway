@@ -598,6 +598,8 @@ Use these when you want a supported UI quickly instead of building a custom page
 
 The user-facing wp-admin credits page label defaults to `AI Credits` and can be changed in `AI Gateway -> Settings`.
 
+Gateway-wide model defaults are managed in `AI Gateway -> Settings -> General Defaults`. `AI Gateway -> Demo Defaults` only controls demo-page selection behavior and sample page creation.
+
 The credits page shows the current user's:
 
 - resolved active plan

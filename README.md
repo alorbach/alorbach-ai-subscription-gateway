@@ -60,9 +60,9 @@ All pages are under the **AI Gateway** top-level menu.
 | Page | Purpose |
 |---|---|
 | **API Keys** | Manage credentials for OpenAI, Azure, Google, GitHub Models, Codex |
-| **Settings** | Rate limits, monthly quotas, cost multipliers, canonical billing/account URLs |
+| **Settings** | Tabbed gateway-wide defaults, rate limits, quotas, billing/account URLs, provider import settings, advanced controls |
 | **Models** | Import and manage AI models with per-model pricing |
-| **Demo Defaults** | Configure default models for demo pages; create sample pages |
+| **Demo Defaults** | Demo-only UI controls and sample page creation |
 | **Image Queue** | Monitor recent image jobs, prompts, progress, previews, and final outputs |
 | **Plans** | Manage configurable paid plans plus the protected free Basic fallback plan |
 | **User Plans** | Review each user's resolved plan and assign or clear manual plan overrides |
@@ -88,6 +88,8 @@ All pages are under the **AI Gateway** top-level menu.
 Demo pages can also be created automatically via **AI Gateway -> Demo Defaults -> Create sample pages**.
 
 The logged-in user menu label for the credits page defaults to `AI Credits` and can be changed in **AI Gateway -> Settings**.
+
+Gateway-wide model defaults now live in **AI Gateway -> Settings -> General Defaults**. **Demo Defaults** only controls whether demo users may change those defaults in the sample UI.
 
 ---
 

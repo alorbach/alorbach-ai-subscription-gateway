@@ -714,11 +714,11 @@ class REST_Proxy {
 	 */
 	public static function me_models( $request ) {
 		$user_id = get_current_user_id();
-		$config = Integration_Service::get_integration_config( $user_id );
-		$admin  = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
+		$config         = Integration_Service::get_integration_config( $user_id );
+		$admin          = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
+		$settings_admin = \Alorbach\AIGateway\Admin\Admin_Settings::class;
 		$max_tokens_options = $admin::get_max_tokens_options();
-		$default_max_tokens = get_option( 'alorbach_demo_default_max_tokens', '1024' );
-		$default_max_tokens = in_array( $default_max_tokens, $max_tokens_options, true ) ? $default_max_tokens : ( $max_tokens_options[0] ?? '1024' );
+		$default_max_tokens = $settings_admin::get_default_max_tokens();
 		$image_models = isset( $config['capabilities']['image_models'] ) && is_array( $config['capabilities']['image_models'] ) ? $config['capabilities']['image_models'] : array();
 		$streamable_image_models = array_values( array_filter( $image_models, function ( $model ) {
 			return API_Client::supports_partial_image_streaming( $model );
@@ -864,7 +864,7 @@ class REST_Proxy {
 			$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
 			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		} elseif ( $type === 'video' ) {
-			$model    = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_video_model', 'sora-2' );
+			$model    = $request->get_param( 'model' ) ?: \Alorbach\AIGateway\Admin\Admin_Settings::get_default_video_model( array( 'sora-2' ) );
 			$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
 			if ( ! in_array( $duration, array( 4, 8, 12 ), true ) ) {
 				$duration = 8;
@@ -873,7 +873,7 @@ class REST_Proxy {
 			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		} elseif ( $type === 'audio' ) {
 			$duration = max( 1, (int) $request->get_param( 'duration_seconds' ) );
-			$model    = $request->get_param( 'model' ) ?: get_option( 'alorbach_demo_default_audio_model', 'whisper-1' );
+			$model    = $request->get_param( 'model' ) ?: \Alorbach\AIGateway\Admin\Admin_Settings::get_default_audio_model( array( 'whisper-1' ) );
 			$api_cost  = Cost_Matrix::get_audio_cost( $duration, $model );
 			$cost_uc   = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		}

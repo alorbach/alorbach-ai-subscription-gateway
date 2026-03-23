@@ -185,14 +185,9 @@ class Image_Jobs {
 	 */
 	private static function get_internal_process_url() {
 		$scheme = is_ssl() ? 'https' : 'http';
-		$port   = isset( $_SERVER['SERVER_PORT'] ) ? (int) $_SERVER['SERVER_PORT'] : ( $scheme === 'https' ? 443 : 80 );
 		$path   = wp_parse_url( home_url( '/' ), PHP_URL_PATH );
 		$path   = is_string( $path ) ? rtrim( $path, '/' ) : '';
 		$url    = $scheme . '://127.0.0.1';
-
-		if ( ( $scheme === 'http' && 80 !== $port ) || ( $scheme === 'https' && 443 !== $port ) ) {
-			$url .= ':' . $port;
-		}
 
 		return $url . $path . '/index.php?rest_route=/alorbach/v1/internal/images/jobs/process';
 	}
@@ -282,7 +277,7 @@ class Image_Jobs {
 				$job['model'],
 				$job['quality'],
 				null,
-				function ( $event ) use ( &$job ) {
+				function ( $event ) use ( &$job, $on_update ) {
 					if ( empty( $event['type'] ) || empty( $event['images'] ) || ! is_array( $event['images'] ) ) {
 						return;
 					}
