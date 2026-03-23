@@ -101,8 +101,8 @@ class Admin_Developer_Docs {
 				</tr>
 			</thead>
 			<tbody>
-				<tr><td>GET</td><td><code>/integration/config</code></td><td><?php esc_html_e( 'Backend defaults, supported capabilities, canonical billing/account URLs. Public-readable.', 'alorbach-ai-gateway' ); ?></td></tr>
-				<tr><td>GET</td><td><code>/integration/plans</code></td><td><?php esc_html_e( 'Canonical plan catalog. Returns active plans by default. Public-readable.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/integration/config</code></td><td><?php esc_html_e( 'Backend defaults, supported capabilities, canonical billing/account URLs, and logged-in plan filtering. Public-readable.', 'alorbach-ai-gateway' ); ?></td></tr>
+				<tr><td>GET</td><td><code>/integration/plans</code></td><td><?php esc_html_e( 'Canonical plan catalog including capabilities and allowed-model lists. Returns active plans by default. Public-readable.', 'alorbach-ai-gateway' ); ?></td></tr>
 				<tr><td>GET</td><td><code>/integration/account</code></td><td><?php esc_html_e( 'Current user account summary: balance, usage, billing URLs, renewal summary. Logged-in users only.', 'alorbach-ai-gateway' ); ?></td></tr>
 				<tr><td>GET</td><td><code>/integration/account/history</code></td><td><?php esc_html_e( 'Current user recent credit history in a frontend-safe shape. Logged-in users only.', 'alorbach-ai-gateway' ); ?></td></tr>
 			</tbody>
@@ -189,6 +189,33 @@ const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integrat
     "video_sizes": ["..."],
     "video_durations": ["4", "8", "12"]
   },
+  "plan_capabilities": {
+    "chat": true,
+    "image": false,
+    "audio": false,
+    "video": false
+  },
+  "active_plan": {
+    "slug": "basic",
+    "public_name": "Basic",
+    "is_free": true,
+    "is_active": true,
+    "billing_interval": "month",
+    "price_usd": 0,
+    "included_credits_uc": 0,
+    "capabilities": {
+      "chat": true,
+      "image": false,
+      "audio": false,
+      "video": false
+    },
+    "allowed_models": {
+      "chat": [],
+      "image": [],
+      "audio": [],
+      "video": []
+    }
+  },
   "billing_urls": {
     "subscribe": "",
     "top_up": "",
@@ -197,21 +224,36 @@ const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integrat
   }
 }</code></pre>
 		<p><?php esc_html_e( 'Billing URLs are returned exactly as configured by the admin. Empty strings mean the downstream UI should hide that CTA.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'When a user is logged in, the payload is filtered to their resolved plan. If a Basic user has a positive credit balance, the full configured catalog is exposed so those credits can be spent across the paid capabilities.', 'alorbach-ai-gateway' ); ?></p>
 
 		<h3><code>/integration/plans</code></h3>
 		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>[
   {
-    "slug": "plan_10",
-    "public_name": "10 $/Monat",
+    "slug": "basic",
+    "public_name": "Basic",
     "billing_interval": "month",
-    "price_usd": 10,
-    "included_credits_uc": 10000000,
-    "included_credits_display": "10,000 Credits",
-    "display_order": 10,
-    "is_active": true
+    "price_usd": 0,
+    "included_credits_uc": 0,
+    "included_credits_display": "0 Credits",
+    "display_order": 0,
+    "is_active": true,
+    "is_free": true,
+    "capabilities": {
+      "chat": true,
+      "image": false,
+      "audio": false,
+      "video": false
+    },
+    "allowed_models": {
+      "chat": [],
+      "image": [],
+      "audio": [],
+      "video": []
+    }
   }
 ]</code></pre>
 		<p><?php esc_html_e( 'Plans are normalized from stored data. Legacy fields such as `name` and `credits_per_month` are internal storage compatibility details, not the public contract.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'The protected `basic` plan is always available as the fallback when no manual override or active paid subscription resolves.', 'alorbach-ai-gateway' ); ?></p>
 
 		<h3><code>/integration/account</code></h3>
 		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>{
@@ -235,6 +277,28 @@ const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integrat
     "manage_account": "",
     "account_overview": ""
   },
+  "active_plan": {
+    "slug": "basic",
+    "public_name": "Basic",
+    "is_free": true,
+    "is_active": true,
+    "billing_interval": "month",
+    "price_usd": 0,
+    "included_credits_uc": 0,
+    "capabilities": {
+      "chat": true,
+      "image": false,
+      "audio": false,
+      "video": false
+    },
+    "allowed_models": {
+      "chat": [],
+      "image": [],
+      "audio": [],
+      "video": []
+    },
+    "source": "basic"
+  },
   "renewal": {
     "status": "active",
     "next_payment": "2026-04-01 10:00:00",
@@ -242,6 +306,7 @@ const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integrat
   }
 }</code></pre>
 		<p><?php esc_html_e( 'If WooCommerce Subscriptions is unavailable or no subscription metadata is found, `renewal` may be `null`.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'Plan resolution order is manual override, active mapped subscription, then Basic fallback. `active_plan.source` is `manual`, `subscription`, or `basic`.', 'alorbach-ai-gateway' ); ?></p>
 
 		<h3><code>/integration/account/history</code></h3>
 		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>{
@@ -340,9 +405,11 @@ $config  = alorbach_get_integration_config();
 $plans   = alorbach_get_public_plans();
 $urls    = alorbach_get_billing_urls();
 $summary = alorbach_get_account_summary( $user_id );
-$history = alorbach_get_account_history( $user_id, array( 'per_page' => 5 ) );</code></pre>
+$history = alorbach_get_account_history( $user_id, array( 'per_page' => 5 ) );
+$plan    = alorbach_get_active_plan( $user_id );
+$can_use_image = alorbach_user_can_access_capability( 'image', 'gpt-image-1', $user_id );</code></pre>
 		<p><?php esc_html_e( 'Safe per-request overrides usually include generation choices like model, size, quality, duration, or max token settings when your frontend is calling the generation endpoints. Gateway-owned canonical data includes normalized plans, billing/account URLs, and global fallback defaults returned by `alorbach_get_integration_config()`.', 'alorbach-ai-gateway' ); ?></p>
-		<p><?php esc_html_e( 'Avoid reading raw options like `alorbach_plans` or demo default options directly in downstream products. Use helpers or `/integration/*` instead so storage migrations remain internal to the gateway.', 'alorbach-ai-gateway' ); ?></p>
+		<p><?php esc_html_e( 'Avoid reading raw options like `alorbach_plans`, direct user meta, or demo default options directly in downstream products. Use helpers or `/integration/*` instead so storage migrations and plan-resolution rules remain internal to the gateway.', 'alorbach-ai-gateway' ); ?></p>
 		<?php
 	}
 

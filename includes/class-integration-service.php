@@ -17,12 +17,50 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Integration_Service {
 
 	/**
+	 * Canonical slug for the implicit free plan.
+	 *
+	 * @var string
+	 */
+	const BASIC_PLAN_SLUG = 'basic';
+
+	/**
+	 * Supported plan capability keys.
+	 *
+	 * @var string[]
+	 */
+	const PLAN_CAPABILITIES = array( 'chat', 'image', 'audio', 'video' );
+
+	/**
+	 * User meta key for a manual plan override.
+	 *
+	 * @var string
+	 */
+	const USER_PLAN_OVERRIDE_META_KEY = 'alorbach_manual_plan_slug';
+
+	/**
 	 * Default plans in normalized format.
 	 *
 	 * @return array
 	 */
 	public static function get_default_plans() {
 		return array(
+			self::BASIC_PLAN_SLUG => array(
+				'slug'                => self::BASIC_PLAN_SLUG,
+				'public_name'         => 'Basic',
+				'billing_interval'    => 'month',
+				'price_usd'           => 0.0,
+				'included_credits_uc' => 0,
+				'display_order'       => 0,
+				'is_active'           => true,
+				'is_free'             => true,
+				'capabilities'        => array(
+					'chat'  => true,
+					'image' => false,
+					'audio' => false,
+					'video' => false,
+				),
+				'allowed_models'      => self::get_empty_allowed_models(),
+			),
 			'plan_10' => array(
 				'slug'                => 'plan_10',
 				'public_name'         => '10 $/Monat',
@@ -31,6 +69,9 @@ class Integration_Service {
 				'included_credits_uc' => 10000000,
 				'display_order'       => 10,
 				'is_active'           => true,
+				'is_free'             => false,
+				'capabilities'        => self::get_default_capabilities( true ),
+				'allowed_models'      => self::get_empty_allowed_models(),
 			),
 			'plan_20' => array(
 				'slug'                => 'plan_20',
@@ -40,6 +81,9 @@ class Integration_Service {
 				'included_credits_uc' => 20000000,
 				'display_order'       => 20,
 				'is_active'           => true,
+				'is_free'             => false,
+				'capabilities'        => self::get_default_capabilities( true ),
+				'allowed_models'      => self::get_empty_allowed_models(),
 			),
 			'plan_50' => array(
 				'slug'                => 'plan_50',
@@ -49,6 +93,9 @@ class Integration_Service {
 				'included_credits_uc' => 50000000,
 				'display_order'       => 30,
 				'is_active'           => true,
+				'is_free'             => false,
+				'capabilities'        => self::get_default_capabilities( true ),
+				'allowed_models'      => self::get_empty_allowed_models(),
 			),
 		);
 	}
@@ -69,8 +116,9 @@ class Integration_Service {
 			$plans = self::get_default_plans();
 		}
 
-		$normalized = array();
-		$order      = 10;
+		$model_catalog = self::get_plan_model_catalog();
+		$normalized    = array();
+		$order         = 10;
 
 		foreach ( $plans as $slug => $plan ) {
 			if ( ! is_array( $plan ) ) {
@@ -85,6 +133,8 @@ class Integration_Service {
 			$included_credits_uc = isset( $plan['included_credits_uc'] ) ? (int) $plan['included_credits_uc'] : ( isset( $plan['credits_per_month'] ) ? (int) $plan['credits_per_month'] : 0 );
 			$display_order       = isset( $plan['display_order'] ) ? (int) $plan['display_order'] : $order;
 			$is_active           = isset( $plan['is_active'] ) ? (bool) $plan['is_active'] : true;
+			$is_free             = isset( $plan['is_free'] ) ? (bool) $plan['is_free'] : ( $slug === self::BASIC_PLAN_SLUG || $price_usd <= 0.0 );
+			$has_entitlements    = isset( $plan['capabilities'] ) || isset( $plan['allowed_models'] ) || isset( $plan['is_free'] );
 
 			if ( '' === $slug ) {
 				continue;
@@ -93,15 +143,41 @@ class Integration_Service {
 			$normalized[ $slug ] = array(
 				'slug'                     => $slug,
 				'public_name'              => $public_name ?: ( $legacy_name ?: $slug ),
-				'billing_interval'         => $billing_interval ?: 'month',
-				'price_usd'                => $price_usd,
+				'billing_interval'         => in_array( $billing_interval, array( 'month', 'year', 'week' ), true ) ? $billing_interval : 'month',
+				'price_usd'                => max( 0, $price_usd ),
 				'included_credits_uc'      => max( 0, $included_credits_uc ),
 				'included_credits_display' => User_Display::uc_to_credits( max( 0, $included_credits_uc ) ),
 				'display_order'            => $display_order,
 				'is_active'                => $is_active,
+				'is_free'                  => $is_free,
+				'capabilities'             => self::normalize_capabilities(
+					$has_entitlements ? ( $plan['capabilities'] ?? array() ) : self::get_default_capabilities( true ),
+					$slug === self::BASIC_PLAN_SLUG ? self::get_default_capabilities( false ) : self::get_default_capabilities( true )
+				),
+				'allowed_models'           => self::normalize_allowed_models(
+					$plan['allowed_models'] ?? array(),
+					$model_catalog
+				),
 			);
 
 			$order += 10;
+		}
+
+		if ( ! isset( $normalized[ self::BASIC_PLAN_SLUG ] ) ) {
+			$basic = self::get_default_plans()[ self::BASIC_PLAN_SLUG ];
+			$normalized[ self::BASIC_PLAN_SLUG ] = array(
+				'slug'                     => $basic['slug'],
+				'public_name'              => $basic['public_name'],
+				'billing_interval'         => $basic['billing_interval'],
+				'price_usd'                => $basic['price_usd'],
+				'included_credits_uc'      => $basic['included_credits_uc'],
+				'included_credits_display' => User_Display::uc_to_credits( $basic['included_credits_uc'] ),
+				'display_order'            => $basic['display_order'],
+				'is_active'                => $basic['is_active'],
+				'is_free'                  => true,
+				'capabilities'             => $basic['capabilities'],
+				'allowed_models'           => $basic['allowed_models'],
+			);
 		}
 
 		uasort(
@@ -135,17 +211,28 @@ class Integration_Service {
 		$included_credits_uc = isset( $plan['included_credits_uc'] ) ? (int) $plan['included_credits_uc'] : 0;
 		$display_order       = isset( $plan['display_order'] ) ? (int) $plan['display_order'] : $fallback_order;
 		$is_active           = ! empty( $plan['is_active'] );
+		$is_free             = isset( $plan['is_free'] ) ? (bool) $plan['is_free'] : ( $slug === self::BASIC_PLAN_SLUG || $price_usd <= 0.0 );
+		$default_caps        = $slug === self::BASIC_PLAN_SLUG ? self::get_default_capabilities( false ) : self::get_default_capabilities( true );
 
 		return array(
 			'slug'                => $slug,
 			'public_name'         => $public_name ?: $slug,
 			'name'                => $public_name ?: $slug,
-			'billing_interval'    => $billing_interval ?: 'month',
+			'billing_interval'    => in_array( $billing_interval, array( 'month', 'year', 'week' ), true ) ? $billing_interval : 'month',
 			'price_usd'           => max( 0, $price_usd ),
 			'included_credits_uc' => max( 0, $included_credits_uc ),
 			'credits_per_month'   => max( 0, $included_credits_uc ),
 			'display_order'       => $display_order,
 			'is_active'           => $is_active,
+			'is_free'             => $is_free,
+			'capabilities'        => self::normalize_capabilities(
+				$plan['capabilities'] ?? array(),
+				$default_caps
+			),
+			'allowed_models'      => self::normalize_allowed_models(
+				$plan['allowed_models'] ?? array(),
+				self::get_plan_model_catalog()
+			),
 		);
 	}
 
@@ -199,7 +286,7 @@ class Integration_Service {
 	 *
 	 * @return array
 	 */
-	public static function get_integration_config() {
+	public static function get_integration_config( $user_id = null ) {
 		$admin = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
 
 		$text_models   = $admin::get_text_models();
@@ -212,7 +299,7 @@ class Integration_Service {
 		$video_lengths = array( '4', '8', '12' );
 
 		$config = array(
-			'defaults'     => array(
+			'defaults'          => array(
 				'chat_model'    => get_option( 'alorbach_demo_default_chat_model', $text_models[0] ?? 'gpt-4.1-mini' ),
 				'image_model'   => get_option( 'alorbach_image_default_model', $image_models[0] ?? 'dall-e-3' ),
 				'image_size'    => get_option( 'alorbach_demo_default_image_model', $image_sizes[0] ?? '1024x1024' ),
@@ -220,7 +307,7 @@ class Integration_Service {
 				'audio_model'   => get_option( 'alorbach_demo_default_audio_model', $audio_models[0] ?? 'whisper-1' ),
 				'video_model'   => get_option( 'alorbach_demo_default_video_model', $video_models[0] ?? 'sora-2' ),
 			),
-			'capabilities' => array(
+			'capabilities'      => array(
 				'chat_models'     => array_values( $text_models ),
 				'image_models'    => array_values( $image_models ),
 				'image_sizes'     => array_values( $image_sizes ),
@@ -230,8 +317,16 @@ class Integration_Service {
 				'video_sizes'     => $video_sizes,
 				'video_durations' => $video_lengths,
 			),
-			'billing_urls' => self::get_billing_urls(),
+			'plan_capabilities' => self::get_default_capabilities( true ),
+			'billing_urls'      => self::get_billing_urls(),
 		);
+
+		$user_id = null !== $user_id ? (int) $user_id : ( is_user_logged_in() ? (int) get_current_user_id() : 0 );
+		if ( $user_id > 0 ) {
+			$plan                  = self::get_user_active_plan( $user_id );
+			$config                = self::filter_config_for_plan( $config, $plan, $user_id );
+			$config['active_plan'] = self::get_plan_summary( $plan );
+		}
 
 		return apply_filters( 'alorbach_integration_config', $config );
 	}
@@ -248,6 +343,7 @@ class Integration_Service {
 
 		$balance = $user_id ? Ledger::get_balance( $user_id ) : 0;
 		$usage   = $user_id ? Ledger::get_usage_this_month( $user_id ) : 0;
+		$resolution = self::get_user_plan_resolution( $user_id );
 		$summary = array(
 			'user_id'      => $user_id,
 			'balance_uc'   => $balance,
@@ -265,6 +361,12 @@ class Integration_Service {
 			),
 			'billing_urls' => self::get_billing_urls(),
 			'renewal'      => self::get_renewal_summary( $user_id ),
+			'active_plan'  => array_merge(
+				self::get_plan_summary( $resolution['plan'] ),
+				array(
+					'source' => $resolution['source'],
+				)
+			),
 		);
 
 		return apply_filters( 'alorbach_integration_account_summary', $summary, $user_id );
@@ -369,6 +471,18 @@ class Integration_Service {
 				</div>
 			</div>
 
+			<?php if ( ! empty( $summary['active_plan']['public_name'] ) ) : ?>
+				<p class="alorbach-account-widget__renewal">
+					<?php
+					printf(
+						/* translators: %s: plan name */
+						esc_html__( 'Active plan: %s', 'alorbach-ai-gateway' ),
+						esc_html( $summary['active_plan']['public_name'] )
+					);
+					?>
+				</p>
+			<?php endif; ?>
+
 			<?php if ( ! empty( $summary['renewal'] ) && ! empty( $summary['renewal']['status_label'] ) ) : ?>
 				<p class="alorbach-account-widget__renewal"><?php echo esc_html( $summary['renewal']['status_label'] ); ?></p>
 			<?php endif; ?>
@@ -420,8 +534,220 @@ class Integration_Service {
 	 * @return int
 	 */
 	public static function get_plan_included_credits( $plan_slug ) {
-		$plans = self::get_normalized_plans();
-		return isset( $plans[ $plan_slug ]['included_credits_uc'] ) ? (int) $plans[ $plan_slug ]['included_credits_uc'] : 0;
+		$plan = self::get_plan( $plan_slug );
+		return isset( $plan['included_credits_uc'] ) ? (int) $plan['included_credits_uc'] : 0;
+	}
+
+	/**
+	 * Get one plan by slug.
+	 *
+	 * @param string $plan_slug Plan slug.
+	 * @return array
+	 */
+	public static function get_plan( $plan_slug ) {
+		$plans     = self::get_normalized_plans();
+		$plan_slug = sanitize_key( (string) $plan_slug );
+
+		if ( $plan_slug && isset( $plans[ $plan_slug ] ) ) {
+			return $plans[ $plan_slug ];
+		}
+
+		return $plans[ self::BASIC_PLAN_SLUG ] ?? self::get_default_plans()[ self::BASIC_PLAN_SLUG ];
+	}
+
+	/**
+	 * Get the active plan for a user.
+	 *
+	 * @param int|null $user_id User ID or current user.
+	 * @return array
+	 */
+	public static function get_user_active_plan( $user_id = null ) {
+		$resolution = self::get_user_plan_resolution( $user_id );
+		return $resolution['plan'];
+	}
+
+	/**
+	 * Get the resolved plan plus its source for a user.
+	 *
+	 * @param int|null $user_id User ID or current user.
+	 * @return array
+	 */
+	public static function get_user_plan_resolution( $user_id = null ) {
+		$user_id = $user_id ?: get_current_user_id();
+		$user_id = (int) $user_id;
+
+		if ( $user_id <= 0 ) {
+			return array(
+				'plan'             => self::get_plan( self::BASIC_PLAN_SLUG ),
+				'source'           => 'basic',
+				'manual_plan_slug' => '',
+				'paid_plan_slug'   => '',
+			);
+		}
+
+		$manual_plan_slug = self::get_user_manual_plan_slug( $user_id );
+		if ( $manual_plan_slug ) {
+			return array(
+				'plan'             => self::get_plan( $manual_plan_slug ),
+				'source'           => 'manual',
+				'manual_plan_slug' => $manual_plan_slug,
+				'paid_plan_slug'   => '',
+			);
+		}
+
+		$paid_plan_slug = self::get_active_paid_plan_slug_for_user( $user_id );
+		if ( $paid_plan_slug ) {
+			return array(
+				'plan'             => self::get_plan( $paid_plan_slug ),
+				'source'           => 'subscription',
+				'manual_plan_slug' => '',
+				'paid_plan_slug'   => $paid_plan_slug,
+			);
+		}
+
+		return array(
+			'plan'             => self::get_plan( self::BASIC_PLAN_SLUG ),
+			'source'           => 'basic',
+			'manual_plan_slug' => '',
+			'paid_plan_slug'   => '',
+		);
+	}
+
+	/**
+	 * Get the resolution source for a user's active plan.
+	 *
+	 * @param int|null $user_id User ID or current user.
+	 * @return string
+	 */
+	public static function get_user_active_plan_source( $user_id = null ) {
+		$resolution = self::get_user_plan_resolution( $user_id );
+		return (string) $resolution['source'];
+	}
+
+	/**
+	 * Read the manual plan override for a user.
+	 *
+	 * @param int $user_id User ID.
+	 * @return string
+	 */
+	public static function get_user_manual_plan_slug( $user_id ) {
+		$user_id = (int) $user_id;
+		if ( $user_id <= 0 ) {
+			return '';
+		}
+
+		$plan_slug = sanitize_key( (string) get_user_meta( $user_id, self::USER_PLAN_OVERRIDE_META_KEY, true ) );
+		if ( '' === $plan_slug ) {
+			return '';
+		}
+
+		$plan = self::get_plan( $plan_slug );
+		return $plan['slug'] === $plan_slug ? $plan_slug : '';
+	}
+
+	/**
+	 * Set or clear the manual plan override for a user.
+	 *
+	 * @param int    $user_id User ID.
+	 * @param string $plan_slug Plan slug or empty to clear.
+	 * @return void
+	 */
+	public static function set_user_manual_plan_slug( $user_id, $plan_slug ) {
+		$user_id  = (int) $user_id;
+		$plan_slug = sanitize_key( (string) $plan_slug );
+
+		if ( $user_id <= 0 ) {
+			return;
+		}
+
+		if ( '' === $plan_slug ) {
+			delete_user_meta( $user_id, self::USER_PLAN_OVERRIDE_META_KEY );
+			return;
+		}
+
+		$plan = self::get_plan( $plan_slug );
+		if ( $plan['slug'] !== $plan_slug ) {
+			return;
+		}
+
+		update_user_meta( $user_id, self::USER_PLAN_OVERRIDE_META_KEY, $plan_slug );
+	}
+
+	/**
+	 * Check whether a capability is enabled for a user.
+	 *
+	 * @param int|null $user_id User ID or current user.
+	 * @param string   $capability Capability key.
+	 * @param string   $model Optional model ID.
+	 * @return bool
+	 */
+	public static function user_can_access_capability( $user_id, $capability, $model = '' ) {
+		if ( self::has_balance_access_override( $user_id ) ) {
+			return true;
+		}
+
+		return self::plan_allows_capability( self::get_user_active_plan( $user_id ), $capability, $model );
+	}
+
+	/**
+	 * Check whether a capability is enabled for a plan.
+	 *
+	 * @param array  $plan Plan array.
+	 * @param string $capability Capability key.
+	 * @param string $model Optional model ID.
+	 * @return bool
+	 */
+	public static function plan_allows_capability( $plan, $capability, $model = '' ) {
+		$capability = sanitize_key( (string) $capability );
+		if ( ! in_array( $capability, self::PLAN_CAPABILITIES, true ) ) {
+			return false;
+		}
+
+		if ( empty( $plan['capabilities'][ $capability ] ) ) {
+			return false;
+		}
+
+		return self::is_model_allowed_for_plan( $plan, $capability, $model );
+	}
+
+	/**
+	 * Get models allowed for a plan and capability.
+	 *
+	 * @param array  $plan Plan array.
+	 * @param string $capability Capability key.
+	 * @param array  $available_models Source model list.
+	 * @return array
+	 */
+	public static function get_allowed_models_for_plan( $plan, $capability, $available_models ) {
+		$available_models = is_array( $available_models ) ? array_values( array_filter( $available_models, 'is_string' ) ) : array();
+		$capability       = sanitize_key( (string) $capability );
+		$allowed          = isset( $plan['allowed_models'][ $capability ] ) && is_array( $plan['allowed_models'][ $capability ] ) ? $plan['allowed_models'][ $capability ] : array();
+
+		if ( empty( $allowed ) ) {
+			return $available_models;
+		}
+
+		return array_values( array_intersect( $available_models, $allowed ) );
+	}
+
+	/**
+	 * Get a frontend-safe plan summary.
+	 *
+	 * @param array $plan Plan array.
+	 * @return array
+	 */
+	public static function get_plan_summary( $plan ) {
+		return array(
+			'slug'                => (string) ( $plan['slug'] ?? '' ),
+			'public_name'         => (string) ( $plan['public_name'] ?? '' ),
+			'is_free'             => ! empty( $plan['is_free'] ),
+			'is_active'           => ! empty( $plan['is_active'] ),
+			'billing_interval'    => (string) ( $plan['billing_interval'] ?? 'month' ),
+			'price_usd'           => (float) ( $plan['price_usd'] ?? 0 ),
+			'included_credits_uc' => (int) ( $plan['included_credits_uc'] ?? 0 ),
+			'capabilities'        => self::normalize_capabilities( $plan['capabilities'] ?? array() ),
+			'allowed_models'      => self::normalize_allowed_models( $plan['allowed_models'] ?? array(), self::get_plan_model_catalog() ),
+		);
 	}
 
 	/**
@@ -472,5 +798,253 @@ class Integration_Service {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Get default capability map.
+	 *
+	 * @param bool $enabled Default enabled state.
+	 * @return array
+	 */
+	private static function get_default_capabilities( $enabled = true ) {
+		return array(
+			'chat'  => (bool) $enabled,
+			'image' => (bool) $enabled,
+			'audio' => (bool) $enabled,
+			'video' => (bool) $enabled,
+		);
+	}
+
+	/**
+	 * Get an empty model allowlist map.
+	 *
+	 * @return array
+	 */
+	private static function get_empty_allowed_models() {
+		return array(
+			'chat'  => array(),
+			'image' => array(),
+			'audio' => array(),
+			'video' => array(),
+		);
+	}
+
+	/**
+	 * Normalize capability booleans.
+	 *
+	 * @param array      $capabilities Raw capability values.
+	 * @param array|null $defaults Default values when keys are missing.
+	 * @return array
+	 */
+	private static function normalize_capabilities( $capabilities, $defaults = null ) {
+		$defaults     = is_array( $defaults ) ? $defaults : self::get_default_capabilities( true );
+		$capabilities = is_array( $capabilities ) ? $capabilities : array();
+		$normalized   = array();
+
+		foreach ( self::PLAN_CAPABILITIES as $capability ) {
+			$normalized[ $capability ] = array_key_exists( $capability, $capabilities )
+				? (bool) $capabilities[ $capability ]
+				: ! empty( $defaults[ $capability ] );
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Normalize allowed model lists by capability.
+	 *
+	 * @param array $allowed_models Raw allowlists.
+	 * @param array $model_catalog Catalog keyed by capability.
+	 * @return array
+	 */
+	private static function normalize_allowed_models( $allowed_models, $model_catalog ) {
+		$allowed_models = is_array( $allowed_models ) ? $allowed_models : array();
+		$model_catalog  = is_array( $model_catalog ) ? $model_catalog : self::get_plan_model_catalog();
+		$normalized     = self::get_empty_allowed_models();
+
+		foreach ( self::PLAN_CAPABILITIES as $capability ) {
+			$rows = isset( $allowed_models[ $capability ] ) ? $allowed_models[ $capability ] : array();
+			$rows = is_array( $rows ) ? $rows : array();
+			$rows = array_values(
+				array_unique(
+					array_filter(
+						array_map( 'sanitize_text_field', $rows ),
+						function ( $model ) use ( $model_catalog, $capability ) {
+							return in_array( $model, $model_catalog[ $capability ] ?? array(), true );
+						}
+					)
+				)
+			);
+			$normalized[ $capability ] = $rows;
+		}
+
+		return $normalized;
+	}
+
+	/**
+	 * Get configured model catalogs by capability.
+	 *
+	 * @return array
+	 */
+	private static function get_plan_model_catalog() {
+		$admin = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
+
+		return array(
+			'chat'  => array_values( $admin::get_text_models() ),
+			'image' => array_values( $admin::get_image_models() ),
+			'audio' => array_values( $admin::get_audio_models() ),
+			'video' => array_values( $admin::get_video_models() ),
+		);
+	}
+
+	/**
+	 * Filter config defaults and capabilities for a plan.
+	 *
+	 * @param array $config Base config.
+	 * @param array $plan Active plan.
+	 * @return array
+	 */
+	private static function filter_config_for_plan( $config, $plan, $user_id = 0 ) {
+		if ( self::has_balance_access_override( $user_id ) ) {
+			$config['plan_capabilities'] = self::get_default_capabilities( true );
+			return $config;
+		}
+
+		$capability_map = self::normalize_capabilities( $plan['capabilities'] ?? array(), self::get_default_capabilities( true ) );
+
+		$config['plan_capabilities']            = $capability_map;
+		$config['capabilities']['chat_models']  = ! empty( $capability_map['chat'] ) ? self::get_allowed_models_for_plan( $plan, 'chat', $config['capabilities']['chat_models'] ?? array() ) : array();
+		$config['capabilities']['image_models'] = ! empty( $capability_map['image'] ) ? self::get_allowed_models_for_plan( $plan, 'image', $config['capabilities']['image_models'] ?? array() ) : array();
+		$config['capabilities']['audio_models'] = ! empty( $capability_map['audio'] ) ? self::get_allowed_models_for_plan( $plan, 'audio', $config['capabilities']['audio_models'] ?? array() ) : array();
+		$config['capabilities']['video_models'] = ! empty( $capability_map['video'] ) ? self::get_allowed_models_for_plan( $plan, 'video', $config['capabilities']['video_models'] ?? array() ) : array();
+
+		$config['defaults']['chat_model']  = self::pick_allowed_default( $config['defaults']['chat_model'] ?? '', $config['capabilities']['chat_models'] );
+		$config['defaults']['image_model'] = self::pick_allowed_default( $config['defaults']['image_model'] ?? '', $config['capabilities']['image_models'] );
+		$config['defaults']['audio_model'] = self::pick_allowed_default( $config['defaults']['audio_model'] ?? '', $config['capabilities']['audio_models'] );
+		$config['defaults']['video_model'] = self::pick_allowed_default( $config['defaults']['video_model'] ?? '', $config['capabilities']['video_models'] );
+
+		if ( empty( $capability_map['image'] ) ) {
+			$config['defaults']['image_model']         = '';
+			$config['capabilities']['image_sizes']     = array();
+			$config['capabilities']['image_qualities'] = array();
+			$config['defaults']['image_size']          = '';
+			$config['defaults']['image_quality']       = '';
+		}
+
+		if ( empty( $capability_map['video'] ) ) {
+			$config['defaults']['video_model']         = '';
+			$config['capabilities']['video_sizes']     = array();
+			$config['capabilities']['video_durations'] = array();
+		}
+
+		return $config;
+	}
+
+	/**
+	 * Basic users with a positive balance can spend that balance on all configured models.
+	 *
+	 * @param int $user_id User ID.
+	 * @return bool
+	 */
+	private static function has_balance_access_override( $user_id ) {
+		$user_id = (int) $user_id;
+		if ( $user_id <= 0 ) {
+			return false;
+		}
+
+		$resolution = self::get_user_plan_resolution( $user_id );
+		if ( (string) $resolution['source'] !== 'basic' ) {
+			return false;
+		}
+
+		return Ledger::get_balance( $user_id ) > 0;
+	}
+
+	/**
+	 * Pick a default value that exists in the allowed list.
+	 *
+	 * @param string $current Current default.
+	 * @param array  $options Allowed options.
+	 * @return string
+	 */
+	private static function pick_allowed_default( $current, $options ) {
+		$options = is_array( $options ) ? array_values( $options ) : array();
+		if ( empty( $options ) ) {
+			return '';
+		}
+
+		return in_array( $current, $options, true ) ? $current : (string) $options[0];
+	}
+
+	/**
+	 * Check whether a specific model is allowed for a plan.
+	 *
+	 * @param array  $plan Plan array.
+	 * @param string $capability Capability key.
+	 * @param string $model Optional model.
+	 * @return bool
+	 */
+	private static function is_model_allowed_for_plan( $plan, $capability, $model = '' ) {
+		$model = (string) $model;
+		if ( '' === $model ) {
+			return true;
+		}
+
+		$allowed_models = isset( $plan['allowed_models'][ $capability ] ) && is_array( $plan['allowed_models'][ $capability ] ) ? $plan['allowed_models'][ $capability ] : array();
+		if ( empty( $allowed_models ) ) {
+			return true;
+		}
+
+		return in_array( $model, $allowed_models, true );
+	}
+
+	/**
+	 * Resolve the active paid plan slug from WooCommerce subscriptions.
+	 *
+	 * @param int $user_id User ID.
+	 * @return string
+	 */
+	private static function get_active_paid_plan_slug_for_user( $user_id ) {
+		if ( $user_id <= 0 || ! function_exists( 'wcs_get_users_subscriptions' ) ) {
+			return '';
+		}
+
+		$product_mapping = get_option( 'alorbach_product_to_plan', array() );
+		$product_mapping = is_array( $product_mapping ) ? $product_mapping : array();
+		if ( empty( $product_mapping ) ) {
+			return '';
+		}
+
+		$plans         = self::get_normalized_plans();
+		$subscriptions = wcs_get_users_subscriptions( $user_id );
+		if ( empty( $subscriptions ) || ! is_array( $subscriptions ) ) {
+			return '';
+		}
+
+		foreach ( $subscriptions as $subscription ) {
+			if ( ! is_object( $subscription ) || ! method_exists( $subscription, 'get_items' ) ) {
+				continue;
+			}
+
+			$status = method_exists( $subscription, 'get_status' ) ? (string) $subscription->get_status() : '';
+			if ( ! in_array( $status, array( 'active', 'pending-cancel' ), true ) ) {
+				continue;
+			}
+
+			foreach ( $subscription->get_items() as $item ) {
+				$product_id = method_exists( $item, 'get_product_id' ) ? (int) $item->get_product_id() : 0;
+				$plan_slug  = isset( $product_mapping[ $product_id ] ) ? sanitize_key( (string) $product_mapping[ $product_id ] ) : '';
+
+				if ( ! $plan_slug || self::BASIC_PLAN_SLUG === $plan_slug ) {
+					continue;
+				}
+
+				if ( isset( $plans[ $plan_slug ] ) && ! empty( $plans[ $plan_slug ]['is_active'] ) ) {
+					return $plan_slug;
+				}
+			}
+		}
+
+		return '';
 	}
 }

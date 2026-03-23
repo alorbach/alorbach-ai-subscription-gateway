@@ -64,7 +64,8 @@ All pages are under the **AI Gateway** top-level menu.
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Configure default models for demo pages; create sample pages |
 | **Image Queue** | Monitor recent image jobs, prompts, progress, previews, and final outputs |
-| **Plans** | Create credit packages and subscription plans |
+| **Plans** | Manage configurable paid plans plus the protected free Basic fallback plan |
+| **User Plans** | Review each user's resolved plan and assign or clear manual plan overrides |
 | **User Balance** | Manually credit or adjust individual users |
 | **Stripe Webhook** | Webhook integration log and status |
 | **Developer** | REST API docs, shortcode reference, hooks, and live test tools |
@@ -85,6 +86,8 @@ All pages are under the **AI Gateway** top-level menu.
 ```
 
 Demo pages can also be created automatically via **AI Gateway -> Demo Defaults -> Create sample pages**.
+
+The logged-in user menu label for the credits page defaults to `AI Credits` and can be changed in **AI Gateway -> Settings**.
 
 ---
 
@@ -142,7 +145,7 @@ Codex models are a specialized text-model path for coding and agent-style respon
 
 ### Capability Discovery
 
-Use `/me/models` when building frontend pages so the UI can discover the currently configured defaults and supported options for:
+Use `/me/models` when building frontend pages so the UI can discover the currently configured defaults and plan-filtered options for:
 
 - `text`
 - `image`
@@ -150,6 +153,8 @@ Use `/me/models` when building frontend pages so the UI can discover the current
 - `video`
 
 For image pages specifically, `/me/models` also includes progress and preview capability metadata so the frontend can decide whether to use the async preview flow.
+
+Basic users with a positive balance can spend those credits on the full configured model catalog.
 
 ---
 
@@ -180,8 +185,8 @@ Base URL: `/wp-json/alorbach/v1`
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/integration/config` | Canonical downstream config: backend defaults, capabilities, billing URLs |
-| `GET` | `/integration/plans` | Canonical downstream plan catalog (active plans by default) |
+| `GET` | `/integration/config` | Canonical downstream config: backend defaults, capabilities, billing URLs, and logged-in active-plan filtering |
+| `GET` | `/integration/plans` | Canonical downstream plan catalog with capabilities and model allowlists |
 
 ### Admin Endpoints _(requires `manage_options`)_
 
@@ -289,6 +294,10 @@ $uc = alorbach_get_user_balance( $user_id );
 
 // Get this month's usage in UC
 $used = alorbach_get_user_usage_this_month( $user_id );
+
+// Get the resolved active plan and capability access
+$plan = alorbach_get_active_plan( $user_id );
+$can_generate_images = alorbach_user_can_access_capability( 'image', 'gpt-image-1.5', $user_id );
 
 // Format UC as a human-readable Credits string - e.g. "1.50 Credits"
 echo alorbach_format_credits( $uc );

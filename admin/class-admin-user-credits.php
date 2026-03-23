@@ -20,9 +20,10 @@ class Admin_User_Credits {
 	 * Register "Mein Guthaben" menu for logged-in users.
 	 */
 	public static function register_menu() {
+		$menu_label = self::get_menu_label();
 		add_menu_page(
-			__( 'My Credits', 'alorbach-ai-gateway' ),
-			__( 'My Credits', 'alorbach-ai-gateway' ),
+			$menu_label,
+			$menu_label,
 			'read',
 			'alorbach-my-credits',
 			array( __CLASS__, 'render_my_credits_page' ),
@@ -39,6 +40,7 @@ class Admin_User_Credits {
 		if ( ! $user_id ) {
 			return;
 		}
+		$summary = \Alorbach\AIGateway\Integration_Service::get_account_summary( $user_id );
 		$balance = \Alorbach\AIGateway\Ledger::get_balance( $user_id );
 		$usage   = \Alorbach\AIGateway\Ledger::get_usage_this_month( $user_id );
 
@@ -56,8 +58,17 @@ class Admin_User_Credits {
 		$pages    = $total > 0 ? (int) ceil( $total / $per_page ) : 0;
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'My AI Credits', 'alorbach-ai-gateway' ); ?></h1>
+			<h1><?php echo esc_html( self::get_menu_label() ); ?></h1>
 			<table class="form-table">
+				<tr>
+					<th><?php esc_html_e( 'Plan', 'alorbach-ai-gateway' ); ?></th>
+					<td>
+						<strong><?php echo esc_html( $summary['active_plan']['public_name'] ?? '' ); ?></strong>
+						<?php if ( ! empty( $summary['active_plan']['source'] ) ) : ?>
+							<span class="description">(<?php echo esc_html( self::get_plan_source_label( (string) $summary['active_plan']['source'] ) ); ?>)</span>
+						<?php endif; ?>
+					</td>
+				</tr>
 				<tr>
 					<th><?php esc_html_e( 'Balance', 'alorbach-ai-gateway' ); ?></th>
 					<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $balance ) ); ?> <span class="description">(<?php echo esc_html( __( 'worth', 'alorbach-ai-gateway' ) . ' ' . \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?>)</span></td>
@@ -65,6 +76,10 @@ class Admin_User_Credits {
 				<tr>
 					<th><?php esc_html_e( 'Usage this month', 'alorbach-ai-gateway' ); ?></th>
 					<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $usage ) ); ?></td>
+				</tr>
+				<tr>
+					<th><?php esc_html_e( 'Benefits', 'alorbach-ai-gateway' ); ?></th>
+					<td><?php self::render_plan_benefits( $summary['active_plan'] ?? array() ); ?></td>
 				</tr>
 			</table>
 
@@ -120,11 +135,21 @@ class Admin_User_Credits {
 		if ( ! $user || ! $user->ID ) {
 			return;
 		}
+		$summary = \Alorbach\AIGateway\Integration_Service::get_account_summary( $user->ID );
 		$balance = \Alorbach\AIGateway\Ledger::get_balance( $user->ID );
 		$usage   = \Alorbach\AIGateway\Ledger::get_usage_this_month( $user->ID );
 		?>
 		<h2><?php esc_html_e( 'AI Credits', 'alorbach-ai-gateway' ); ?></h2>
 		<table class="form-table">
+			<tr>
+				<th><?php esc_html_e( 'Plan', 'alorbach-ai-gateway' ); ?></th>
+				<td>
+					<strong><?php echo esc_html( $summary['active_plan']['public_name'] ?? '' ); ?></strong>
+					<?php if ( ! empty( $summary['active_plan']['source'] ) ) : ?>
+						<span class="description">(<?php echo esc_html( self::get_plan_source_label( (string) $summary['active_plan']['source'] ) ); ?>)</span>
+					<?php endif; ?>
+				</td>
+			</tr>
 			<tr>
 				<th><?php esc_html_e( 'Balance', 'alorbach-ai-gateway' ); ?></th>
 				<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $balance ) ); ?> <span class="description">(<?php echo esc_html( __( 'worth', 'alorbach-ai-gateway' ) . ' ' . \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?>)</span></td>
@@ -133,7 +158,81 @@ class Admin_User_Credits {
 				<th><?php esc_html_e( 'Usage this month', 'alorbach-ai-gateway' ); ?></th>
 				<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_credits( $usage ) ); ?></td>
 			</tr>
+			<tr>
+				<th><?php esc_html_e( 'Benefits', 'alorbach-ai-gateway' ); ?></th>
+				<td><?php self::render_plan_benefits( $summary['active_plan'] ?? array() ); ?></td>
+			</tr>
 		</table>
 		<?php
+	}
+
+	/**
+	 * Render a compact plan benefits summary.
+	 *
+	 * @param array $plan Active plan summary.
+	 * @return void
+	 */
+	private static function render_plan_benefits( $plan ) {
+		$capabilities = isset( $plan['capabilities'] ) && is_array( $plan['capabilities'] ) ? $plan['capabilities'] : array();
+		$labels       = array(
+			'chat'  => __( 'Chat', 'alorbach-ai-gateway' ),
+			'image' => __( 'Image', 'alorbach-ai-gateway' ),
+			'audio' => __( 'Audio', 'alorbach-ai-gateway' ),
+			'video' => __( 'Video', 'alorbach-ai-gateway' ),
+		);
+		$enabled = array();
+
+		foreach ( $labels as $key => $label ) {
+			if ( ! empty( $capabilities[ $key ] ) ) {
+				$enabled[] = $label;
+			}
+		}
+
+		if ( ! empty( $plan['included_credits_uc'] ) ) {
+			echo '<p>' . esc_html(
+				sprintf(
+					/* translators: %s: credits per billing period */
+					__( 'Included credits: %s per billing cycle', 'alorbach-ai-gateway' ),
+					number_format_i18n( \Alorbach\AIGateway\User_Display::uc_to_credits( (int) $plan['included_credits_uc'] ), 2 )
+				)
+			) . '</p>';
+		}
+
+		echo '<p>' . esc_html(
+			sprintf(
+				/* translators: %s: enabled capability list */
+				__( 'Enabled features: %s', 'alorbach-ai-gateway' ),
+				! empty( $enabled ) ? implode( ', ', $enabled ) : __( 'None', 'alorbach-ai-gateway' )
+			)
+		) . '</p>';
+	}
+
+	/**
+	 * Translate plan source into a user-facing label.
+	 *
+	 * @param string $source Plan resolution source.
+	 * @return string
+	 */
+	private static function get_plan_source_label( $source ) {
+		switch ( $source ) {
+			case 'manual':
+				return __( 'Manual override', 'alorbach-ai-gateway' );
+			case 'subscription':
+				return __( 'Subscription', 'alorbach-ai-gateway' );
+			default:
+				return __( 'Basic fallback', 'alorbach-ai-gateway' );
+		}
+	}
+
+	/**
+	 * Get the configured user-facing menu label.
+	 *
+	 * @return string
+	 */
+	private static function get_menu_label() {
+		$label = (string) get_option( 'alorbach_my_credits_menu_label', 'AI Credits' );
+		$label = trim( $label );
+
+		return '' !== $label ? $label : 'AI Credits';
 	}
 }

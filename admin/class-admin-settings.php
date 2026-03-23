@@ -41,6 +41,7 @@ class Admin_Settings {
 			$billing_url_top_up    = isset( $_POST['alorbach_billing_url_top_up'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_top_up'] ) ) : '';
 			$billing_url_manage_account = isset( $_POST['alorbach_billing_url_manage_account'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_manage_account'] ) ) : '';
 			$billing_url_account   = isset( $_POST['alorbach_billing_url_account_overview'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_billing_url_account_overview'] ) ) : '';
+			$my_credits_menu_label = isset( $_POST['alorbach_my_credits_menu_label'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_my_credits_menu_label'] ) ) : 'AI Credits';
 
 			update_option( 'alorbach_selling_enabled', $selling_enabled );
 			update_option( 'alorbach_selling_multiplier', $selling_multiplier );
@@ -56,6 +57,7 @@ class Admin_Settings {
 			update_option( 'alorbach_billing_url_top_up', $billing_url_top_up );
 			update_option( 'alorbach_billing_url_manage_account', $billing_url_manage_account );
 			update_option( 'alorbach_billing_url_account_overview', $billing_url_account );
+			update_option( 'alorbach_my_credits_menu_label', $my_credits_menu_label ?: 'AI Credits' );
 			$monthly_quota_uc = isset( $_POST['alorbach_monthly_quota_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_monthly_quota_uc'] ) ) ) : 0;
 			update_option( 'alorbach_monthly_quota_uc', $monthly_quota_uc );
 			Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
@@ -76,6 +78,7 @@ class Admin_Settings {
 		$billing_url_top_up         = (string) get_option( 'alorbach_billing_url_top_up', '' );
 		$billing_url_manage_account = (string) get_option( 'alorbach_billing_url_manage_account', '' );
 		$billing_url_account        = (string) get_option( 'alorbach_billing_url_account_overview', '' );
+		$my_credits_menu_label      = (string) get_option( 'alorbach_my_credits_menu_label', 'AI Credits' );
 		?>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Settings', 'alorbach-ai-gateway' ); ?></h1>
@@ -204,6 +207,13 @@ class Admin_Settings {
 					<tr>
 						<th scope="row"><label for="alorbach_billing_url_account_overview"><?php esc_html_e( 'Account overview URL', 'alorbach-ai-gateway' ); ?></label></th>
 						<td><input type="url" name="alorbach_billing_url_account_overview" id="alorbach_billing_url_account_overview" value="<?php echo esc_attr( $billing_url_account ); ?>" class="regular-text code" /></td>
+					</tr>
+					<tr>
+						<th scope="row"><label for="alorbach_my_credits_menu_label"><?php esc_html_e( 'My credits menu label', 'alorbach-ai-gateway' ); ?></label></th>
+						<td>
+							<input type="text" name="alorbach_my_credits_menu_label" id="alorbach_my_credits_menu_label" value="<?php echo esc_attr( $my_credits_menu_label ); ?>" class="regular-text" />
+							<p class="description"><?php esc_html_e( 'User-facing WordPress admin menu label. Default: AI Credits.', 'alorbach-ai-gateway' ); ?></p>
+						</td>
 					</tr>
 				</table>
 

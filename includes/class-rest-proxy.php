@@ -113,6 +113,50 @@ class REST_Proxy {
 	}
 
 	/**
+	 * Build a plan restriction error for blocked capabilities or models.
+	 *
+	 * @param int    $user_id WordPress user ID.
+	 * @param string $capability Capability key.
+	 * @param string $model Requested model.
+	 * @return \WP_Error
+	 */
+	private static function plan_restriction_error( $user_id, $capability, $model = '' ) {
+		$plan = Integration_Service::get_user_active_plan( $user_id );
+
+		return new \WP_Error(
+			'plan_restriction',
+			sprintf(
+				/* translators: 1: capability, 2: plan name */
+				__( 'The requested %1$s feature is not included in your %2$s plan.', 'alorbach-ai-gateway' ),
+				(string) $capability,
+				(string) ( $plan['public_name'] ?? $plan['slug'] ?? __( 'current', 'alorbach-ai-gateway' ) )
+			),
+			array(
+				'status'     => 403,
+				'capability' => (string) $capability,
+				'model'      => (string) $model,
+				'plan'       => Integration_Service::get_plan_summary( $plan ),
+			)
+		);
+	}
+
+	/**
+	 * Enforce plan capability and model access for a user.
+	 *
+	 * @param int    $user_id WordPress user ID.
+	 * @param string $capability Capability key.
+	 * @param string $model Requested model.
+	 * @return \WP_Error|null
+	 */
+	private static function enforce_user_plan_access( $user_id, $capability, $model = '' ) {
+		if ( Integration_Service::user_can_access_capability( $user_id, $capability, $model ) ) {
+			return null;
+		}
+
+		return self::plan_restriction_error( $user_id, $capability, $model );
+	}
+
+	/**
 	 * Register REST routes.
 	 */
 	public static function register_routes() {
@@ -492,11 +536,17 @@ class REST_Proxy {
 		}
 
 		$messages         = $request->get_param( 'messages' );
-		$model            = $request->get_param( 'model' );
+		$config           = Integration_Service::get_integration_config( $user_id );
+		$model            = $request->get_param( 'model' ) ?: ( $config['defaults']['chat_model'] ?? 'gpt-4.1-mini' );
 		$max_tokens       = $request->get_param( 'max_tokens' );
 		$multi_step       = (bool) $request->get_param( 'multi_step' );
 		$max_steps        = min( 20, max( 1, (int) $request->get_param( 'max_steps' ) ) );
 		$continue_message = (string) $request->get_param( 'continue_message' );
+
+		$plan_error = self::enforce_user_plan_access( $user_id, 'chat', $model );
+		if ( $plan_error ) {
+			return $plan_error;
+		}
 
 		// Validate messages structure.
 		if ( ! is_array( $messages ) || empty( $messages ) ) {
@@ -663,7 +713,8 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function me_models( $request ) {
-		$config = Integration_Service::get_integration_config();
+		$user_id = get_current_user_id();
+		$config = Integration_Service::get_integration_config( $user_id );
 		$admin  = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
 		$max_tokens_options = $admin::get_max_tokens_options();
 		$default_max_tokens = get_option( 'alorbach_demo_default_max_tokens', '1024' );
@@ -677,6 +728,7 @@ class REST_Proxy {
 
 		return rest_ensure_response( array(
 			'text'  => array(
+				'enabled'      => ! empty( $config['plan_capabilities']['chat'] ),
 				'default'      => $config['defaults']['chat_model'],
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_chat_model_select', false ),
 				'options'      => $config['capabilities']['chat_models'],
@@ -686,6 +738,7 @@ class REST_Proxy {
 				),
 			),
  			'image' => array(
+				'enabled' => ! empty( $config['plan_capabilities']['image'] ),
  				'size'    => array(
  					'default'      => $config['defaults']['image_size'],
  					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_size_select', false ),
@@ -708,11 +761,13 @@ class REST_Proxy {
 				'preview_models'          => $streamable_image_models,
  			),
 			'audio' => array(
+				'enabled'      => ! empty( $config['plan_capabilities']['audio'] ),
 				'default'      => $config['defaults']['audio_model'],
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_audio_model_select', false ),
 				'options'      => $config['capabilities']['audio_models'],
 			),
 			'video' => array(
+				'enabled'      => ! empty( $config['plan_capabilities']['video'] ),
 				'default'      => $config['defaults']['video_model'],
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_video_model_select', false ),
 				'options'      => $config['capabilities']['video_models'],
@@ -737,7 +792,7 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function integration_config( $request ) {
-		return rest_ensure_response( Integration_Service::get_integration_config() );
+		return rest_ensure_response( Integration_Service::get_integration_config( get_current_user_id() ) );
 	}
 
 	/**
@@ -947,6 +1002,11 @@ class REST_Proxy {
 			? $quality
 			: get_option( 'alorbach_image_default_quality', 'medium' );
 
+		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
+		if ( $plan_error ) {
+			return $plan_error;
+		}
+
 		// Idempotency: reject duplicate image requests within a 5-minute window.
 		$time_bucket       = (int) ( time() / 300 );
 		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $n, $time_bucket ) ) );
@@ -1014,6 +1074,12 @@ class REST_Proxy {
 			return $quota_error;
 		}
 
+		$model = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
+		if ( $plan_error ) {
+			return $plan_error;
+		}
+
 		$result = Image_Jobs::create_job(
 			$user_id,
 			array(
@@ -1022,7 +1088,7 @@ class REST_Proxy {
 				'size'            => $request->get_param( 'size' ),
 				'n'               => $request->get_param( 'n' ),
 				'quality'         => $request->get_param( 'quality' ),
-				'model'           => $request->get_param( 'model' ),
+				'model'           => $model,
 			)
 		);
 
@@ -1213,6 +1279,11 @@ class REST_Proxy {
 		$prompt    = $request->get_param( 'prompt' ) ?: '';
 		$format    = $request->get_param( 'audio_format' ) ?: null;
 
+		$plan_error = self::enforce_user_plan_access( $user_id, 'audio', $model );
+		if ( $plan_error ) {
+			return $plan_error;
+		}
+
 		// Limit encoded size to ~48 MB decoded to prevent DoS via memory exhaustion.
 		if ( ! is_string( $audio_b64 ) || strlen( $audio_b64 ) > 67108864 ) {
 			return new \WP_Error( 'audio_too_large', __( 'Audio file exceeds the 48 MB limit.', 'alorbach-ai-gateway' ), array( 'status' => 413 ) );
@@ -1319,6 +1390,11 @@ class REST_Proxy {
 		$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
 		if ( ! in_array( (string) $duration, array( '4', '8', '12' ), true ) ) {
 			$duration = 8;
+		}
+
+		$plan_error = self::enforce_user_plan_access( $user_id, 'video', $model );
+		if ( $plan_error ) {
+			return $plan_error;
 		}
 
 		// Idempotency: reject duplicate video requests within a 5-minute window.

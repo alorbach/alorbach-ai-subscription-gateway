@@ -209,10 +209,11 @@ function alorbach_format_credits( $uc_amount ) {
 /**
  * Template tag: Get downstream integration config.
  *
+ * @param int|null $user_id Optional user ID for plan-aware filtering.
  * @return array
  */
-function alorbach_get_integration_config() {
-	return Alorbach\AIGateway\Integration_Service::get_integration_config();
+function alorbach_get_integration_config( $user_id = null ) {
+	return Alorbach\AIGateway\Integration_Service::get_integration_config( $user_id );
 }
 
 /**
@@ -253,6 +254,28 @@ function alorbach_get_account_summary( $user_id = null ) {
  */
 function alorbach_get_account_history( $user_id = null, $args = array() ) {
 	return Alorbach\AIGateway\Integration_Service::get_account_history( $user_id, $args );
+}
+
+/**
+ * Template tag: Get the resolved active plan for a user.
+ *
+ * @param int|null $user_id Optional user ID.
+ * @return array
+ */
+function alorbach_get_active_plan( $user_id = null ) {
+	return Alorbach\AIGateway\Integration_Service::get_user_active_plan( $user_id );
+}
+
+/**
+ * Template tag: Check plan capability access for a user.
+ *
+ * @param string   $capability Capability key.
+ * @param string   $model Optional model ID.
+ * @param int|null $user_id Optional user ID.
+ * @return bool
+ */
+function alorbach_user_can_access_capability( $capability, $model = '', $user_id = null ) {
+	return Alorbach\AIGateway\Integration_Service::user_can_access_capability( $user_id, $capability, $model );
 }
 
 // ---------------------------------------------------------------------------

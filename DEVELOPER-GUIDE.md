@@ -52,6 +52,24 @@ The plugin currently exposes these route groups:
 
 ---
 
+## Plan Resolution
+
+The gateway resolves a user's active plan in this order:
+
+- manual admin override from `AI Gateway -> User Plans`
+- active WooCommerce subscription product mapped to a plan
+- protected `basic` fallback plan
+
+The `basic` plan is always present in the effective catalog. By default it enables chat only.
+
+Important exception:
+
+- if a user resolves to `basic` and has a positive credit balance, the gateway allows the full configured model catalog and paid capabilities so manually added credits can be spent
+
+Use the downstream account/config endpoints or PHP helpers instead of reproducing this logic in another plugin.
+
+---
+
 ## User Endpoints
 
 These endpoints require a logged-in WordPress user.
@@ -101,12 +119,18 @@ Typical response fields:
 
 Frontend capability and default-model discovery endpoint.
 
+This payload is plan-aware for logged-in users. If a user is on the free Basic plan, disabled capabilities return `enabled: false` and restricted model lists are filtered before they reach the UI.
+
+Exception: if a Basic user has a positive credit balance, the gateway exposes the full configured model catalog so those credits can be spent across the paid capabilities.
+
 Model categories exposed:
 
 - `text`
 - `image`
 - `audio`
 - `video`
+
+Each category also includes an `enabled` flag for the current user.
 
 Image capability metadata can include:
 
@@ -141,6 +165,16 @@ Typical response fields:
 Canonical account summary for the current logged-in user.
 
 Useful for downstream plugins that want a stable user-facing account payload.
+
+The payload includes the resolved `active_plan` summary.
+
+`active_plan.source` indicates whether the plan came from a manual admin override, a WooCommerce subscription, or the Basic fallback.
+
+Expected values:
+
+- `manual`
+- `subscription`
+- `basic`
 
 ### `GET /integration/account/history`
 
@@ -266,6 +300,10 @@ Use this for:
 - capability discovery
 - billing or account URLs exposed by the gateway
 
+When the caller is logged in, the payload is filtered to the user's active plan and includes `active_plan` plus `plan_capabilities`.
+
+If the logged-in user is on `basic` with a positive balance, the payload exposes the full configured catalog so the frontend can spend those credits without being artificially restricted.
+
 ### `GET /integration/plans`
 
 Canonical downstream plan catalog.
@@ -275,6 +313,17 @@ Query params:
 - `include_inactive` optional boolean
 
 Use this when another plugin wants to render gateway-owned plan data instead of duplicating it.
+
+Each plan row includes:
+
+- pricing and included credits
+- `is_free`
+- `capabilities`
+- `allowed_models`
+
+The plugin always maintains a protected `basic` plan as the fallback for users without an active paid subscription.
+
+The `basic` plan cannot disappear from the effective catalog, even if older stored plan data is incomplete.
 
 ---
 
@@ -515,6 +564,8 @@ If you build your own page, keep preview frames visually distinct from final ima
 
 This matters if your downstream UI wants to explain when balance changes will occur.
 
+It also matters for Basic users with manually granted credits: a positive balance unlocks the full configured capability/model catalog even when the resolved plan is still `basic`.
+
 ---
 
 ## Queue and Admin Monitoring
@@ -544,6 +595,43 @@ Available shortcodes include:
 - `[alorbach_demo_video]`
 
 Use these when you want a supported UI quickly instead of building a custom page.
+
+The user-facing wp-admin credits page label defaults to `AI Credits` and can be changed in `AI Gateway -> Settings`.
+
+The credits page shows the current user's:
+
+- resolved active plan
+- plan source
+- enabled benefits and included credits
+- current balance and usage/history
+
+---
+
+## PHP Helpers
+
+Use the plugin helpers instead of reading `alorbach_plans`, user meta, or demo defaults directly.
+
+Common helpers:
+
+- `alorbach_get_integration_config( $user_id = null )`
+- `alorbach_get_public_plans( $args = array() )`
+- `alorbach_get_billing_urls()`
+- `alorbach_get_account_summary( $user_id = null )`
+- `alorbach_get_account_history( $user_id = null, $args = array() )`
+- `alorbach_get_active_plan( $user_id = null )`
+- `alorbach_user_can_access_capability( $capability, $model = '', $user_id = null )`
+
+Typical usage:
+
+```php
+$plan    = alorbach_get_active_plan( $user_id );
+$summary = alorbach_get_account_summary( $user_id );
+$config  = alorbach_get_integration_config( $user_id );
+
+if ( alorbach_user_can_access_capability( 'image', 'gpt-image-1', $user_id ) ) {
+    // Render or enable image-generation UI.
+}
+```
 
 ---
 
