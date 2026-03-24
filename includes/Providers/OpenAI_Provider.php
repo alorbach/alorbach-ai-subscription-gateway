@@ -102,11 +102,66 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
 		}
+
+		$reference_images = is_array( $reference_images ) ? array_values( array_filter( $reference_images, 'is_array' ) ) : array();
+
+		if ( ! empty( $reference_images ) ) {
+			if ( strpos( $model, 'gpt-image' ) !== 0 ) {
+				return new \WP_Error( 'reference_images_unsupported', __( 'Reference-image generation is supported only for GPT Image models.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+
+			$boundary = wp_generate_password( 24, false );
+			$body     = '';
+
+			$fields = array(
+				'model'         => $model,
+				'prompt'        => $prompt,
+				'size'          => $size,
+				'n'             => $n,
+				'quality'       => $quality ?: 'medium',
+				'output_format' => $output_format ?: 'png',
+			);
+
+			foreach ( $fields as $name => $value ) {
+				$body .= '--' . $boundary . "\r\n";
+				$body .= 'Content-Disposition: form-data; name="' . $name . '"' . "\r\n\r\n";
+				$body .= (string) $value . "\r\n";
+			}
+
+			foreach ( $reference_images as $index => $item ) {
+				$b64 = isset( $item['b64_json'] ) && is_string( $item['b64_json'] ) ? trim( $item['b64_json'] ) : '';
+				if ( '' === $b64 ) {
+					return new \WP_Error( 'invalid_reference_image', __( 'Reference images must include base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+				}
+
+				$binary = base64_decode( $b64, true );
+				if ( false === $binary || '' === $binary ) {
+					return new \WP_Error( 'invalid_reference_image', __( 'Reference image data could not be decoded.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+				}
+
+				$body .= '--' . $boundary . "\r\n";
+				$body .= 'Content-Disposition: form-data; name="image[]"; filename="reference-' . ( $index + 1 ) . '.png"' . "\r\n";
+				$body .= 'Content-Type: image/png' . "\r\n\r\n";
+				$body .= $binary . "\r\n";
+			}
+
+			$body .= '--' . $boundary . '--' . "\r\n";
+
+			return array(
+				'url'     => 'https://api.openai.com/v1/images/edits',
+				'headers' => array(
+					'Content-Type'  => 'multipart/form-data; boundary=' . $boundary,
+					'Authorization' => 'Bearer ' . $api_key,
+				),
+				'body'    => $body,
+			);
+		}
+
 		$body = array(
 			'model'  => $model,
 			'prompt' => $prompt,

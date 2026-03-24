@@ -70,9 +70,10 @@ interface Provider_Interface {
 	 * @param string $quality      Quality (low, medium, high).
 	 * @param string $output_format Output format (png, jpeg).
 	 * @param array  $credentials Credentials.
+	 * @param array  $reference_images Optional reference image payloads.
 	 * @return array{url: string, headers: array, body: string}|WP_Error|null
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials );
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() );
 
 	/**
 	 * Build transcribe request. Return null if not supported.

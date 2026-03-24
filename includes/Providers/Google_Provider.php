@@ -47,10 +47,13 @@ class Google_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return null;
+		}
+		if ( ! empty( $reference_images ) ) {
+			return new \WP_Error( 'reference_images_unsupported', __( 'Reference-image generation is not supported for Google image models.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		$is_imagen = ( strpos( $model, 'imagen-' ) === 0 );
 		if ( ! $is_imagen ) {

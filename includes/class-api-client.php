@@ -411,7 +411,7 @@ class API_Client {
 	 * @param string|null $output_format Output format. Default from options.
 	 * @return array|WP_Error Response or error.
 	 */
-	public static function images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null ) {
+	public static function images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $reference_images = array() ) {
 		$n      = min( 10, max( 1, (int) $n ) );
 		$model  = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
@@ -426,7 +426,7 @@ class API_Client {
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds );
+		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -471,14 +471,14 @@ class API_Client {
 	 * @param callable|null $on_event      Optional callback receiving event payloads.
 	 * @return array|\WP_Error
 	 */
-	public static function stream_images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $on_event = null ) {
+	public static function stream_images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $on_event = null, $reference_images = array() ) {
 		$n             = min( 10, max( 1, (int) $n ) );
 		$model         = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality       = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
 		$provider      = self::get_provider_for_model( $model );
 
-		if ( ! self::supports_partial_image_streaming( $model, $provider ) ) {
+		if ( ! empty( $reference_images ) || ! self::supports_partial_image_streaming( $model, $provider ) ) {
 			return new \WP_Error( 'stream_not_supported', __( 'Partial image streaming is not supported for this model.', 'alorbach-ai-gateway' ) );
 		}
 
@@ -492,7 +492,7 @@ class API_Client {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
 		}
 
-		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds );
+		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}

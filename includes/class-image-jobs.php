@@ -63,6 +63,7 @@ class Image_Jobs {
 		$model           = isset( $args['model'] ) && $args['model'] ? sanitize_text_field( $args['model'] ) : get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality         = isset( $args['quality'] ) && $args['quality'] ? sanitize_text_field( $args['quality'] ) : get_option( 'alorbach_image_default_quality', 'medium' );
 		$n               = isset( $args['n'] ) ? max( 1, min( 10, (int) $args['n'] ) ) : 1;
+		$reference_images = isset( $args['reference_images'] ) && is_array( $args['reference_images'] ) ? array_values( array_filter( $args['reference_images'], 'is_array' ) ) : array();
 
 		if ( '' === $original_prompt ) {
 			$original_prompt = $prompt;
@@ -98,7 +99,7 @@ class Image_Jobs {
 
 		$job_id             = wp_generate_uuid4();
 		$token              = wp_generate_password( 20, false, false );
-		$supports_previews  = API_Client::supports_partial_image_streaming( $model );
+		$supports_previews  = empty( $reference_images ) && API_Client::supports_partial_image_streaming( $model );
 		$progress_mode      = $supports_previews ? 'provider' : 'estimated';
 		$job     = array(
 			'job_id'             => $job_id,
@@ -116,11 +117,12 @@ class Image_Jobs {
 			'n'                  => $n,
 			'quality'            => $quality,
 			'model'              => $model,
+			'reference_images'   => $reference_images,
 			'cost_uc'            => $cost,
 			'cost_credits'       => User_Display::uc_to_credits( $cost ),
 			'cost_usd'           => User_Display::uc_to_usd( $cost ),
 			'api_cost_uc'        => $api_cost,
-			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $n, time() ) ) ),
+			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $n, md5( wp_json_encode( $reference_images ) ), time() ) ) ),
 			'deduction_applied'  => false,
 			'error'              => '',
 			'dispatch_token'     => $token,
@@ -261,7 +263,7 @@ class Image_Jobs {
 		$job['status']            = 'in_progress';
 		$job['progress_stage']    = 'drafting';
 		$job['progress_percent']  = 35;
-		$job['supports_previews'] = API_Client::supports_partial_image_streaming( $job['model'] );
+		$job['supports_previews'] = empty( $job['reference_images'] ) && API_Client::supports_partial_image_streaming( $job['model'] );
 		$job['progress_mode']     = $job['supports_previews'] ? 'provider' : 'estimated';
 		$job['updated_at']        = time();
 		self::save_job( $job );
@@ -306,7 +308,8 @@ class Image_Jobs {
 							call_user_func( $on_update, self::public_job_payload( $job ) );
 						}
 					}
-				}
+				},
+				isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array()
 			);
 		} else {
 			$response = API_Client::images(
@@ -314,7 +317,9 @@ class Image_Jobs {
 				$job['size'],
 				$job['n'],
 				$job['model'],
-				$job['quality']
+				$job['quality'],
+				null,
+				isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array()
 			);
 		}
 

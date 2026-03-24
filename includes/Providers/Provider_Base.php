@@ -57,7 +57,7 @@ abstract class Provider_Base implements Provider_Interface {
 	 *
 	 * @return null
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
 		return null;
 	}
 

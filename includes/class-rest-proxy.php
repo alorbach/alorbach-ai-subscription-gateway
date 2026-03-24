@@ -997,6 +997,8 @@ class REST_Proxy {
 		$n       = (int) $request->get_param( 'n' );
 		$n       = min( 10, max( 1, $n ) );
 		$quality = $request->get_param( 'quality' );
+		$reference_images = $request->get_param( 'reference_images' );
+		$reference_images = is_array( $reference_images ) ? $reference_images : array();
 		$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality = ( $quality && in_array( $quality, array( 'low', 'medium', 'high' ), true ) )
 			? $quality
@@ -1009,7 +1011,7 @@ class REST_Proxy {
 
 		// Idempotency: reject duplicate image requests within a 5-minute window.
 		$time_bucket       = (int) ( time() / 300 );
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $n, $time_bucket ) ) );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $n, md5( wp_json_encode( $reference_images ) ), $time_bucket ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -1031,7 +1033,7 @@ class REST_Proxy {
 			);
 		}
 
-		$response = API_Client::images( $prompt, $size, $n, $model, $quality );
+		$response = API_Client::images( $prompt, $size, $n, $model, $quality, null, $reference_images );
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
@@ -1089,6 +1091,7 @@ class REST_Proxy {
 				'n'               => $request->get_param( 'n' ),
 				'quality'         => $request->get_param( 'quality' ),
 				'model'           => $model,
+				'reference_images' => $request->get_param( 'reference_images' ),
 			)
 		);
 
