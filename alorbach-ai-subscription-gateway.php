@@ -46,10 +46,14 @@ function alorbach_load_textdomain() {
 
 add_action( 'init', array( 'Alorbach\AIGateway\Ledger', 'maybe_upgrade' ), 5 );
 add_action( 'init', array( 'Alorbach\AIGateway\Admin\Admin_Settings', 'maybe_migrate_general_defaults' ), 6 );
+add_action( 'init', array( 'Alorbach\AIGateway\Image_Jobs', 'ensure_cleanup_scheduled' ), 7 );
+add_action( 'admin_post_alorbach_image_job_asset', array( 'Alorbach\AIGateway\Image_Jobs', 'serve_asset_request' ) );
+add_action( \Alorbach\AIGateway\Image_Jobs::CLEANUP_HOOK, array( 'Alorbach\AIGateway\Image_Jobs', 'cleanup_expired_assets' ) );
 
 register_activation_hook( __FILE__, 'alorbach_activate' );
 function alorbach_activate() {
 	Alorbach\AIGateway\Ledger::create_table();
+	Alorbach\AIGateway\Image_Jobs::ensure_cleanup_scheduled();
 	if ( apply_filters( 'alorbach_create_sample_pages_on_activation', false ) ) {
 		Alorbach\AIGateway\Admin\Admin_Demo_Defaults::create_sample_pages();
 	}
@@ -58,6 +62,7 @@ function alorbach_activate() {
 register_deactivation_hook( __FILE__, 'alorbach_deactivate' );
 function alorbach_deactivate() {
 	wp_clear_scheduled_hook( 'alorbach_retry_wc_renewal' );
+	wp_clear_scheduled_hook( \Alorbach\AIGateway\Image_Jobs::CLEANUP_HOOK );
 }
 
 // Register Codex OAuth provider after the registry is initialised.

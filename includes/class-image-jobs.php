@@ -24,6 +24,20 @@ class Image_Jobs {
 	const JOB_TRANSIENT_PREFIX = 'alorbach_image_job_';
 
 	/**
+	 * Asset reference transient prefix.
+	 *
+	 * @var string
+	 */
+	const JOB_ASSET_TRANSIENT_PREFIX = 'alorbach_image_job_assets_';
+
+	/**
+	 * Prompt transient prefix.
+	 *
+	 * @var string
+	 */
+	const JOB_PROMPT_TRANSIENT_PREFIX = 'alorbach_image_job_prompts_';
+
+	/**
 	 * Option name used to track recent job ids.
 	 *
 	 * @var string
@@ -45,6 +59,62 @@ class Image_Jobs {
 	const JOB_INDEX_LIMIT = 200;
 
 	/**
+	 * Default age in seconds after which an in-progress job is treated as stalled.
+	 *
+	 * @var int
+	 */
+	const JOB_STALLED_SECONDS = 180;
+
+	/**
+	 * Cron hook used to purge expired intermediate assets.
+	 *
+	 * @var string
+	 */
+	const CLEANUP_HOOK = 'alorbach_cleanup_image_job_assets';
+
+	/**
+	 * Attachment meta key for the owning job id.
+	 *
+	 * @var string
+	 */
+	const ATTACHMENT_META_JOB_ID = '_alorbach_image_job_id';
+
+	/**
+	 * Attachment meta key for the stored asset role.
+	 *
+	 * @var string
+	 */
+	const ATTACHMENT_META_ROLE = '_alorbach_image_job_asset_role';
+
+	/**
+	 * Attachment meta key for the asset owner.
+	 *
+	 * @var string
+	 */
+	const ATTACHMENT_META_USER_ID = '_alorbach_image_job_user_id';
+
+	/**
+	 * Attachment meta key for the stored source hash.
+	 *
+	 * @var string
+	 */
+	const ATTACHMENT_META_SOURCE_HASH = '_alorbach_image_job_source_hash';
+
+	/**
+	 * Attachment meta key for the asset creation timestamp.
+	 *
+	 * @var string
+	 */
+	const ATTACHMENT_META_CREATED_AT = '_alorbach_image_job_created_at';
+
+	/**
+	 * Preview/reference retention window in seconds.
+	 *
+	 * @var int
+	 */
+	const PREVIEW_RETENTION_SECONDS = DAY_IN_SECONDS;
+
+	/**
 	 * Create an async image generation job.
 	 *
 	 * @param int   $user_id User ID.
@@ -63,7 +133,9 @@ class Image_Jobs {
 		$model           = isset( $args['model'] ) && $args['model'] ? sanitize_text_field( $args['model'] ) : get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality         = isset( $args['quality'] ) && $args['quality'] ? sanitize_text_field( $args['quality'] ) : get_option( 'alorbach_image_default_quality', 'medium' );
 		$n               = isset( $args['n'] ) ? max( 1, min( 10, (int) $args['n'] ) ) : 1;
-		$reference_images = isset( $args['reference_images'] ) && is_array( $args['reference_images'] ) ? array_values( array_filter( $args['reference_images'], 'is_array' ) ) : array();
+		$reference_images = self::normalize_reference_images(
+			isset( $args['reference_images'] ) && is_array( $args['reference_images'] ) ? $args['reference_images'] : array()
+		);
 
 		if ( '' === $original_prompt ) {
 			$original_prompt = $prompt;
@@ -109,15 +181,13 @@ class Image_Jobs {
 			'progress_percent'   => 10,
 			'progress_mode'      => $progress_mode,
 			'supports_previews'  => $supports_previews,
-			'preview_images'     => array(),
-			'final_images'       => array(),
-			'prompt'             => $prompt,
-			'original_prompt'    => $original_prompt,
 			'size'               => $size,
 			'n'                  => $n,
 			'quality'            => $quality,
 			'model'              => $model,
-			'reference_images'   => $reference_images,
+			'preview_count'      => 0,
+			'final_count'        => 0,
+			'reference_count'    => count( $reference_images ),
 			'cost_uc'            => $cost,
 			'cost_credits'       => User_Display::uc_to_credits( $cost ),
 			'cost_usd'           => User_Display::uc_to_usd( $cost ),
@@ -131,10 +201,21 @@ class Image_Jobs {
 			'updated_at'         => time(),
 		);
 
-		self::save_job( $job );
+		self::save_full_job(
+			$job,
+			array(
+				'preview_images'   => array(),
+				'final_images'     => array(),
+				'reference_images' => $reference_images,
+			),
+			array(
+				'prompt'          => $prompt,
+				'original_prompt' => $original_prompt,
+			)
+		);
 		self::dispatch_job( $job );
 
-		return self::public_job_payload( $job, false );
+		return self::public_job_payload( self::hydrate_public_job( $job ), false );
 	}
 
 	/**
@@ -150,9 +231,8 @@ class Image_Jobs {
 
 		$job['dispatched_at'] = time();
 		$job['updated_at']    = time();
-		self::save_job( $job );
+		self::save_job( self::strip_heavy_job_fields( $job ) );
 
-		$url = self::get_internal_process_url();
 		$body = wp_json_encode(
 			array(
 				'job_id' => $job['job_id'],
@@ -160,38 +240,109 @@ class Image_Jobs {
 			)
 		);
 
-		if ( self::send_fire_and_forget_request( $url, $body ) ) {
-			return;
+		foreach ( self::get_internal_process_urls() as $url ) {
+			if ( self::send_fire_and_forget_request( $url, $body ) ) {
+				self::log_job_diagnostic(
+					'dispatch_job_socket_success',
+					array(
+						'job_id' => (string) $job['job_id'],
+						'url'    => (string) $url,
+					)
+				);
+				return;
+			}
+
+			self::log_job_diagnostic(
+				'dispatch_job_socket_failed',
+				array(
+					'job_id' => (string) $job['job_id'],
+					'url'    => (string) $url,
+				)
+			);
 		}
 
-		wp_remote_post(
-			$url,
-			array(
-				'timeout'  => 1,
-				'blocking' => false,
-				'headers'  => array(
-					'Content-Type' => 'application/json',
-				),
-				'body'     => $body,
-			)
-		);
+		foreach ( self::get_internal_process_urls() as $url ) {
+			$response = wp_remote_post(
+				$url,
+				array(
+					'timeout'  => 1,
+					'blocking' => false,
+					'headers'  => array(
+						'Content-Type' => 'application/json',
+					),
+					'body'     => $body,
+				)
+			);
+
+			if ( ! is_wp_error( $response ) ) {
+				self::log_job_diagnostic(
+					'dispatch_job_http_success',
+					array(
+						'job_id' => (string) $job['job_id'],
+						'url'    => (string) $url,
+					)
+				);
+				return;
+			}
+
+			self::log_job_diagnostic(
+				'dispatch_job_http_failed',
+				array(
+					'job_id'  => (string) $job['job_id'],
+					'url'     => (string) $url,
+					'message' => $response->get_error_message(),
+				)
+			);
+		}
 	}
 
 	/**
-	 * Build an internal loopback URL for processing jobs.
+	 * Build candidate internal loopback URLs for processing jobs.
 	 *
-	 * Uses the local web server port instead of the public site URL so
-	 * containerized environments can reach the same WordPress instance.
+	 * Web requests can usually use 127.0.0.1, but CLI runs inside wp-env hit a
+	 * separate container where the web server is instead reachable as
+	 * "wordpress". We try a small ordered candidate set and let the transport
+	 * pick the first reachable target.
 	 *
-	 * @return string
+	 * @return string[]
 	 */
-	private static function get_internal_process_url() {
+	private static function get_internal_process_urls() {
 		$scheme = is_ssl() ? 'https' : 'http';
 		$path   = wp_parse_url( home_url( '/' ), PHP_URL_PATH );
 		$path   = is_string( $path ) ? rtrim( $path, '/' ) : '';
-		$url    = $scheme . '://127.0.0.1';
+		$route  = $path . '/index.php?rest_route=/alorbach/v1/internal/images/jobs/process';
+		$hosts  = array( '127.0.0.1' );
 
-		return $url . $path . '/index.php?rest_route=/alorbach/v1/internal/images/jobs/process';
+		if ( defined( 'WP_CLI' ) && WP_CLI ) {
+			array_unshift( $hosts, 'wordpress' );
+		}
+
+		$site_host = wp_parse_url( home_url( '/' ), PHP_URL_HOST );
+		$site_host = is_string( $site_host ) ? trim( $site_host ) : '';
+		if ( '' !== $site_host ) {
+			$hosts[] = $site_host;
+		}
+
+		$hosts = apply_filters( 'alorbach_image_job_internal_hosts', $hosts );
+		if ( ! is_array( $hosts ) ) {
+			$hosts = array( '127.0.0.1' );
+		}
+
+		$hosts = array_values(
+			array_unique(
+				array_filter(
+					array_map(
+						static fn( $host ) => is_string( $host ) ? trim( $host ) : '',
+						$hosts
+					)
+				)
+			)
+		);
+
+		return array_map(
+			static fn( $host ) => $scheme . '://' . $host . $route,
+			$hosts
+		);
 	}
 
 	/**
@@ -249,7 +400,7 @@ class Image_Jobs {
 	 * @return array|WP_Error
 	 */
 	public static function process_job( $job_id, $token, $on_update = null ) {
-		$job = self::get_job( $job_id );
+		$job = self::get_full_job( $job_id );
 		if ( ! $job ) {
 			return new \WP_Error( 'job_not_found', __( 'Image job not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
 		}
@@ -266,9 +417,25 @@ class Image_Jobs {
 		$job['supports_previews'] = empty( $job['reference_images'] ) && API_Client::supports_partial_image_streaming( $job['model'] );
 		$job['progress_mode']     = $job['supports_previews'] ? 'provider' : 'estimated';
 		$job['updated_at']        = time();
-		self::save_job( $job );
+		self::save_full_job( $job );
 		if ( is_callable( $on_update ) ) {
 			call_user_func( $on_update, self::public_job_payload( $job ) );
+		}
+
+		$provider_reference_images = self::build_provider_reference_images(
+			isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array()
+		);
+		if ( is_wp_error( $provider_reference_images ) ) {
+			$job['status']           = 'failed';
+			$job['progress_stage']   = 'failed';
+			$job['progress_percent'] = 0;
+			$job['error']            = $provider_reference_images->get_error_message();
+			$job['updated_at']       = time();
+			self::save_full_job( $job );
+			if ( is_callable( $on_update ) ) {
+				call_user_func( $on_update, self::public_job_payload( $job ) );
+			}
+			return $provider_reference_images;
 		}
 
 		if ( ! empty( $job['supports_previews'] ) ) {
@@ -285,13 +452,19 @@ class Image_Jobs {
 					}
 
 					if ( $event['type'] === 'preview_image' ) {
-						$job['preview_images']   = self::merge_images( $job['preview_images'], $event['images'] );
+						$job['preview_images']   = self::append_asset_items(
+							$job['preview_images'],
+							$event['images'],
+							(string) $job['job_id'],
+							(int) $job['user_id'],
+							'preview'
+						);
 						$preview_count           = count( $job['preview_images'] );
 						$job['status']           = 'in_progress';
 						$job['progress_stage']   = $preview_count >= 3 ? 'finalizing' : ( $preview_count === 2 ? 'refining' : 'drafting' );
 						$job['progress_percent'] = $preview_count >= 3 ? 90 : ( $preview_count === 2 ? 75 : 55 );
 						$job['updated_at']       = time();
-						self::save_job( $job );
+						self::save_full_job( $job );
 						if ( is_callable( $on_update ) ) {
 							call_user_func( $on_update, self::public_job_payload( $job ) );
 						}
@@ -299,17 +472,23 @@ class Image_Jobs {
 					}
 
 					if ( $event['type'] === 'final_image' ) {
-						$job['final_images']     = self::merge_images( $job['final_images'], $event['images'] );
+						$job['final_images']     = self::append_asset_items(
+							$job['final_images'],
+							$event['images'],
+							(string) $job['job_id'],
+							(int) $job['user_id'],
+							'final'
+						);
 						$job['progress_stage']   = 'finalizing';
 						$job['progress_percent'] = 95;
 						$job['updated_at']       = time();
-						self::save_job( $job );
+						self::save_full_job( $job );
 						if ( is_callable( $on_update ) ) {
 							call_user_func( $on_update, self::public_job_payload( $job ) );
 						}
 					}
 				},
-				isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array()
+				$provider_reference_images
 			);
 		} else {
 			$response = API_Client::images(
@@ -319,7 +498,7 @@ class Image_Jobs {
 				$job['model'],
 				$job['quality'],
 				null,
-				isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array()
+				$provider_reference_images
 			);
 		}
 
@@ -329,7 +508,7 @@ class Image_Jobs {
 			$job['progress_percent'] = 0;
 			$job['error']            = $response->get_error_message();
 			$job['updated_at']       = time();
-			self::save_job( $job );
+			self::save_full_job( $job );
 			if ( is_callable( $on_update ) ) {
 				call_user_func( $on_update, self::public_job_payload( $job ) );
 			}
@@ -339,8 +518,22 @@ class Image_Jobs {
 		$job['status']         = 'completed';
 		$job['progress_stage'] = 'completed';
 		$job['progress_percent'] = 100;
-		$job['final_images']   = isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array();
-		$job['preview_images'] = isset( $response['preview_images'] ) && is_array( $response['preview_images'] ) ? self::merge_images( $job['preview_images'], $response['preview_images'] ) : $job['preview_images'];
+		$job['final_images']   = self::append_asset_items(
+			array(),
+			isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array(),
+			(string) $job['job_id'],
+			(int) $job['user_id'],
+			'final'
+		);
+		$job['preview_images'] = isset( $response['preview_images'] ) && is_array( $response['preview_images'] )
+			? self::append_asset_items(
+				$job['preview_images'],
+				$response['preview_images'],
+				(string) $job['job_id'],
+				(int) $job['user_id'],
+				'preview'
+			)
+			: $job['preview_images'];
 		$job['updated_at']     = time();
 
 		if ( empty( $job['final_images'] ) ) {
@@ -348,7 +541,7 @@ class Image_Jobs {
 			$job['progress_stage']   = 'failed';
 			$job['progress_percent'] = 0;
 			$job['error']            = __( 'Image generation returned no images.', 'alorbach-ai-gateway' );
-			self::save_job( $job );
+			self::save_full_job( $job );
 			if ( is_callable( $on_update ) ) {
 				call_user_func( $on_update, self::public_job_payload( $job ) );
 			}
@@ -371,7 +564,7 @@ class Image_Jobs {
 			$job['deduction_applied'] = true;
 		}
 
-		self::save_job( $job );
+		self::save_full_job( $job );
 		if ( is_callable( $on_update ) ) {
 			call_user_func( $on_update, self::public_job_payload( $job ) );
 		}
@@ -386,7 +579,7 @@ class Image_Jobs {
 	 * @return array|null
 	 */
 	public static function get_job_for_user( $job_id, $user_id ) {
-		$job = self::get_job( $job_id );
+		$job = self::get_full_job( $job_id );
 		if ( ! $job || (int) $job['user_id'] !== (int) $user_id ) {
 			return null;
 		}
@@ -399,8 +592,13 @@ class Image_Jobs {
 	 * @param string $job_id Job ID.
 	 * @return array|null
 	 */
-	public static function get_job_for_admin( $job_id ) {
-		return self::get_job( $job_id );
+	public static function get_job_for_admin( $job_id, $include_images = false ) {
+		$job = self::get_job( $job_id );
+		if ( ! $job ) {
+			return null;
+		}
+
+		return self::hydrate_admin_job( $job, $include_images );
 	}
 
 	/**
@@ -422,9 +620,6 @@ class Image_Jobs {
 			if ( ! $job ) {
 				continue;
 			}
-			$job['preview_count'] = isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? count( $job['preview_images'] ) : 0;
-			$job['final_count']   = isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? count( $job['final_images'] ) : 0;
-			unset( $job['preview_images'], $job['final_images'], $job['prompt'], $job['original_prompt'], $job['error'] );
 			$jobs[]                = $job;
 			$valid_index[ $job_id ] = (int) ( $job['updated_at'] ?? $updated_at );
 			if ( count( $jobs ) >= $limit ) {
@@ -495,16 +690,20 @@ class Image_Jobs {
 			'progress_percent'    => (int) ( $job['progress_percent'] ?? 0 ),
 			'progress_mode'       => (string) ( $job['progress_mode'] ?? 'estimated' ),
 			'supports_previews'   => ! empty( $job['supports_previews'] ),
-			'prompt'              => (string) ( $job['prompt'] ?? '' ),
-			'original_prompt'     => (string) ( $job['original_prompt'] ?? ( $job['prompt'] ?? '' ) ),
 			'model'               => (string) ( $job['model'] ?? '' ),
 			'size'                => (string) ( $job['size'] ?? '' ),
 			'quality'             => (string) ( $job['quality'] ?? '' ),
 			'n'                   => (int) ( $job['n'] ?? 1 ),
+			'prompt'              => (string) ( $job['prompt'] ?? '' ),
+			'original_prompt'     => (string) ( $job['original_prompt'] ?? ( $job['prompt'] ?? '' ) ),
 			'preview_images'      => isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? $job['preview_images'] : array(),
 			'final_images'        => isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? $job['final_images'] : array(),
-			'preview_count'       => isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? count( $job['preview_images'] ) : 0,
-			'final_count'         => isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? count( $job['final_images'] ) : 0,
+			'reference_images'    => isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array(),
+			'preview_count'       => (int) ( $job['preview_count'] ?? 0 ),
+			'final_count'         => (int) ( $job['final_count'] ?? 0 ),
+			'reference_count'     => (int) ( $job['reference_count'] ?? 0 ),
+			'images_included'     => ! empty( $job['images_included'] ),
+			'images_error'        => (string) ( $job['images_error'] ?? '' ),
 			'cost_uc'             => (int) ( $job['cost_uc'] ?? 0 ),
 			'cost_credits'        => $cost_credits,
 			'cost_credits_label'  => number_format_i18n( $cost_credits, 2 ) . ' Credits ($' . number_format_i18n( $cost_usd, 2 ) . ')',
@@ -548,8 +747,8 @@ class Image_Jobs {
 			'size'               => (string) ( $job['size'] ?? '' ),
 			'quality'            => (string) ( $job['quality'] ?? '' ),
 			'n'                  => (int) ( $job['n'] ?? 1 ),
-			'preview_count'      => isset( $job['preview_count'] ) ? (int) $job['preview_count'] : ( isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? count( $job['preview_images'] ) : 0 ),
-			'final_count'        => isset( $job['final_count'] ) ? (int) $job['final_count'] : ( isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? count( $job['final_images'] ) : 0 ),
+			'preview_count'      => (int) ( $job['preview_count'] ?? 0 ),
+			'final_count'        => (int) ( $job['final_count'] ?? 0 ),
 			'cost_uc'            => (int) ( $job['cost_uc'] ?? 0 ),
 			'cost_credits'       => $cost_credits,
 			'cost_credits_label' => number_format_i18n( $cost_credits, 2 ) . ' Credits ($' . number_format_i18n( $cost_usd, 2 ) . ')',
@@ -571,6 +770,8 @@ class Image_Jobs {
 	 * @return array
 	 */
 	public static function public_job_payload( $job, $include_internal = false ) {
+		$job = self::hydrate_public_job( $job );
+
 		$payload = array(
 			'job_id'             => $job['job_id'],
 			'status'             => $job['status'],
@@ -605,8 +806,54 @@ class Image_Jobs {
 	 * @return array|null
 	 */
 	private static function get_job( $job_id ) {
+		self::invalidate_transient_option_caches( self::JOB_TRANSIENT_PREFIX . $job_id );
 		$job = get_transient( self::JOB_TRANSIENT_PREFIX . $job_id );
-		return is_array( $job ) ? $job : null;
+		if ( ! is_array( $job ) ) {
+			return null;
+		}
+
+		if ( self::job_has_legacy_heavy_fields( $job ) ) {
+			$job = self::migrate_legacy_job_storage( $job );
+		}
+
+		if ( self::is_job_stalled( $job ) ) {
+			$job['status']           = 'failed';
+			$job['progress_stage']   = 'failed';
+			$job['progress_percent'] = 0;
+			$job['error']            = __( 'Image generation timed out before a final image was received. Please retry the request.', 'alorbach-ai-gateway' );
+			$job['updated_at']       = time();
+			self::save_job( $job );
+		}
+
+		return $job;
+	}
+
+	/**
+	 * Whether a job has been left in progress long enough to treat it as stalled.
+	 *
+	 * @param array $job Raw job data.
+	 * @return bool
+	 */
+	private static function is_job_stalled( $job ) {
+		if ( ! is_array( $job ) || ( $job['status'] ?? '' ) !== 'in_progress' ) {
+			return false;
+		}
+
+		if ( (int) ( $job['final_count'] ?? 0 ) > 0 ) {
+			return false;
+		}
+
+		$updated_at = isset( $job['updated_at'] ) ? (int) $job['updated_at'] : 0;
+		if ( $updated_at <= 0 ) {
+			return false;
+		}
+
+		$timeout = max(
+			30,
+			(int) apply_filters( 'alorbach_image_job_stalled_seconds', self::JOB_STALLED_SECONDS )
+		);
+
+		return ( time() - $updated_at ) >= $timeout;
 	}
 
 	/**
@@ -621,24 +868,964 @@ class Image_Jobs {
 	}
 
 	/**
-	 * Merge image items while preserving uniqueness.
+	 * Save a full job by splitting compact state, image assets, and prompts.
 	 *
-	 * @param array $existing Existing image items.
-	 * @param array $incoming Incoming image items.
+	 * @param array      $job     Job state.
+	 * @param array|null $assets  Optional explicit assets override.
+	 * @param array|null $prompts Optional explicit prompt override.
+	 * @return void
+	 */
+	private static function save_full_job( $job, $assets = null, $prompts = null ) {
+		$job_id = (string) ( $job['job_id'] ?? '' );
+		if ( '' === $job_id ) {
+			return;
+		}
+
+		$assets  = is_array( $assets ) ? $assets : self::extract_asset_payload( $job );
+		$assets  = self::prepare_assets_for_storage( $job_id, (int) ( $job['user_id'] ?? 0 ), $assets );
+		$prompts = is_array( $prompts ) ? $prompts : self::extract_prompt_payload( $job );
+
+		$job['preview_count']   = count( isset( $assets['preview_images'] ) && is_array( $assets['preview_images'] ) ? $assets['preview_images'] : array() );
+		$job['final_count']     = count( isset( $assets['final_images'] ) && is_array( $assets['final_images'] ) ? $assets['final_images'] : array() );
+		$job['reference_count'] = count( isset( $assets['reference_images'] ) && is_array( $assets['reference_images'] ) ? $assets['reference_images'] : array() );
+
+		self::save_job( self::strip_heavy_job_fields( $job ) );
+		self::save_job_assets( $job_id, $assets );
+		self::save_job_prompts( $job_id, $prompts );
+		self::log_job_diagnostic(
+			'saved_compact_job',
+			array(
+				'job_id'        => $job_id,
+				'compact_bytes' => strlen( wp_json_encode( self::strip_heavy_job_fields( $job ) ) ),
+				'asset_bytes'   => strlen( wp_json_encode( $assets ) ),
+				'prompt_bytes'  => strlen( wp_json_encode( $prompts ) ),
+			)
+		);
+	}
+
+	/**
+	 * Get a full job with prompts and image assets.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return array|null
+	 */
+	private static function get_full_job( $job_id ) {
+		$job = self::get_job( $job_id );
+		if ( ! $job ) {
+			return null;
+		}
+
+		return array_merge(
+			$job,
+			self::get_stored_job_assets( $job_id ),
+			self::get_job_prompts( $job_id )
+		);
+	}
+
+	/**
+	 * Build an admin-focused job payload, optionally loading heavy image data.
+	 *
+	 * @param array $job            Compact job.
+	 * @param bool  $include_images Whether to include heavy images.
 	 * @return array
 	 */
-	private static function merge_images( $existing, $incoming ) {
-		$seen = array();
-		$merged = array();
-		foreach ( array_merge( $existing, $incoming ) as $item ) {
-			$hash = md5( wp_json_encode( $item ) );
-			if ( isset( $seen[ $hash ] ) ) {
+	private static function hydrate_admin_job( $job, $include_images ) {
+		$job = array_merge( $job, self::get_job_prompts( (string) $job['job_id'] ) );
+		$job['preview_images']   = array();
+		$job['final_images']     = array();
+		$job['reference_images'] = array();
+		$job['images_included']  = false;
+		$job['images_error']     = '';
+
+		if ( $include_images ) {
+			$job = array_merge( $job, self::get_job_assets_for_payload( (string) $job['job_id'] ) );
+			$job['images_included'] = true;
+		}
+
+		return $job;
+	}
+
+	/**
+	 * Ensure public job payloads still contain live image arrays.
+	 *
+	 * @param array $job Compact or full job.
+	 * @return array
+	 */
+	private static function hydrate_public_job( $job ) {
+		if ( isset( $job['preview_images'], $job['final_images'] ) ) {
+			$job['preview_images']   = self::prepare_asset_refs_for_payload( (string) ( $job['job_id'] ?? '' ), isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? $job['preview_images'] : array() );
+			$job['final_images']     = self::prepare_asset_refs_for_payload( (string) ( $job['job_id'] ?? '' ), isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? $job['final_images'] : array() );
+			$job['reference_images'] = self::prepare_asset_refs_for_payload( (string) ( $job['job_id'] ?? '' ), isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array() );
+			return $job;
+		}
+
+		return array_merge( $job, self::get_job_assets_for_payload( (string) $job['job_id'] ) );
+	}
+
+	/**
+	 * Determine whether a job still uses legacy all-in-one storage.
+	 *
+	 * @param array $job Job data.
+	 * @return bool
+	 */
+	private static function job_has_legacy_heavy_fields( $job ) {
+		return isset( $job['preview_images'] ) || isset( $job['final_images'] ) || isset( $job['reference_images'] ) || isset( $job['prompt'] ) || isset( $job['original_prompt'] );
+	}
+
+	/**
+	 * Migrate a legacy raw job into compact + separated storage.
+	 *
+	 * @param array $job Legacy job data.
+	 * @return array
+	 */
+	private static function migrate_legacy_job_storage( $job ) {
+		self::save_full_job( $job );
+		self::log_job_diagnostic(
+			'migrated_legacy_job_storage',
+			array(
+				'job_id' => (string) ( $job['job_id'] ?? '' ),
+			)
+		);
+
+		return self::strip_heavy_job_fields( $job );
+	}
+
+	/**
+	 * Remove heavy fields from a job before saving compact metadata.
+	 *
+	 * @param array $job Job data.
+	 * @return array
+	 */
+	private static function strip_heavy_job_fields( $job ) {
+		unset( $job['preview_images'], $job['final_images'], $job['reference_images'], $job['prompt'], $job['original_prompt'], $job['images_included'], $job['images_error'] );
+		return $job;
+	}
+
+	/**
+	 * Extract image assets from a full job.
+	 *
+	 * @param array $job Job data.
+	 * @return array
+	 */
+	private static function extract_asset_payload( $job ) {
+		return array(
+			'preview_images'   => isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? array_values( $job['preview_images'] ) : array(),
+			'final_images'     => isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? array_values( $job['final_images'] ) : array(),
+			'reference_images' => isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? array_values( $job['reference_images'] ) : array(),
+		);
+	}
+
+	/**
+	 * Extract prompt payload from a full job.
+	 *
+	 * @param array $job Job data.
+	 * @return array
+	 */
+	private static function extract_prompt_payload( $job ) {
+		return array(
+			'prompt'          => (string) ( $job['prompt'] ?? '' ),
+			'original_prompt' => (string) ( $job['original_prompt'] ?? ( $job['prompt'] ?? '' ) ),
+		);
+	}
+
+	/**
+	 * Save image assets for one job.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $assets Asset payload.
+	 * @return void
+	 */
+	private static function save_job_assets( $job_id, $assets ) {
+		set_transient(
+			self::JOB_ASSET_TRANSIENT_PREFIX . $job_id,
+			array(
+				'preview_images'   => isset( $assets['preview_images'] ) && is_array( $assets['preview_images'] ) ? array_values( $assets['preview_images'] ) : array(),
+				'final_images'     => isset( $assets['final_images'] ) && is_array( $assets['final_images'] ) ? array_values( $assets['final_images'] ) : array(),
+				'reference_images' => isset( $assets['reference_images'] ) && is_array( $assets['reference_images'] ) ? array_values( $assets['reference_images'] ) : array(),
+			),
+			self::JOB_TTL
+		);
+	}
+
+	/**
+	 * Load image assets for one job.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return array
+	 */
+	private static function get_stored_job_assets( $job_id ) {
+		self::invalidate_transient_option_caches( self::JOB_ASSET_TRANSIENT_PREFIX . $job_id );
+		$assets = get_transient( self::JOB_ASSET_TRANSIENT_PREFIX . $job_id );
+		if ( ! is_array( $assets ) ) {
+			return array(
+				'preview_images'   => array(),
+				'final_images'     => array(),
+				'reference_images' => array(),
+			);
+		}
+
+		if ( self::assets_need_migration( $assets ) ) {
+			$job         = self::get_job( $job_id );
+			$user_id     = (int) ( $job['user_id'] ?? 0 );
+			$assets      = self::prepare_assets_for_storage( $job_id, $user_id, $assets );
+			self::save_job_assets( $job_id, $assets );
+			self::log_job_diagnostic(
+				'migrated_legacy_job_assets',
+				array(
+					'job_id' => $job_id,
+				)
+			);
+		}
+
+		$assets = self::prune_missing_asset_refs( $job_id, $assets );
+
+		return array(
+			'preview_images'   => isset( $assets['preview_images'] ) && is_array( $assets['preview_images'] ) ? array_values( $assets['preview_images'] ) : array(),
+			'final_images'     => isset( $assets['final_images'] ) && is_array( $assets['final_images'] ) ? array_values( $assets['final_images'] ) : array(),
+			'reference_images' => isset( $assets['reference_images'] ) && is_array( $assets['reference_images'] ) ? array_values( $assets['reference_images'] ) : array(),
+		);
+	}
+
+	/**
+	 * Load payload-ready image assets for one job.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return array
+	 */
+	private static function get_job_assets_for_payload( $job_id ) {
+		$assets = self::get_stored_job_assets( $job_id );
+
+		return array(
+			'preview_images'   => self::prepare_asset_refs_for_payload( $job_id, isset( $assets['preview_images'] ) && is_array( $assets['preview_images'] ) ? $assets['preview_images'] : array() ),
+			'final_images'     => self::prepare_asset_refs_for_payload( $job_id, isset( $assets['final_images'] ) && is_array( $assets['final_images'] ) ? $assets['final_images'] : array() ),
+			'reference_images' => self::prepare_asset_refs_for_payload( $job_id, isset( $assets['reference_images'] ) && is_array( $assets['reference_images'] ) ? $assets['reference_images'] : array() ),
+		);
+	}
+
+	/**
+	 * Save prompt fields for one job.
+	 *
+	 * @param string $job_id  Job ID.
+	 * @param array  $prompts Prompt payload.
+	 * @return void
+	 */
+	private static function save_job_prompts( $job_id, $prompts ) {
+		set_transient(
+			self::JOB_PROMPT_TRANSIENT_PREFIX . $job_id,
+			array(
+				'prompt'          => (string) ( $prompts['prompt'] ?? '' ),
+				'original_prompt' => (string) ( $prompts['original_prompt'] ?? ( $prompts['prompt'] ?? '' ) ),
+			),
+			self::JOB_TTL
+		);
+	}
+
+	/**
+	 * Load prompt fields for one job.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return array
+	 */
+	private static function get_job_prompts( $job_id ) {
+		self::invalidate_transient_option_caches( self::JOB_PROMPT_TRANSIENT_PREFIX . $job_id );
+		$prompts = get_transient( self::JOB_PROMPT_TRANSIENT_PREFIX . $job_id );
+		if ( ! is_array( $prompts ) ) {
+			return array(
+				'prompt'          => '',
+				'original_prompt' => '',
+			);
+		}
+
+		return array(
+			'prompt'          => (string) ( $prompts['prompt'] ?? '' ),
+			'original_prompt' => (string) ( $prompts['original_prompt'] ?? ( $prompts['prompt'] ?? '' ) ),
+		);
+	}
+
+	/**
+	 * Normalize reference images before saving them in transient storage.
+	 *
+	 * @param array $reference_images Raw reference images.
+	 * @return array
+	 */
+	private static function normalize_reference_images( $reference_images ) {
+		$normalized = array();
+
+		foreach ( $reference_images as $item ) {
+			if ( ! is_array( $item ) ) {
 				continue;
 			}
-			$seen[ $hash ] = true;
-			$merged[] = $item;
+
+			$normalized_item = array();
+			if ( isset( $item['url'] ) && is_string( $item['url'] ) && '' !== $item['url'] ) {
+				$normalized_item['url'] = esc_url_raw( $item['url'] );
+			}
+			if ( isset( $item['b64_json'] ) && is_string( $item['b64_json'] ) && '' !== $item['b64_json'] ) {
+				$normalized_item['b64_json'] = preg_replace( '/\s+/', '', $item['b64_json'] );
+			}
+			if ( isset( $item['mime_type'] ) && is_string( $item['mime_type'] ) && '' !== $item['mime_type'] ) {
+				$normalized_item['mime_type'] = sanitize_text_field( $item['mime_type'] );
+			}
+			if ( ! empty( $normalized_item ) ) {
+				$normalized[] = $normalized_item;
+			}
 		}
-		return $merged;
+
+		return $normalized;
+	}
+
+	/**
+	 * Determine whether an asset payload still contains legacy raw image items.
+	 *
+	 * @param array $assets Stored asset payload.
+	 * @return bool
+	 */
+	private static function assets_need_migration( $assets ) {
+		foreach ( array( 'preview_images', 'final_images', 'reference_images' ) as $key ) {
+			$items = isset( $assets[ $key ] ) && is_array( $assets[ $key ] ) ? $assets[ $key ] : array();
+			foreach ( $items as $item ) {
+				if ( ! self::is_asset_ref( $item ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Convert raw image items or legacy payloads into compact stored attachment refs.
+	 *
+	 * @param string $job_id   Job ID.
+	 * @param int    $user_id  Owner user ID.
+	 * @param array  $assets   Asset payload.
+	 * @return array
+	 */
+	private static function prepare_assets_for_storage( $job_id, $user_id, $assets ) {
+		$prepared = array(
+			'preview_images'   => array(),
+			'final_images'     => array(),
+			'reference_images' => array(),
+		);
+
+		foreach ( array( 'preview_images' => 'preview', 'final_images' => 'final', 'reference_images' => 'reference' ) as $key => $role ) {
+			$prepared[ $key ] = self::prepare_asset_collection_for_storage(
+				$job_id,
+				$user_id,
+				isset( $assets[ $key ] ) && is_array( $assets[ $key ] ) ? $assets[ $key ] : array(),
+				$role
+			);
+		}
+
+		return $prepared;
+	}
+
+	/**
+	 * Convert a set of items into stored attachment refs for one role.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param int    $user_id User ID.
+	 * @param array  $items Items or refs.
+	 * @param string $role Asset role.
+	 * @return array
+	 */
+	private static function prepare_asset_collection_for_storage( $job_id, $user_id, $items, $role ) {
+		$prepared = array();
+		$seen     = array();
+
+		foreach ( $items as $item ) {
+			$ref = self::normalize_asset_ref_or_create_attachment( $job_id, $user_id, $item, $role );
+			if ( empty( $ref ) || empty( $ref['attachment_id'] ) ) {
+				continue;
+			}
+
+			$dedupe_key = ! empty( $ref['source_hash'] ) ? (string) $ref['source_hash'] : 'attachment:' . (int) $ref['attachment_id'];
+			if ( isset( $seen[ $dedupe_key ] ) ) {
+				continue;
+			}
+
+			$seen[ $dedupe_key ] = true;
+			$prepared[]          = $ref;
+		}
+
+		return array_values( $prepared );
+	}
+
+	/**
+	 * Append provider image items to an existing set of stored refs.
+	 *
+	 * @param array  $existing Existing refs.
+	 * @param array  $incoming Incoming raw image items.
+	 * @param string $job_id Job ID.
+	 * @param int    $user_id User ID.
+	 * @param string $role Asset role.
+	 * @return array
+	 */
+	private static function append_asset_items( $existing, $incoming, $job_id, $user_id, $role ) {
+		return self::prepare_asset_collection_for_storage(
+			$job_id,
+			$user_id,
+			array_merge(
+				is_array( $existing ) ? $existing : array(),
+				is_array( $incoming ) ? $incoming : array()
+			),
+			$role
+		);
+	}
+
+	/**
+	 * Determine whether one item is already a stored asset ref.
+	 *
+	 * @param mixed $item Asset item.
+	 * @return bool
+	 */
+	private static function is_asset_ref( $item ) {
+		return is_array( $item ) && ! empty( $item['attachment_id'] ) && is_numeric( $item['attachment_id'] );
+	}
+
+	/**
+	 * Normalize a stored ref or create a new attachment for a raw image item.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param int    $user_id User ID.
+	 * @param mixed  $item Asset item or ref.
+	 * @param string $role Asset role.
+	 * @return array
+	 */
+	private static function normalize_asset_ref_or_create_attachment( $job_id, $user_id, $item, $role ) {
+		if ( ! is_array( $item ) ) {
+			return array();
+		}
+
+		if ( self::is_asset_ref( $item ) ) {
+			return self::sanitize_asset_ref( $job_id, $item, $role );
+		}
+
+		$attachment_id = self::create_attachment_from_image_item( $job_id, $user_id, $item, $role );
+		if ( $attachment_id <= 0 ) {
+			return array();
+		}
+
+		return self::build_stored_asset_ref( $job_id, $attachment_id, $role, self::image_item_source_hash( $item ) );
+	}
+
+	/**
+	 * Sanitize one stored asset ref and ensure role metadata is present.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $item Stored ref.
+	 * @param string $role Asset role.
+	 * @return array
+	 */
+	private static function sanitize_asset_ref( $job_id, $item, $role ) {
+		$attachment_id = (int) ( $item['attachment_id'] ?? 0 );
+		if ( $attachment_id <= 0 || 'attachment' !== get_post_type( $attachment_id ) ) {
+			return array();
+		}
+
+		$stored_role = (string) get_post_meta( $attachment_id, self::ATTACHMENT_META_ROLE, true );
+		if ( '' === $stored_role ) {
+			update_post_meta( $attachment_id, self::ATTACHMENT_META_ROLE, $role );
+			$stored_role = $role;
+		}
+
+		$created_at = (int) get_post_meta( $attachment_id, self::ATTACHMENT_META_CREATED_AT, true );
+		if ( $created_at <= 0 ) {
+			$created_at = time();
+			update_post_meta( $attachment_id, self::ATTACHMENT_META_CREATED_AT, $created_at );
+		}
+
+		$source_hash = (string) get_post_meta( $attachment_id, self::ATTACHMENT_META_SOURCE_HASH, true );
+		if ( '' === $source_hash && ! empty( $item['source_hash'] ) ) {
+			$source_hash = sanitize_text_field( (string) $item['source_hash'] );
+			update_post_meta( $attachment_id, self::ATTACHMENT_META_SOURCE_HASH, $source_hash );
+		}
+
+		if ( '' === (string) get_post_meta( $attachment_id, self::ATTACHMENT_META_JOB_ID, true ) ) {
+			update_post_meta( $attachment_id, self::ATTACHMENT_META_JOB_ID, $job_id );
+		}
+
+		return self::build_stored_asset_ref( $job_id, $attachment_id, $stored_role, $source_hash, $created_at );
+	}
+
+	/**
+	 * Build one stored asset ref from attachment metadata.
+	 *
+	 * @param string   $job_id Job ID.
+	 * @param int      $attachment_id Attachment ID.
+	 * @param string   $role Asset role.
+	 * @param string   $source_hash Optional source hash.
+	 * @param int|null $created_at Optional creation timestamp.
+	 * @return array
+	 */
+	private static function build_stored_asset_ref( $job_id, $attachment_id, $role, $source_hash = '', $created_at = null ) {
+		$mime_type = get_post_mime_type( $attachment_id );
+		$created   = null === $created_at ? (int) get_post_meta( $attachment_id, self::ATTACHMENT_META_CREATED_AT, true ) : (int) $created_at;
+		if ( $created <= 0 ) {
+			$created = time();
+		}
+
+		return array(
+			'attachment_id' => (int) $attachment_id,
+			'mime_type'     => $mime_type ? (string) $mime_type : 'image/png',
+			'role'          => sanitize_text_field( $role ),
+			'created_at'    => $created,
+			'source_hash'   => (string) $source_hash,
+		);
+	}
+
+	/**
+	 * Convert stored refs into payload-safe items with signed same-origin URLs.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $items Stored refs.
+	 * @return array
+	 */
+	private static function prepare_asset_refs_for_payload( $job_id, $items ) {
+		$payload = array();
+
+		foreach ( $items as $item ) {
+			$ref = self::sanitize_asset_ref( $job_id, $item, isset( $item['role'] ) ? (string) $item['role'] : 'preview' );
+			if ( empty( $ref['attachment_id'] ) ) {
+				continue;
+			}
+
+			$payload[] = array(
+				'attachment_id' => (int) $ref['attachment_id'],
+				'url'           => self::get_asset_url( $job_id, (int) $ref['attachment_id'] ),
+				'mime_type'     => (string) ( $ref['mime_type'] ?? 'image/png' ),
+				'role'          => (string) ( $ref['role'] ?? 'preview' ),
+				'created_at'    => (int) ( $ref['created_at'] ?? 0 ),
+			);
+		}
+
+		return $payload;
+	}
+
+	/**
+	 * Remove missing or expired asset refs and persist the compact result.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $assets Stored asset payload.
+	 * @return array
+	 */
+	private static function prune_missing_asset_refs( $job_id, $assets ) {
+		$changed = false;
+
+		foreach ( array( 'preview_images' => 'preview', 'final_images' => 'final', 'reference_images' => 'reference' ) as $key => $role ) {
+			$items   = isset( $assets[ $key ] ) && is_array( $assets[ $key ] ) ? $assets[ $key ] : array();
+			$cleaned = array();
+
+			foreach ( $items as $item ) {
+				$ref = self::sanitize_asset_ref( $job_id, $item, $role );
+				if ( empty( $ref['attachment_id'] ) ) {
+					$changed = true;
+					continue;
+				}
+				if ( self::is_attachment_expired( $ref ) ) {
+					self::delete_attachment_if_exists( (int) $ref['attachment_id'] );
+					$changed = true;
+					continue;
+				}
+				$cleaned[] = $ref;
+			}
+
+			$assets[ $key ] = array_values( $cleaned );
+		}
+
+		if ( $changed ) {
+			self::save_job_assets( $job_id, $assets );
+			$job = get_transient( self::JOB_TRANSIENT_PREFIX . $job_id );
+			if ( is_array( $job ) ) {
+				$job['preview_count']   = count( $assets['preview_images'] );
+				$job['final_count']     = count( $assets['final_images'] );
+				$job['reference_count'] = count( $assets['reference_images'] );
+				$job['updated_at']      = isset( $job['updated_at'] ) ? (int) $job['updated_at'] : time();
+				self::save_job( $job );
+			}
+		}
+
+		return $assets;
+	}
+
+	/**
+	 * Build provider-compatible reference images from stored refs.
+	 *
+	 * @param array $reference_refs Stored reference refs.
+	 * @return array|\WP_Error
+	 */
+	private static function build_provider_reference_images( $reference_refs ) {
+		$provider_items = array();
+
+		foreach ( $reference_refs as $item ) {
+			$attachment_id = (int) ( $item['attachment_id'] ?? 0 );
+			if ( $attachment_id <= 0 ) {
+				continue;
+			}
+
+			$file = get_attached_file( $attachment_id );
+			if ( ! $file || ! file_exists( $file ) ) {
+				return new \WP_Error( 'missing_reference_image', __( 'A reference image file is missing.', 'alorbach-ai-gateway' ) );
+			}
+
+			$binary = file_get_contents( $file );
+			if ( false === $binary || '' === $binary ) {
+				return new \WP_Error( 'invalid_reference_image', __( 'A reference image could not be read.', 'alorbach-ai-gateway' ) );
+			}
+
+			$provider_items[] = array(
+				'b64_json'  => base64_encode( $binary ),
+				'mime_type' => get_post_mime_type( $attachment_id ) ?: 'image/png',
+			);
+		}
+
+		return $provider_items;
+	}
+
+	/**
+	 * Create one intermediate attachment from a raw provider image item.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param int    $user_id User ID.
+	 * @param array  $item Raw image item.
+	 * @param string $role Asset role.
+	 * @return int
+	 */
+	private static function create_attachment_from_image_item( $job_id, $user_id, $item, $role ) {
+		$binary    = self::image_item_binary( $item );
+		$mime_type = self::image_item_mime_type( $item );
+		if ( '' === $binary ) {
+			return 0;
+		}
+
+		if ( ! function_exists( 'wp_generate_attachment_metadata' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/image.php';
+		}
+		if ( ! function_exists( 'wp_upload_bits' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+
+		$extension = self::mime_type_to_extension( $mime_type );
+		$filename  = sprintf( 'alorbach-%s-%s-%s.%s', sanitize_key( $role ), sanitize_key( $job_id ), wp_generate_password( 8, false, false ), $extension );
+		$upload    = wp_upload_bits( $filename, null, $binary );
+		if ( ! empty( $upload['error'] ) ) {
+			self::log_job_diagnostic(
+				'asset_upload_failed',
+				array(
+					'job_id' => $job_id,
+					'role'   => $role,
+					'error'  => (string) $upload['error'],
+				)
+			);
+			return 0;
+		}
+
+		$attachment_id = wp_insert_attachment(
+			array(
+				'post_mime_type' => $mime_type,
+				'post_title'     => sanitize_file_name( pathinfo( $filename, PATHINFO_FILENAME ) ),
+				'post_status'    => 'private',
+				'post_author'    => max( 0, (int) $user_id ),
+			),
+			$upload['file']
+		);
+		if ( is_wp_error( $attachment_id ) || $attachment_id <= 0 ) {
+			return 0;
+		}
+
+		wp_update_attachment_metadata( $attachment_id, wp_generate_attachment_metadata( $attachment_id, $upload['file'] ) );
+		update_post_meta( $attachment_id, self::ATTACHMENT_META_JOB_ID, $job_id );
+		update_post_meta( $attachment_id, self::ATTACHMENT_META_ROLE, $role );
+		update_post_meta( $attachment_id, self::ATTACHMENT_META_USER_ID, max( 0, (int) $user_id ) );
+		update_post_meta( $attachment_id, self::ATTACHMENT_META_CREATED_AT, time() );
+		update_post_meta( $attachment_id, self::ATTACHMENT_META_SOURCE_HASH, self::image_item_source_hash( $item ) );
+
+		return (int) $attachment_id;
+	}
+
+	/**
+	 * Get raw binary for a provider image item.
+	 *
+	 * @param array $item Image item.
+	 * @return string
+	 */
+	private static function image_item_binary( $item ) {
+		if ( ! is_array( $item ) ) {
+			return '';
+		}
+
+		if ( ! function_exists( 'download_url' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+
+		if ( ! empty( $item['b64_json'] ) && is_string( $item['b64_json'] ) ) {
+			$binary = base64_decode( preg_replace( '/\s+/', '', $item['b64_json'] ), true );
+			return false === $binary ? '' : $binary;
+		}
+
+		if ( ! empty( $item['url'] ) && is_string( $item['url'] ) ) {
+			$temp_file = download_url( esc_url_raw( $item['url'] ) );
+			if ( is_wp_error( $temp_file ) ) {
+				return '';
+			}
+
+			$binary = file_get_contents( $temp_file );
+			@unlink( $temp_file );
+
+			return false === $binary ? '' : $binary;
+		}
+
+		return '';
+	}
+
+	/**
+	 * Determine mime type for a provider image item.
+	 *
+	 * @param array $item Image item.
+	 * @return string
+	 */
+	private static function image_item_mime_type( $item ) {
+		if ( is_array( $item ) && ! empty( $item['mime_type'] ) && is_string( $item['mime_type'] ) ) {
+			return sanitize_text_field( $item['mime_type'] );
+		}
+
+		return 'image/png';
+	}
+
+	/**
+	 * Create a stable dedupe hash for one raw image item.
+	 *
+	 * @param array $item Image item.
+	 * @return string
+	 */
+	private static function image_item_source_hash( $item ) {
+		if ( ! is_array( $item ) ) {
+			return '';
+		}
+
+		if ( ! empty( $item['b64_json'] ) && is_string( $item['b64_json'] ) ) {
+			return hash( 'sha256', preg_replace( '/\s+/', '', $item['b64_json'] ) );
+		}
+
+		if ( ! empty( $item['url'] ) && is_string( $item['url'] ) ) {
+			return hash( 'sha256', esc_url_raw( $item['url'] ) );
+		}
+
+		return '';
+	}
+
+	/**
+	 * Convert mime type into a safe file extension.
+	 *
+	 * @param string $mime_type Mime type.
+	 * @return string
+	 */
+	private static function mime_type_to_extension( $mime_type ) {
+		$map = array(
+			'image/png'  => 'png',
+			'image/jpeg' => 'jpg',
+			'image/webp' => 'webp',
+			'image/gif'  => 'gif',
+		);
+
+		return $map[ $mime_type ] ?? 'png';
+	}
+
+	/**
+	 * Generate a signed same-origin URL for one intermediate attachment.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param int    $attachment_id Attachment ID.
+	 * @return string
+	 */
+	public static function get_asset_url( $job_id, $attachment_id ) {
+		$base_url   = admin_url( 'admin-post.php' );
+		$path       = wp_parse_url( $base_url, PHP_URL_PATH );
+		$query      = wp_parse_url( $base_url, PHP_URL_QUERY );
+		$relative   = is_string( $path ) && '' !== $path ? $path : '/wp-admin/admin-post.php';
+		$relative  .= is_string( $query ) && '' !== $query ? '?' . $query : '';
+
+		return add_query_arg(
+			array(
+				'action'        => 'alorbach_image_job_asset',
+				'job_id'        => (string) $job_id,
+				'attachment_id' => (int) $attachment_id,
+				'_wpnonce'      => wp_create_nonce( 'alorbach_image_job_asset_' . $job_id . '_' . $attachment_id ),
+			),
+			$relative
+		);
+	}
+
+	/**
+	 * Serve one intermediate asset to an authorized admin or job owner.
+	 *
+	 * @return void
+	 */
+	public static function serve_asset_request() {
+		if ( ! is_user_logged_in() ) {
+			status_header( 403 );
+			exit;
+		}
+
+		$job_id        = isset( $_GET['job_id'] ) ? sanitize_text_field( wp_unslash( $_GET['job_id'] ) ) : '';
+		$attachment_id = isset( $_GET['attachment_id'] ) ? absint( wp_unslash( $_GET['attachment_id'] ) ) : 0;
+		$nonce         = isset( $_GET['_wpnonce'] ) ? sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ) : '';
+
+		if ( '' === $job_id || $attachment_id <= 0 || ! wp_verify_nonce( $nonce, 'alorbach_image_job_asset_' . $job_id . '_' . $attachment_id ) ) {
+			status_header( 403 );
+			exit;
+		}
+
+		$user_id = get_current_user_id();
+		$job     = current_user_can( 'manage_options' ) ? self::get_job_for_admin( $job_id, false ) : self::get_job_for_user( $job_id, $user_id );
+		if ( ! $job ) {
+			status_header( 404 );
+			exit;
+		}
+
+		$assets = self::get_stored_job_assets( $job_id );
+		$found  = false;
+		foreach ( array( 'preview_images', 'final_images', 'reference_images' ) as $key ) {
+			foreach ( isset( $assets[ $key ] ) && is_array( $assets[ $key ] ) ? $assets[ $key ] : array() as $item ) {
+				if ( (int) ( $item['attachment_id'] ?? 0 ) === $attachment_id ) {
+					$found = true;
+					break 2;
+				}
+			}
+		}
+
+		if ( ! $found ) {
+			status_header( 404 );
+			exit;
+		}
+
+		$file = get_attached_file( $attachment_id );
+		if ( ! $file || ! file_exists( $file ) ) {
+			status_header( 404 );
+			exit;
+		}
+
+		$mime_type = get_post_mime_type( $attachment_id ) ?: 'application/octet-stream';
+		nocache_headers();
+		header( 'Content-Type: ' . $mime_type );
+		header( 'Content-Length: ' . filesize( $file ) );
+		header( 'Content-Disposition: inline; filename="' . basename( $file ) . '"' );
+		readfile( $file );
+		exit;
+	}
+
+	/**
+	 * Ensure periodic cleanup is scheduled.
+	 *
+	 * @return void
+	 */
+	public static function ensure_cleanup_scheduled() {
+		if ( ! wp_next_scheduled( self::CLEANUP_HOOK ) ) {
+			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', self::CLEANUP_HOOK );
+		}
+	}
+
+	/**
+	 * Delete expired preview/reference attachments.
+	 *
+	 * @return void
+	 */
+	public static function cleanup_expired_assets() {
+		$query = new \WP_Query(
+			array(
+				'post_type'      => 'attachment',
+				'post_status'    => 'any',
+				'posts_per_page' => 100,
+				'fields'         => 'ids',
+				'meta_query'     => array(
+					array(
+						'key'     => self::ATTACHMENT_META_ROLE,
+						'value'   => array( 'preview', 'reference' ),
+						'compare' => 'IN',
+					),
+					array(
+						'key'     => self::ATTACHMENT_META_CREATED_AT,
+						'value'   => time() - self::PREVIEW_RETENTION_SECONDS,
+						'type'    => 'NUMERIC',
+						'compare' => '<=',
+					),
+				),
+			)
+		);
+
+		foreach ( $query->posts as $attachment_id ) {
+			self::delete_attachment_if_exists( (int) $attachment_id );
+		}
+	}
+
+	/**
+	 * Decide whether a stored attachment ref has expired.
+	 *
+	 * @param array $ref Stored ref.
+	 * @return bool
+	 */
+	private static function is_attachment_expired( $ref ) {
+		$role = (string) ( $ref['role'] ?? '' );
+		if ( ! in_array( $role, array( 'preview', 'reference' ), true ) ) {
+			return false;
+		}
+
+		$created_at = (int) ( $ref['created_at'] ?? 0 );
+		return $created_at > 0 && $created_at <= ( time() - self::PREVIEW_RETENTION_SECONDS );
+	}
+
+	/**
+	 * Delete one attachment if it still exists.
+	 *
+	 * @param int $attachment_id Attachment ID.
+	 * @return void
+	 */
+	private static function delete_attachment_if_exists( $attachment_id ) {
+		if ( $attachment_id > 0 && 'attachment' === get_post_type( $attachment_id ) ) {
+			wp_delete_attachment( $attachment_id, true );
+		}
+	}
+
+	/**
+	 * Clear DB-backed transient option caches before polling from long-running CLI processes.
+	 *
+	 * Without an external object cache, another PHP request can update a transient
+	 * while the current process still serves the old option value from its local
+	 * object cache. Sample-gallery seeding polls in one long CLI request, so we
+	 * force-refresh the targeted transient options before reading them.
+	 *
+	 * @param string $transient_key Logical transient key without `_transient_` prefix.
+	 * @return void
+	 */
+	private static function invalidate_transient_option_caches( $transient_key ) {
+		if ( wp_using_ext_object_cache() || '' === $transient_key ) {
+			return;
+		}
+
+		wp_cache_delete( '_transient_' . $transient_key, 'options' );
+		wp_cache_delete( '_transient_timeout_' . $transient_key, 'options' );
+		wp_cache_delete( 'alloptions', 'options' );
+	}
+
+	/**
+	 * Emit lightweight diagnostics for queue reliability work.
+	 *
+	 * @param string $event   Event name.
+	 * @param array  $context Context.
+	 * @return void
+	 */
+	private static function log_job_diagnostic( $event, $context = array() ) {
+		if ( ! defined( 'WP_DEBUG' ) || ! WP_DEBUG ) {
+			return;
+		}
+
+		error_log(
+			sprintf(
+				'[alorbach-image-jobs] %s %s',
+				(string) $event,
+				wp_json_encode( $context )
+			)
+		);
 	}
 
 	/**

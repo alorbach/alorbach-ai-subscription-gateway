@@ -24,6 +24,11 @@ class REST_Proxy {
 	 * @return \WP_Error|null WP_Error (HTTP 429) when limit exceeded, null when allowed.
 	 */
 	private static function check_rate_limit( $user_id, $endpoint ) {
+		$bypass = apply_filters( 'alorbach_bypass_rate_limit', false, (string) $endpoint, (int) $user_id );
+		if ( $bypass ) {
+			return null;
+		}
+
 		$window = max( 10, (int) get_option( 'alorbach_rate_limit_window', 60 ) );
 		$option_map = array(
 			'chat'       => array( 'alorbach_rate_limit_chat', 100 ),
@@ -513,6 +518,12 @@ class REST_Proxy {
 			'methods'             => 'GET',
 			'callback'            => array( __CLASS__, 'admin_image_job_detail' ),
 			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'include_images' => array(
+					'default'           => false,
+					'sanitize_callback' => 'rest_sanitize_boolean',
+				),
+			),
 		) );
 	}
 
@@ -1233,13 +1244,26 @@ class REST_Proxy {
 	public static function admin_image_jobs_list( $request ) {
 		$jobs = Image_Jobs::list_jobs_for_admin( (int) $request->get_param( 'limit' ) );
 		$payload = array_map( array( Image_Jobs::class, 'admin_job_summary_payload' ), $jobs );
-
-		return rest_ensure_response(
-			array(
-				'stats' => Image_Jobs::summarize_jobs( $jobs ),
-				'jobs'  => $payload,
-			)
+		$response = array(
+			'stats' => Image_Jobs::summarize_jobs( $jobs ),
+			'jobs'  => $payload,
 		);
+
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log(
+				sprintf(
+					'[alorbach-image-queue] list_response_bytes %s',
+					wp_json_encode(
+						array(
+							'jobs'  => count( $payload ),
+							'bytes' => strlen( wp_json_encode( $response ) ),
+						)
+					)
+				)
+			);
+		}
+
+		return rest_ensure_response( $response );
 	}
 
 	/**
@@ -1249,9 +1273,28 @@ class REST_Proxy {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public static function admin_image_job_detail( $request ) {
-		$job = Image_Jobs::get_job_for_admin( (string) $request->get_param( 'job_id' ) );
+		$include_images = rest_sanitize_boolean( $request->get_param( 'include_images' ) );
+		$job = Image_Jobs::get_job_for_admin(
+			(string) $request->get_param( 'job_id' ),
+			$include_images
+		);
 		if ( ! $job ) {
 			return new \WP_Error( 'job_not_found', __( 'Image job not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+
+		if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+			error_log(
+				sprintf(
+					'[alorbach-image-queue] detail_response_bytes %s',
+					wp_json_encode(
+						array(
+							'job_id'         => (string) $request->get_param( 'job_id' ),
+							'include_images' => $include_images,
+							'bytes'          => strlen( wp_json_encode( $job ) ),
+						)
+					)
+				)
+			);
 		}
 
 		return rest_ensure_response( Image_Jobs::admin_job_payload( $job ) );
