@@ -580,6 +580,29 @@ The queue page shows:
 
 This queue UI is intended for monitoring and debugging, not as a stable public API for third-party dashboards.
 
+### Queue Cleanup
+
+Operator cleanup actions are available to admins on the Image Queue page and through the optional WP-CLI surface.
+
+- `Clear Failed` removes failed jobs, their queue transients, their index entries, and their owned preview/reference assets. Final assets are deleted only when the cleanup rules allow it and the attachment is not marked as promoted downstream.
+- `Clear Stalled` removes queued or in-progress jobs that have exceeded the stall threshold, together with their owned queue assets.
+- `Clear Completed` removes completed jobs and their queue metadata. It keeps final assets by default.
+- `Clear Expired` removes jobs whose transient state has expired or gone missing, and prunes their queue record.
+- `Clear All` removes every indexed job using the same ownership checks.
+- `Prune Index` removes stale job IDs from the queue index without deleting media.
+
+What cleanup does not delete:
+
+- unrelated WordPress attachments
+- any attachment that is not explicitly marked as owned by the target job
+- final attachments that are already promoted into a downstream permanent workflow unless the cleanup path is forced and the code path explicitly allows that deletion
+
+Recommended uses:
+
+- provider outages and retries after API failures
+- billing exhaustion or provider-side rejection loops
+- sample-gallery or demo-page debugging when stale queue state obscures the current job list
+
 ---
 
 ## Shortcodes

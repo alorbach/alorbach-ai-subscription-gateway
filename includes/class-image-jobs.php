@@ -620,10 +620,9 @@ class Image_Jobs {
 			if ( ! $job ) {
 				continue;
 			}
-			$jobs[]                = $job;
 			$valid_index[ $job_id ] = (int) ( $job['updated_at'] ?? $updated_at );
-			if ( count( $jobs ) >= $limit ) {
-				break;
+			if ( count( $jobs ) < $limit ) {
+				$jobs[] = $job;
 			}
 		}
 
@@ -637,6 +636,252 @@ class Image_Jobs {
 		);
 
 		return $jobs;
+	}
+
+	/**
+	 * Get queue statistics across the indexed job set.
+	 *
+	 * @return array
+	 */
+	public static function get_queue_stats() {
+		$stats = array(
+			'total'            => 0,
+			'recent_total'     => 0,
+			'queued'           => 0,
+			'in_progress'      => 0,
+			'completed'        => 0,
+			'failed'           => 0,
+			'stalled'          => 0,
+			'expired'          => 0,
+			'stale_or_expired' => 0,
+		);
+
+		foreach ( self::get_all_job_ids() as $job_id ) {
+			$stats['total']++;
+			$stats['recent_total']++;
+
+			$job = self::load_job_record( $job_id, false );
+			if ( ! is_array( $job ) ) {
+				$stats['expired']++;
+				$stats['stale_or_expired']++;
+				continue;
+			}
+
+			$status = self::get_job_status( $job );
+			if ( isset( $stats[ $status ] ) ) {
+				$stats[ $status ]++;
+			}
+
+			$is_stalled = self::is_job_stalled_for_cleanup( $job );
+			$is_expired = self::is_job_expired_for_cleanup( $job_id, $job );
+			if ( $is_stalled ) {
+				$stats['stalled']++;
+			}
+			if ( $is_expired ) {
+				$stats['expired']++;
+			}
+			if ( $is_stalled || $is_expired ) {
+				$stats['stale_or_expired']++;
+			}
+		}
+
+		return $stats;
+	}
+
+	/**
+	 * Get all job ids currently present in the job index.
+	 *
+	 * @return array
+	 */
+	public static function get_all_job_ids() {
+		$index = self::get_job_index();
+		arsort( $index );
+
+		return array_map( 'strval', array_keys( $index ) );
+	}
+
+	/**
+	 * Get job ids matching one or more statuses.
+	 *
+	 * @param array $statuses Status values to match.
+	 * @return array
+	 */
+	public static function get_job_ids_by_status( $statuses ) {
+		$statuses = array_values(
+			array_unique(
+				array_filter(
+					array_map(
+						'sanitize_key',
+						is_array( $statuses ) ? $statuses : array()
+					)
+				)
+			)
+		);
+		if ( empty( $statuses ) ) {
+			return array();
+		}
+
+		$matched = array();
+		foreach ( self::get_all_job_ids() as $job_id ) {
+			$job = self::load_job_record( $job_id, false );
+			if ( self::job_matches_requested_statuses( $job_id, $job, $statuses ) ) {
+				$matched[] = $job_id;
+			}
+		}
+
+		return $matched;
+	}
+
+	/**
+	 * Delete one job and any owned cleanup assets.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $options Cleanup options.
+	 * @return array
+	 */
+	public static function delete_job( $job_id, $options = array() ) {
+		$job_id = (string) $job_id;
+		$options = wp_parse_args(
+			$options,
+			array(
+				'delete_preview_assets' => true,
+				'delete_reference_assets' => true,
+				'delete_final_assets'   => false,
+				'force_final_assets'    => false,
+				'prune_index'           => true,
+			)
+		);
+
+		$job = self::load_job_record( $job_id, false );
+		$attachment_result = self::delete_job_attachments( $job_id, $options, $job );
+		delete_transient( self::JOB_TRANSIENT_PREFIX . $job_id );
+		delete_transient( self::JOB_ASSET_TRANSIENT_PREFIX . $job_id );
+		delete_transient( self::JOB_PROMPT_TRANSIENT_PREFIX . $job_id );
+		$index_removed = self::remove_job_from_index( $job_id );
+
+		$result = array(
+			'job_id'             => $job_id,
+			'job_found'          => is_array( $job ),
+			'job_status'         => is_array( $job ) ? self::get_job_status( $job ) : 'missing',
+			'attachments_removed' => $attachment_result['attachments_removed'],
+			'attachments_skipped' => $attachment_result['attachments_skipped'],
+			'attachment_count'   => count( $attachment_result['attachments_removed'] ),
+			'index_removed'      => $index_removed,
+			'deleted'            => true,
+		);
+
+		self::log_job_diagnostic(
+			'cleanup_delete_job',
+			array(
+				'job_id'            => $job_id,
+				'job_found'         => is_array( $job ),
+				'job_status'        => $result['job_status'],
+				'attachments_removed' => $result['attachments_removed'],
+				'attachments_skipped' => $result['attachments_skipped'],
+				'index_removed'     => $index_removed,
+				'operator_user_id'  => get_current_user_id(),
+				'options'           => array(
+					'delete_preview_assets' => (bool) $options['delete_preview_assets'],
+					'delete_reference_assets' => (bool) $options['delete_reference_assets'],
+					'delete_final_assets'   => (bool) $options['delete_final_assets'],
+					'force_final_assets'    => (bool) $options['force_final_assets'],
+				),
+			)
+		);
+
+		return $result;
+	}
+
+	/**
+	 * Delete jobs matching the provided statuses.
+	 *
+	 * @param array $statuses Status values.
+	 * @param array $options Cleanup options.
+	 * @return array
+	 */
+	public static function delete_jobs_by_status( $statuses, $options = array() ) {
+		$job_ids = self::get_job_ids_by_status( $statuses );
+		$jobs = array();
+		$attachments_removed = array();
+
+		foreach ( $job_ids as $job_id ) {
+			$result = self::delete_job( $job_id, $options );
+			$jobs[] = $result;
+			$attachments_removed = array_merge( $attachments_removed, $result['attachments_removed'] );
+		}
+
+		return array(
+			'job_ids'             => $job_ids,
+			'job_count'           => count( $job_ids ),
+			'jobs'                => $jobs,
+			'attachments_removed' => array_values( array_unique( array_map( 'absint', $attachments_removed ) ) ),
+			'attachment_count'    => count( array_unique( array_map( 'absint', $attachments_removed ) ) ),
+		);
+	}
+
+	/**
+	 * Delete expired jobs.
+	 *
+	 * @param array $options Cleanup options.
+	 * @return array
+	 */
+	public static function delete_expired_jobs( $options = array() ) {
+		return self::delete_jobs_by_status( array( 'expired' ), $options );
+	}
+
+	/**
+	 * Delete stalled jobs.
+	 *
+	 * @param array $options Cleanup options.
+	 * @return array
+	 */
+	public static function delete_stalled_jobs( $options = array() ) {
+		return self::delete_jobs_by_status( array( 'stalled' ), $options );
+	}
+
+	/**
+	 * Delete jobs in a completed state.
+	 *
+	 * @param array $options Cleanup options.
+	 * @return array
+	 */
+	public static function delete_completed_jobs( $options = array() ) {
+		return self::delete_jobs_by_status( array( 'completed' ), $options );
+	}
+
+	/**
+	 * Delete all indexed jobs.
+	 *
+	 * @param array $options Cleanup options.
+	 * @return array
+	 */
+	public static function delete_all_jobs( $options = array() ) {
+		return self::delete_jobs_by_status( self::get_all_job_statuses_for_cleanup(), $options );
+	}
+
+	/**
+	 * Prune missing jobs from the index.
+	 *
+	 * @return int
+	 */
+	public static function prune_job_index() {
+		$index = self::get_job_index();
+		$pruned = 0;
+		$valid_index = array();
+
+		foreach ( $index as $job_id => $updated_at ) {
+			$job = self::load_job_record( (string) $job_id, false );
+			if ( ! is_array( $job ) && ! self::job_exists_in_attachments( (string) $job_id ) ) {
+				$pruned++;
+				continue;
+			}
+
+			$valid_index[ (string) $job_id ] = (int) $updated_at;
+		}
+
+		self::save_job_index( $valid_index );
+
+		return $pruned;
 	}
 
 	/**
@@ -679,6 +924,8 @@ class Image_Jobs {
 		$runtime      = ( $created_at > 0 && $updated_at >= $created_at ) ? ( $updated_at - $created_at ) : null;
 		$cost_credits = isset( $job['cost_credits'] ) ? (float) $job['cost_credits'] : 0.0;
 		$cost_usd     = isset( $job['cost_usd'] ) ? (float) $job['cost_usd'] : 0.0;
+		$job_status   = self::get_job_status( $job );
+		$age_seconds  = self::get_job_age_seconds( $job );
 
 		return array(
 			'job_id'              => (string) ( $job['job_id'] ?? '' ),
@@ -713,6 +960,10 @@ class Image_Jobs {
 			'updated_at_label'    => $updated_at ? wp_date( 'Y-m-d H:i:s', $updated_at ) : '',
 			'dispatched_at'       => isset( $job['dispatched_at'] ) ? (int) $job['dispatched_at'] : 0,
 			'runtime_seconds'     => $runtime,
+			'age_seconds'         => $age_seconds,
+			'is_stalled'          => self::is_job_stalled_for_cleanup( $job ),
+			'is_expired'          => self::is_job_expired_for_cleanup( (string) ( $job['job_id'] ?? '' ), $job ),
+			'job_state'           => $job_status,
 			'error'               => (string) ( $job['error'] ?? '' ),
 			'deduction_applied'   => ! empty( $job['deduction_applied'] ),
 		);
@@ -732,6 +983,8 @@ class Image_Jobs {
 		$runtime      = ( $created_at > 0 && $updated_at >= $created_at ) ? ( $updated_at - $created_at ) : null;
 		$cost_credits = isset( $job['cost_credits'] ) ? (float) $job['cost_credits'] : 0.0;
 		$cost_usd     = isset( $job['cost_usd'] ) ? (float) $job['cost_usd'] : 0.0;
+		$job_status   = self::get_job_status( $job );
+		$age_seconds  = self::get_job_age_seconds( $job );
 
 		return array(
 			'job_id'             => (string) ( $job['job_id'] ?? '' ),
@@ -758,6 +1011,10 @@ class Image_Jobs {
 			'updated_at_label'   => $updated_at ? wp_date( 'Y-m-d H:i:s', $updated_at ) : '',
 			'dispatched_at'      => isset( $job['dispatched_at'] ) ? (int) $job['dispatched_at'] : 0,
 			'runtime_seconds'    => $runtime,
+			'age_seconds'        => $age_seconds,
+			'is_stalled'         => self::is_job_stalled_for_cleanup( $job ),
+			'is_expired'         => self::is_job_expired_for_cleanup( (string) ( $job['job_id'] ?? '' ), $job ),
+			'job_state'          => $job_status,
 			'deduction_applied'  => ! empty( $job['deduction_applied'] ),
 		);
 	}
@@ -806,6 +1063,17 @@ class Image_Jobs {
 	 * @return array|null
 	 */
 	private static function get_job( $job_id ) {
+		return self::load_job_record( $job_id, true );
+	}
+
+	/**
+	 * Load a job snapshot without auto-mutating stalled jobs unless requested.
+	 *
+	 * @param string $job_id        Job ID.
+	 * @param bool   $allow_mutation Whether stalled jobs should be auto-failed.
+	 * @return array|null
+	 */
+	private static function load_job_record( $job_id, $allow_mutation = true ) {
 		self::invalidate_transient_option_caches( self::JOB_TRANSIENT_PREFIX . $job_id );
 		$job = get_transient( self::JOB_TRANSIENT_PREFIX . $job_id );
 		if ( ! is_array( $job ) ) {
@@ -816,7 +1084,7 @@ class Image_Jobs {
 			$job = self::migrate_legacy_job_storage( $job );
 		}
 
-		if ( self::is_job_stalled( $job ) ) {
+		if ( $allow_mutation && self::is_job_stalled( $job ) ) {
 			$job['status']           = 'failed';
 			$job['progress_stage']   = 'failed';
 			$job['progress_percent'] = 0;
@@ -1715,6 +1983,291 @@ class Image_Jobs {
 	}
 
 	/**
+	 * Get the normalized job status or "missing" when no snapshot is available.
+	 *
+	 * @param array|null $job Job snapshot.
+	 * @return string
+	 */
+	private static function get_job_status( $job ) {
+		if ( ! is_array( $job ) ) {
+			return 'missing';
+		}
+
+		$status = sanitize_key( (string) ( $job['status'] ?? 'queued' ) );
+		return '' !== $status ? $status : 'queued';
+	}
+
+	/**
+	 * Whether a queued/in-progress job has exceeded the manual stall threshold.
+	 *
+	 * @param array $job Job snapshot.
+	 * @return bool
+	 */
+	private static function is_job_stalled_for_cleanup( $job ) {
+		if ( ! is_array( $job ) ) {
+			return false;
+		}
+
+		$status = self::get_job_status( $job );
+		if ( ! in_array( $status, array( 'queued', 'in_progress' ), true ) ) {
+			return false;
+		}
+
+		if ( (int) ( $job['final_count'] ?? 0 ) > 0 ) {
+			return false;
+		}
+
+		$updated_at = isset( $job['updated_at'] ) ? (int) $job['updated_at'] : 0;
+		if ( $updated_at <= 0 ) {
+			return false;
+		}
+
+		return ( time() - $updated_at ) >= self::get_stalled_timeout_seconds();
+	}
+
+	/**
+	 * Whether a job record is expired according to transient retention rules.
+	 *
+	 * @param string     $job_id Job ID.
+	 * @param array|null $job    Optional job snapshot.
+	 * @return bool
+	 */
+	private static function is_job_expired_for_cleanup( $job_id, $job = null ) {
+		if ( ! is_array( $job ) ) {
+			return true;
+		}
+
+		$age = self::get_job_age_seconds( $job );
+		if ( null === $age ) {
+			return false;
+		}
+
+		return $age >= self::get_job_retention_seconds();
+	}
+
+	/**
+	 * Get the age of a job in seconds.
+	 *
+	 * @param array $job Job snapshot.
+	 * @return int|null
+	 */
+	private static function get_job_age_seconds( $job ) {
+		if ( ! is_array( $job ) ) {
+			return null;
+		}
+
+		$created_at = isset( $job['created_at'] ) ? (int) $job['created_at'] : 0;
+		$updated_at = isset( $job['updated_at'] ) ? (int) $job['updated_at'] : 0;
+		$timestamp = max( $created_at, $updated_at );
+		if ( $timestamp <= 0 ) {
+			return null;
+		}
+
+		return max( 0, time() - $timestamp );
+	}
+
+	/**
+	 * Get the manual stall threshold in seconds.
+	 *
+	 * @return int
+	 */
+	private static function get_stalled_timeout_seconds() {
+		return max(
+			30,
+			(int) apply_filters( 'alorbach_image_job_stalled_seconds', self::JOB_STALLED_SECONDS )
+		);
+	}
+
+	/**
+	 * Get the retention window used for expired job cleanup.
+	 *
+	 * @return int
+	 */
+	private static function get_job_retention_seconds() {
+		return max( 1, (int) apply_filters( 'alorbach_image_job_ttl', self::JOB_TTL ) );
+	}
+
+	/**
+	 * Return the configured cleanup statuses used for "clear all".
+	 *
+	 * @return array
+	 */
+	private static function get_all_job_statuses_for_cleanup() {
+		return array( 'queued', 'in_progress', 'completed', 'failed', 'stalled', 'expired' );
+	}
+
+	/**
+	 * Check whether a job snapshot matches any requested statuses.
+	 *
+	 * @param string     $job_id   Job ID.
+	 * @param array|null $job      Job snapshot.
+	 * @param array      $statuses Requested statuses.
+	 * @return bool
+	 */
+	private static function job_matches_requested_statuses( $job_id, $job, $statuses ) {
+		foreach ( $statuses as $status ) {
+			if ( 'expired' === $status && self::is_job_expired_for_cleanup( $job_id, $job ) ) {
+				return true;
+			}
+			if ( 'stalled' === $status && self::is_job_stalled_for_cleanup( $job ) ) {
+				return true;
+			}
+			if ( is_array( $job ) && self::get_job_status( $job ) === $status ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Remove a job from the indexed job list.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return bool
+	 */
+	private static function remove_job_from_index( $job_id ) {
+		$index = self::get_job_index();
+		if ( ! isset( $index[ $job_id ] ) ) {
+			return false;
+		}
+
+		unset( $index[ $job_id ] );
+		self::save_job_index( $index );
+		return true;
+	}
+
+	/**
+	 * Check whether any attachments remain linked to a job.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return bool
+	 */
+	private static function job_exists_in_attachments( $job_id ) {
+		return ! empty( self::get_job_attachment_ids( $job_id ) );
+	}
+
+	/**
+	 * Get owned attachment ids for one job, optionally constrained to roles.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $roles   Optional roles.
+	 * @return array
+	 */
+	private static function get_job_attachment_ids( $job_id, $roles = array() ) {
+		$meta_query = array(
+			array(
+				'key'     => self::ATTACHMENT_META_JOB_ID,
+				'value'   => (string) $job_id,
+				'compare' => '=',
+			),
+		);
+
+		if ( ! empty( $roles ) ) {
+			$meta_query[] = array(
+				'key'     => self::ATTACHMENT_META_ROLE,
+				'value'   => array_values( array_map( 'sanitize_key', (array) $roles ) ),
+				'compare' => 'IN',
+			);
+		}
+
+		$query = new \WP_Query(
+			array(
+				'post_type'      => 'attachment',
+				'post_status'    => 'any',
+				'fields'         => 'ids',
+				'posts_per_page' => -1,
+				'no_found_rows'  => true,
+				'meta_query'     => $meta_query,
+			)
+		);
+
+		return array_map( 'absint', $query->posts );
+	}
+
+	/**
+	 * Delete attachments for a job according to the supplied cleanup options.
+	 *
+	 * @param string     $job_id Job ID.
+	 * @param array      $options Cleanup options.
+	 * @param array|null  $job    Optional job snapshot.
+	 * @return array
+	 */
+	private static function delete_job_attachments( $job_id, $options, $job = null ) {
+		$allowed_roles = array();
+		if ( ! empty( $options['delete_preview_assets'] ) ) {
+			$allowed_roles[] = 'preview';
+		}
+		if ( ! empty( $options['delete_reference_assets'] ) ) {
+			$allowed_roles[] = 'reference';
+		}
+		if ( ! empty( $options['delete_final_assets'] ) ) {
+			$allowed_roles[] = 'final';
+		}
+
+		$attachments_removed = array();
+		$attachments_skipped = array();
+		$job_status = self::get_job_status( $job );
+		$job_is_cleanup_safe = in_array( $job_status, array( 'failed', 'stalled', 'expired' ), true );
+		$finals_allowed = ! empty( $options['delete_final_assets'] ) && ( ! self::has_promoted_final_attachment( $job_id, $job ) || ! empty( $options['force_final_assets'] ) );
+
+		foreach ( self::get_job_attachment_ids( $job_id ) as $attachment_id ) {
+			$role = sanitize_key( (string) get_post_meta( $attachment_id, self::ATTACHMENT_META_ROLE, true ) );
+			if ( '' === $role ) {
+				$attachments_skipped[] = $attachment_id;
+				continue;
+			}
+
+			if ( 'final' === $role ) {
+				if ( ! $job_is_cleanup_safe || ! $finals_allowed ) {
+					$attachments_skipped[] = $attachment_id;
+					continue;
+				}
+			} elseif ( ! in_array( $role, $allowed_roles, true ) ) {
+				$attachments_skipped[] = $attachment_id;
+				continue;
+			}
+
+			if ( self::delete_attachment_if_exists( (int) $attachment_id ) ) {
+				$attachments_removed[] = (int) $attachment_id;
+			} else {
+				$attachments_skipped[] = (int) $attachment_id;
+			}
+		}
+
+		return array(
+			'attachments_removed' => array_values( array_unique( array_map( 'absint', $attachments_removed ) ) ),
+			'attachments_skipped' => array_values( array_unique( array_map( 'absint', $attachments_skipped ) ) ),
+		);
+	}
+
+	/**
+	 * Determine whether a final attachment is already promoted downstream.
+	 *
+	 * @param string     $job_id Job ID.
+	 * @param array|null $job    Optional job snapshot.
+	 * @return bool
+	 */
+	private static function has_promoted_final_attachment( $job_id, $job = null ) {
+		return (bool) apply_filters( 'alorbach_image_job_final_attachment_promoted', false, (string) $job_id, $job );
+	}
+
+	/**
+	 * Delete one attachment if it still exists.
+	 *
+	 * @param int $attachment_id Attachment ID.
+	 * @return bool
+	 */
+	private static function delete_attachment_if_exists( $attachment_id ) {
+		if ( $attachment_id > 0 && 'attachment' === get_post_type( $attachment_id ) ) {
+			$deleted = wp_delete_attachment( $attachment_id, true );
+			return false !== $deleted && null !== $deleted;
+		}
+
+		return false;
+	}
+
+	/**
 	 * Ensure periodic cleanup is scheduled.
 	 *
 	 * @return void
@@ -1772,18 +2325,6 @@ class Image_Jobs {
 
 		$created_at = (int) ( $ref['created_at'] ?? 0 );
 		return $created_at > 0 && $created_at <= ( time() - self::PREVIEW_RETENTION_SECONDS );
-	}
-
-	/**
-	 * Delete one attachment if it still exists.
-	 *
-	 * @param int $attachment_id Attachment ID.
-	 * @return void
-	 */
-	private static function delete_attachment_if_exists( $attachment_id ) {
-		if ( $attachment_id > 0 && 'attachment' === get_post_type( $attachment_id ) ) {
-			wp_delete_attachment( $attachment_id, true );
-		}
 	}
 
 	/**

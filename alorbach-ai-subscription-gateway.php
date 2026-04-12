@@ -27,6 +27,7 @@ require_once ALORBACH_PLUGIN_DIR . 'vendor/autoload.php';
 // Explicitly load Provider classes (in case autoload classmap is stale).
 require_once ALORBACH_PLUGIN_DIR . 'admin/class-admin-image-queue.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-api-keys-helper.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-cli-image-jobs.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-jobs.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-integration-service.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Interface.php';
@@ -132,6 +133,10 @@ function alorbach_codex_exchange_handler() {
 add_action( 'admin_menu', 'alorbach_admin_menu' );
 function alorbach_admin_menu() {
 	Alorbach\AIGateway\Admin\Admin_Menu::register();
+}
+
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+	\WP_CLI::add_command( 'alorbach image-jobs', 'Alorbach\\AIGateway\\CLI\\Image_Jobs_Command' );
 }
 
 add_action( 'show_user_profile', 'alorbach_user_profile_credits_section' );

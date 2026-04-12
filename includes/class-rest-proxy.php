@@ -525,6 +525,19 @@ class REST_Proxy {
 				),
 			),
 		) );
+
+		register_rest_route( 'alorbach/v1', '/admin/image-jobs/actions', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'admin_image_jobs_action' ),
+			'permission_callback' => $admin_permission,
+			'args'                => array(
+				'action' => array(
+					'required'          => true,
+					'type'              => 'string',
+					'sanitize_callback' => 'sanitize_key',
+				),
+			),
+		) );
 	}
 
 	/**
@@ -1244,8 +1257,10 @@ class REST_Proxy {
 	public static function admin_image_jobs_list( $request ) {
 		$jobs = Image_Jobs::list_jobs_for_admin( (int) $request->get_param( 'limit' ) );
 		$payload = array_map( array( Image_Jobs::class, 'admin_job_summary_payload' ), $jobs );
+		$stats = Image_Jobs::get_queue_stats();
+		$stats['recent_total'] = count( $payload );
 		$response = array(
-			'stats' => Image_Jobs::summarize_jobs( $jobs ),
+			'stats' => $stats,
 			'jobs'  => $payload,
 		);
 
@@ -1298,6 +1313,24 @@ class REST_Proxy {
 		}
 
 		return rest_ensure_response( Image_Jobs::admin_job_payload( $job ) );
+	}
+
+	/**
+	 * Execute one admin queue maintenance action.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function admin_image_jobs_action( $request ) {
+		$payload = \Alorbach\AIGateway\Admin\Admin_Image_Queue::execute_action(
+			(string) $request->get_param( 'action' )
+		);
+
+		$stats = Image_Jobs::get_queue_stats();
+		$stats['recent_total'] = min( 50, (int) ( $stats['total'] ?? 0 ) );
+		$payload['stats'] = $stats;
+
+		return rest_ensure_response( $payload );
 	}
 
 	/**

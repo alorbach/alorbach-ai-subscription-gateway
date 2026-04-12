@@ -7,6 +7,8 @@
 
 namespace Alorbach\AIGateway\Admin;
 
+use Alorbach\AIGateway\Image_Jobs;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -17,6 +19,262 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Admin_Image_Queue {
 
 	/**
+	 * Queue admin page slug.
+	 *
+	 * @return string
+	 */
+	private static function page_slug() {
+		return 'alorbach-image-queue';
+	}
+
+	/**
+	 * Transient key for the current operator notice.
+	 *
+	 * @return string
+	 */
+	private static function notice_transient_key() {
+		return 'alorbach_image_queue_notice_' . get_current_user_id();
+	}
+
+	/**
+	 * Whether the current admin request targets the image queue page.
+	 *
+	 * @return bool
+	 */
+	private static function is_queue_page_request() {
+		$page = isset( $_REQUEST['page'] ) ? sanitize_key( wp_unslash( $_REQUEST['page'] ) ) : '';
+
+		return self::page_slug() === $page;
+	}
+
+	/**
+	 * Process a posted queue action before any output is sent.
+	 *
+	 * @return void
+	 */
+	public static function handle_actions() {
+		if ( ! is_admin() || ! self::is_queue_page_request() ) {
+			return;
+		}
+
+		if ( 'POST' !== ( $_SERVER['REQUEST_METHOD'] ?? '' ) || empty( $_POST['alorbach_image_queue_action'] ) ) {
+			return;
+		}
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
+		}
+
+		if ( ! Admin_Helper::verify_post_nonce( 'alorbach_image_queue_nonce', 'alorbach_image_queue_actions' ) ) {
+			wp_die( esc_html__( 'Invalid nonce.', 'alorbach-ai-gateway' ) );
+		}
+
+		$payload = self::execute_action( sanitize_key( wp_unslash( $_POST['alorbach_image_queue_action'] ) ) );
+
+		set_transient( self::notice_transient_key(), $payload['notice'], MINUTE_IN_SECONDS );
+		wp_safe_redirect( admin_url( 'admin.php?page=' . self::page_slug() ) );
+		exit;
+	}
+
+	/**
+	 * Execute one queue maintenance action and return its result payload.
+	 *
+	 * @param string $action Action name.
+	 * @return array
+	 */
+	public static function execute_action( $action ) {
+		$action = sanitize_key( (string) $action );
+		$notice = array(
+			'type'    => 'info',
+			'message' => __( 'No queue action was taken.', 'alorbach-ai-gateway' ),
+		);
+		$result = array(
+			'job_count'        => 0,
+			'attachment_count' => 0,
+		);
+
+		try {
+			switch ( $action ) {
+				case 'clear_failed':
+					$result = Image_Jobs::delete_jobs_by_status(
+						array( 'failed' ),
+						array(
+							'delete_preview_assets'   => true,
+							'delete_reference_assets' => true,
+							'delete_final_assets'     => true,
+						)
+					);
+					break;
+				case 'clear_stalled':
+					$result = Image_Jobs::delete_stalled_jobs(
+						array(
+							'delete_preview_assets'   => true,
+							'delete_reference_assets' => true,
+							'delete_final_assets'     => true,
+						)
+					);
+					break;
+				case 'clear_completed':
+					$result = Image_Jobs::delete_completed_jobs(
+						array(
+							'delete_preview_assets'   => true,
+							'delete_reference_assets' => true,
+							'delete_final_assets'     => false,
+						)
+					);
+					break;
+				case 'clear_expired':
+					$result = Image_Jobs::delete_expired_jobs(
+						array(
+							'delete_preview_assets'   => true,
+							'delete_reference_assets' => true,
+							'delete_final_assets'     => false,
+						)
+					);
+					break;
+				case 'clear_all':
+					$result = Image_Jobs::delete_all_jobs(
+						array(
+							'delete_preview_assets'   => true,
+							'delete_reference_assets' => true,
+							'delete_final_assets'     => true,
+						)
+					);
+					break;
+				case 'prune_index':
+					$result = array(
+						'job_count'        => 0,
+						'attachment_count' => 0,
+						'pruned_count'     => Image_Jobs::prune_job_index(),
+					);
+					break;
+			}
+
+			$notice = self::build_action_notice( $action, $result );
+		} catch ( \Throwable $error ) {
+			$notice = array(
+				'type'    => 'error',
+				'message' => $error->getMessage(),
+			);
+		}
+
+		return array(
+			'action' => $action,
+			'notice' => $notice,
+			'result' => $result,
+		);
+	}
+
+	/**
+	 * Build an operator notice for one queue action result.
+	 *
+	 * @param string $action Action name.
+	 * @param array  $result Action result.
+	 * @return array
+	 */
+	private static function build_action_notice( $action, $result ) {
+		$job_count        = isset( $result['job_count'] ) ? (int) $result['job_count'] : 0;
+		$attachment_count = isset( $result['attachment_count'] ) ? (int) $result['attachment_count'] : 0;
+		$pruned_count     = isset( $result['pruned_count'] ) ? (int) $result['pruned_count'] : 0;
+
+		if ( in_array( $action, array( 'clear_failed', 'clear_stalled', 'clear_completed', 'clear_expired', 'clear_all' ), true ) ) {
+			$message = sprintf(
+				/* translators: %d: job count */
+				_n( 'Cleared %d image job.', 'Cleared %d image jobs.', $job_count, 'alorbach-ai-gateway' ),
+				$job_count
+			);
+			if ( $attachment_count > 0 ) {
+				$message .= ' ' . sprintf(
+					/* translators: %d: attachment count */
+					_n( 'Removed %d attachment.', 'Removed %d attachments.', $attachment_count, 'alorbach-ai-gateway' ),
+					$attachment_count
+				);
+			}
+			if ( $pruned_count > 0 ) {
+				$message .= ' ' . sprintf(
+					/* translators: %d: index entry count */
+					_n( 'Pruned %d stale index entry.', 'Pruned %d stale index entries.', $pruned_count, 'alorbach-ai-gateway' ),
+					$pruned_count
+				);
+			}
+
+			return array(
+				'type'    => $job_count > 0 || $attachment_count > 0 || $pruned_count > 0 ? 'success' : 'info',
+				'message' => $message,
+			);
+		}
+
+		if ( 'prune_index' === $action ) {
+			return array(
+				'type'    => 'success',
+				'message' => sprintf(
+					/* translators: %d: index entry count */
+					_n( 'Pruned %d stale index entry.', 'Pruned %d stale index entries.', $pruned_count, 'alorbach-ai-gateway' ),
+					$pruned_count
+				),
+			);
+		}
+
+		return array(
+			'type'    => 'info',
+			'message' => __( 'No queue action was taken.', 'alorbach-ai-gateway' ),
+		);
+	}
+
+	/**
+	 * Read and clear the latest operator notice.
+	 *
+	 * @return array|null
+	 */
+	private static function get_notice() {
+		$key = self::notice_transient_key();
+		$notice = get_transient( $key );
+		if ( $notice ) {
+			delete_transient( $key );
+		}
+
+		return is_array( $notice ) ? $notice : null;
+	}
+
+	/**
+	 * Render the operator actions panel.
+	 *
+	 * @param array $stats Queue stats.
+	 * @return void
+	 */
+	private static function render_operator_panel( $stats ) {
+		?>
+		<div class="alorbach-image-queue__operator-panel">
+			<div class="alorbach-image-queue__operator-copy">
+				<h2><?php esc_html_e( 'Operator Actions', 'alorbach-ai-gateway' ); ?></h2>
+				<p class="description"><?php esc_html_e( 'Manual cleanup is admin-only and conservative by default. Final assets are only removed when the cleanup rules allow it.', 'alorbach-ai-gateway' ); ?></p>
+			</div>
+			<div class="alorbach-image-queue__operator-stats">
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Recent Jobs', 'alorbach-ai-gateway' ); ?></span><strong data-stat="total"><?php echo esc_html( (string) ( $stats['recent_total'] ?? 0 ) ); ?></strong></div>
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Queued', 'alorbach-ai-gateway' ); ?></span><strong data-stat="queued"><?php echo esc_html( (string) ( $stats['queued'] ?? 0 ) ); ?></strong></div>
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'In Progress', 'alorbach-ai-gateway' ); ?></span><strong data-stat="in_progress"><?php echo esc_html( (string) ( $stats['in_progress'] ?? 0 ) ); ?></strong></div>
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Completed', 'alorbach-ai-gateway' ); ?></span><strong data-stat="completed"><?php echo esc_html( (string) ( $stats['completed'] ?? 0 ) ); ?></strong></div>
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Failed', 'alorbach-ai-gateway' ); ?></span><strong data-stat="failed"><?php echo esc_html( (string) ( $stats['failed'] ?? 0 ) ); ?></strong></div>
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Stalled', 'alorbach-ai-gateway' ); ?></span><strong data-stat="stalled"><?php echo esc_html( (string) ( $stats['stalled'] ?? 0 ) ); ?></strong></div>
+				<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Expired', 'alorbach-ai-gateway' ); ?></span><strong data-stat="expired"><?php echo esc_html( (string) ( $stats['expired'] ?? 0 ) ); ?></strong></div>
+			</div>
+			<form method="post" class="alorbach-image-queue__operator-actions" data-role="operator-form">
+				<?php wp_nonce_field( 'alorbach_image_queue_actions', 'alorbach_image_queue_nonce' ); ?>
+				<div class="alorbach-image-queue__action-set">
+					<button type="submit" class="button button-secondary" name="alorbach_image_queue_action" value="clear_failed" data-confirm="<?php echo esc_attr( __( 'Clear failed jobs and their owned assets?', 'alorbach-ai-gateway' ) ); ?>"><?php esc_html_e( 'Clear Failed', 'alorbach-ai-gateway' ); ?></button>
+					<button type="submit" class="button button-secondary" name="alorbach_image_queue_action" value="clear_stalled" data-confirm="<?php echo esc_attr( __( 'Clear stalled jobs and their owned assets?', 'alorbach-ai-gateway' ) ); ?>"><?php esc_html_e( 'Clear Stalled', 'alorbach-ai-gateway' ); ?></button>
+					<button type="submit" class="button button-secondary" name="alorbach_image_queue_action" value="clear_completed" data-confirm="<?php echo esc_attr( __( 'Clear completed jobs and their queue metadata?', 'alorbach-ai-gateway' ) ); ?>"><?php esc_html_e( 'Clear Completed', 'alorbach-ai-gateway' ); ?></button>
+					<button type="submit" class="button button-secondary" name="alorbach_image_queue_action" value="clear_expired" data-confirm="<?php echo esc_attr( __( 'Clear expired jobs and their owned assets?', 'alorbach-ai-gateway' ) ); ?>"><?php esc_html_e( 'Clear Expired', 'alorbach-ai-gateway' ); ?></button>
+					<button type="submit" class="button button-link-delete" name="alorbach_image_queue_action" value="clear_all" data-confirm="<?php echo esc_attr( __( 'Clear every indexed job and its owned queue assets?', 'alorbach-ai-gateway' ) ); ?>"><?php esc_html_e( 'Clear All', 'alorbach-ai-gateway' ); ?></button>
+					<button type="submit" class="button button-link" name="alorbach_image_queue_action" value="prune_index" data-confirm="<?php echo esc_attr( __( 'Prune stale queue index entries only?', 'alorbach-ai-gateway' ) ); ?>"><?php esc_html_e( 'Prune Index', 'alorbach-ai-gateway' ); ?></button>
+					<button type="button" class="button" data-role="manual-refresh"><?php esc_html_e( 'Refresh Queue', 'alorbach-ai-gateway' ); ?></button>
+				</div>
+			</form>
+		</div>
+		<?php
+	}
+
+	/**
 	 * Render image queue page.
 	 *
 	 * @return void
@@ -25,6 +283,10 @@ class Admin_Image_Queue {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			wp_die( esc_html__( 'Unauthorized.', 'alorbach-ai-gateway' ) );
 		}
+
+		$stats_notice = self::get_notice();
+		$stats        = Image_Jobs::get_queue_stats();
+		$stats['recent_total'] = min( 50, (int) ( $stats['total'] ?? 0 ) );
 
 		$rest_url   = rest_url( 'alorbach/v1/admin/image-jobs' );
 		$rest_path  = wp_parse_url( $rest_url, PHP_URL_PATH );
@@ -37,14 +299,23 @@ class Admin_Image_Queue {
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Image Queue', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description"><?php esc_html_e( 'Monitor recent image jobs, active queue state, and per-job details. The list refreshes automatically.', 'alorbach-ai-gateway' ); ?></p>
+			<div data-role="queue-notice">
+				<?php if ( $stats_notice ) : ?>
+					<?php Admin_Helper::render_notice( (string) ( $stats_notice['message'] ?? '' ), (string) ( $stats_notice['type'] ?? 'info' ) ); ?>
+				<?php endif; ?>
+			</div>
+
+			<?php self::render_operator_panel( $stats ); ?>
 
 			<div id="alorbach-image-queue-app" class="alorbach-image-queue">
 				<div class="alorbach-image-queue__stats">
-					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Recent Jobs', 'alorbach-ai-gateway' ); ?></span><strong data-stat="total">0</strong></div>
-					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Queued', 'alorbach-ai-gateway' ); ?></span><strong data-stat="queued">0</strong></div>
-					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'In Progress', 'alorbach-ai-gateway' ); ?></span><strong data-stat="in_progress">0</strong></div>
-					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Completed', 'alorbach-ai-gateway' ); ?></span><strong data-stat="completed">0</strong></div>
-					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Failed', 'alorbach-ai-gateway' ); ?></span><strong data-stat="failed">0</strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Recent Jobs', 'alorbach-ai-gateway' ); ?></span><strong data-stat="total"><?php echo esc_html( (string) ( $stats['recent_total'] ?? 0 ) ); ?></strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Queued', 'alorbach-ai-gateway' ); ?></span><strong data-stat="queued"><?php echo esc_html( (string) ( $stats['queued'] ?? 0 ) ); ?></strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'In Progress', 'alorbach-ai-gateway' ); ?></span><strong data-stat="in_progress"><?php echo esc_html( (string) ( $stats['in_progress'] ?? 0 ) ); ?></strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Completed', 'alorbach-ai-gateway' ); ?></span><strong data-stat="completed"><?php echo esc_html( (string) ( $stats['completed'] ?? 0 ) ); ?></strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Failed', 'alorbach-ai-gateway' ); ?></span><strong data-stat="failed"><?php echo esc_html( (string) ( $stats['failed'] ?? 0 ) ); ?></strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Stalled', 'alorbach-ai-gateway' ); ?></span><strong data-stat="stalled"><?php echo esc_html( (string) ( $stats['stalled'] ?? 0 ) ); ?></strong></div>
+					<div class="alorbach-image-queue__stat"><span><?php esc_html_e( 'Expired', 'alorbach-ai-gateway' ); ?></span><strong data-stat="expired"><?php echo esc_html( (string) ( $stats['expired'] ?? 0 ) ); ?></strong></div>
 				</div>
 
 				<div class="alorbach-image-queue__status">
@@ -80,6 +351,11 @@ class Admin_Image_Queue {
 		</div>
 
 		<style>
+			.alorbach-image-queue__operator-panel { background:#fff; border:1px solid #dcdcde; border-radius:10px; padding:16px; margin:16px 0 18px; box-shadow:0 1px 0 rgba(0,0,0,.04); }
+			.alorbach-image-queue__operator-copy h2 { margin:0 0 4px; }
+			.alorbach-image-queue__operator-stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin:14px 0; }
+			.alorbach-image-queue__operator-actions { margin-top:12px; }
+			.alorbach-image-queue__action-set { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 			.alorbach-image-queue__stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin:16px 0; }
 			.alorbach-image-queue__stat { background:#fff; border:1px solid #dcdcde; border-radius:8px; padding:12px; }
 			.alorbach-image-queue__stat span { display:block; color:#50575e; margin-bottom:6px; }
@@ -120,6 +396,9 @@ class Admin_Image_Queue {
 			.alorbach-image-queue__lightbox img { position:relative; max-width:min(1200px,92vw); max-height:90vh; border-radius:10px; box-shadow:0 24px 80px rgba(0,0,0,.45); background:#fff; }
 			@media (max-width: 960px) { .alorbach-image-queue__layout { grid-template-columns:1fr; } }
 			@media (max-width: 782px) {
+				.alorbach-image-queue__operator-panel { padding:12px; }
+				.alorbach-image-queue__action-set { width:100%; }
+				.alorbach-image-queue__action-set .button { width:100%; justify-content:center; }
 				.alorbach-image-queue__panel { padding:10px; }
 				.alorbach-image-queue__panel--list { overflow-x:visible; }
 				.alorbach-image-queue__panel--list table,
@@ -143,48 +422,67 @@ class Admin_Image_Queue {
 		</style>
 
 		<script>
-			(function () {
-				var app = document.getElementById('alorbach-image-queue-app');
-				if (!app) return;
+			jQuery(function ($) {
+				var $app = $('#alorbach-image-queue-app');
+				if (! $app.length) {
+					return;
+				}
 
 				var restBase = <?php echo wp_json_encode( $rest_base ); ?>;
 				var nonce = <?php echo wp_json_encode( $nonce ); ?>;
-				var rowsEl = app.querySelector('[data-role="rows"]');
-				var detailsEl = app.querySelector('[data-role="details"]');
-				var statusEl = app.querySelector('[data-role="status"]');
-				var refreshBtn = app.querySelector('[data-role="refresh"]');
+				var $rowsEl = $app.find('[data-role="rows"]');
+				var $detailsEl = $app.find('[data-role="details"]');
+				var $statusEl = $app.find('[data-role="status"]');
+				var $refreshBtn = $app.find('[data-role="refresh"]');
+				var $noticeEl = $('[data-role="queue-notice"]').first();
+				var $operatorForm = $('[data-role="operator-form"]').first();
+				var $actionButtons = $operatorForm.find('button[type="submit"]');
 				var selectedJobId = null;
 				var refreshTimer = null;
 				var lightboxEl = null;
 				var hasRenderedDetails = false;
 				var activeDetailsTab = 'overview';
 
-				function api(path) {
-					return fetch(restBase + path, {
-						headers: { 'X-WP-Nonce': nonce },
-						credentials: 'same-origin'
-					}).then(function (response) {
-						return response.text().then(function (text) {
-							var data = null;
+				function request(options) {
+					return $.ajax($.extend(true, {
+						dataType: 'json',
+						xhrFields: { withCredentials: true },
+						beforeSend: function (xhr) {
+							xhr.setRequestHeader('X-WP-Nonce', nonce);
+						}
+					}, options)).then(function (data) {
+						return data;
+					}, function (xhr) {
+						var data = xhr && xhr.responseJSON ? xhr.responseJSON : null;
+						if (! data && xhr && xhr.responseText) {
 							try {
-								data = text ? JSON.parse(text) : null;
+								data = JSON.parse(xhr.responseText);
 							} catch (error) {
 								data = null;
 							}
+						}
 
-							if (!response.ok) {
-								throw data || { message: text || ('HTTP ' + response.status) };
-							}
-							if (data === null) {
-								throw { message: text || 'Invalid JSON response.' };
-							}
-							return data;
-						});
+						throw data || { message: (xhr && xhr.statusText) ? xhr.statusText : 'Unexpected error.' };
+					});
+				}
+
+				function api(path) {
+					return request({
+						url: restBase + path,
+						method: 'GET'
+					});
+				}
+
+				function runQueueAction(action) {
+					return request({
+						url: restBase + '/actions',
+						method: 'POST',
+						data: { action: action }
 					});
 				}
 
 				function getErrorMessage(error) {
-					if (!error) return 'Unexpected error.';
+					if (! error) return 'Unexpected error.';
 					if (typeof error.message === 'string' && error.message) return error.message;
 					if (typeof error.code === 'string' && error.code) return error.code;
 					return 'Unexpected error.';
@@ -205,10 +503,42 @@ class Admin_Image_Queue {
 				}
 
 				function setStats(stats) {
-					['total', 'queued', 'in_progress', 'completed', 'failed'].forEach(function (key) {
-						var el = app.querySelector('[data-stat="' + key + '"]');
-						if (el) el.textContent = String(stats[key] || 0);
+					['total', 'queued', 'in_progress', 'completed', 'failed', 'stalled', 'expired'].forEach(function (key) {
+						Array.prototype.forEach.call($app[0].querySelectorAll('[data-stat="' + key + '"]'), function (el) {
+							var value = key === 'total' ? (stats.recent_total || stats.total || 0) : (stats[key] || 0);
+							el.textContent = String(value);
+						});
 					});
+				}
+
+				function renderNotice(notice) {
+					if (! $noticeEl.length) {
+						return;
+					}
+
+					if (! notice || ! notice.message) {
+						$noticeEl.empty();
+						return;
+					}
+
+					var typeMap = {
+						success: 'notice-success',
+						error: 'notice-error',
+						warning: 'notice-warning',
+						info: 'notice-info'
+					};
+					var cssClass = typeMap[notice.type] || 'notice-info';
+					$noticeEl.html('<div class="notice ' + cssClass + '"><p>' + escapeHtml(notice.message) + '</p></div>');
+				}
+
+				function setActionButtonsDisabled(disabled) {
+					$actionButtons.prop('disabled', !! disabled);
+				}
+
+				function resetDetails() {
+					hasRenderedDetails = false;
+					activeDetailsTab = 'overview';
+					$detailsEl.html('<h2>Job Details</h2><p class="description">Select a job to inspect compact metadata first. Image assets load only on demand.</p>');
 				}
 
 				function ensureLightbox() {
@@ -252,13 +582,13 @@ class Admin_Image_Queue {
 
 				function setActiveTab(tabName) {
 					activeDetailsTab = tabName || 'overview';
-					Array.prototype.forEach.call(detailsEl.querySelectorAll('[data-tab]'), function (tabButton) {
+					Array.prototype.forEach.call($detailsEl[0].querySelectorAll('[data-tab]'), function (tabButton) {
 						var isActive = tabButton.getAttribute('data-tab') === activeDetailsTab;
 						tabButton.classList.toggle('is-active', isActive);
 						tabButton.setAttribute('aria-selected', isActive ? 'true' : 'false');
 						tabButton.setAttribute('tabindex', isActive ? '0' : '-1');
 					});
-					Array.prototype.forEach.call(detailsEl.querySelectorAll('[data-tab-panel]'), function (panel) {
+					Array.prototype.forEach.call($detailsEl[0].querySelectorAll('[data-tab-panel]'), function (panel) {
 						panel.hidden = panel.getAttribute('data-tab-panel') !== activeDetailsTab;
 					});
 				}
@@ -303,7 +633,7 @@ class Admin_Image_Queue {
 				}
 
 				function bindDetailInteractions(job) {
-					Array.prototype.forEach.call(detailsEl.querySelectorAll('[data-tab]'), function (tabButton) {
+					Array.prototype.forEach.call($detailsEl[0].querySelectorAll('[data-tab]'), function (tabButton) {
 						tabButton.addEventListener('click', function () {
 							var tabName = tabButton.getAttribute('data-tab');
 							setActiveTab(tabName);
@@ -313,13 +643,13 @@ class Admin_Image_Queue {
 						});
 					});
 
-					Array.prototype.forEach.call(detailsEl.querySelectorAll('[data-copy-text]'), function (copyButton) {
+					Array.prototype.forEach.call($detailsEl[0].querySelectorAll('[data-copy-text]'), function (copyButton) {
 						copyButton.addEventListener('click', function () {
 							copyText(copyButton.getAttribute('data-copy-text') || '', copyButton);
 						});
 					});
 
-					var loadImagesBtn = detailsEl.querySelector('[data-role="load-images"]');
+					var loadImagesBtn = $detailsEl[0].querySelector('[data-role="load-images"]');
 					if (loadImagesBtn) {
 						loadImagesBtn.addEventListener('click', function () {
 							loadDetails(job.job_id, false, true);
@@ -333,12 +663,20 @@ class Admin_Image_Queue {
 					var jobs = payload.jobs || [];
 					setStats(payload.stats || {});
 					if (!jobs.length) {
-						rowsEl.innerHTML = '<tr><td colspan="6">No image jobs found.</td></tr>';
-						detailsEl.innerHTML = '<h2>Job Details</h2><p class="description">Select a job to inspect compact metadata first. Image assets load only on demand.</p>';
+						selectedJobId = null;
+						$rowsEl.html('<tr><td colspan="6">No image jobs found.</td></tr>');
+						resetDetails();
 						return;
 					}
 
-					rowsEl.innerHTML = jobs.map(function (job) {
+					var hasSelectedJob = jobs.some(function (job) {
+						return job.job_id === selectedJobId;
+					});
+					if (!selectedJobId || !hasSelectedJob) {
+						selectedJobId = jobs[0].job_id;
+					}
+
+					$rowsEl.html(jobs.map(function (job) {
 						var selected = selectedJobId === job.job_id ? ' is-selected' : '';
 						var shortJobId = job.job_id.length > 14 ? job.job_id.slice(0, 14) + '…' : job.job_id;
 						return '<tr class="alorbach-image-queue__row' + selected + '">' +
@@ -349,18 +687,14 @@ class Admin_Image_Queue {
 							'<td data-label="Progress">' + job.progress_percent + '%</td>' +
 							'<td data-label="Updated">' + escapeHtml(job.updated_at_label) + '</td>' +
 							'</tr>';
-					}).join('');
+					}).join(''));
 
-					Array.prototype.forEach.call(rowsEl.querySelectorAll('[data-job-id]'), function (button) {
+					Array.prototype.forEach.call($rowsEl[0].querySelectorAll('[data-job-id]'), function (button) {
 						button.addEventListener('click', function () {
 							selectedJobId = button.getAttribute('data-job-id');
 							loadDetails(selectedJobId, false, false);
 						});
 					});
-
-					if (!selectedJobId) {
-						selectedJobId = jobs[0].job_id;
-					}
 				}
 
 				function renderThumbs(items) {
@@ -394,7 +728,7 @@ class Admin_Image_Queue {
 					var errorsHtml = (job.error ? '<p class="alorbach-image-queue__error"><strong>Error:</strong> ' + escapeHtml(job.error) + '</p>' : '') +
 						(job.images_error ? '<p class="alorbach-image-queue__error"><strong>Images:</strong> ' + escapeHtml(job.images_error) + '</p>' : '');
 					var hasErrors = !!(job.error || job.images_error);
-					detailsEl.innerHTML =
+					$detailsEl.html(
 						'<div class="alorbach-image-queue__details-header">' +
 							'<div>' +
 								'<h2>Job Details</h2>' +
@@ -436,44 +770,89 @@ class Admin_Image_Queue {
 						'</section>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="errors" hidden>' +
 							(hasErrors ? errorsHtml : '<p class="alorbach-image-queue__empty">No errors reported for this job.</p>') +
-						'</section>';
-					bindThumbClicks(detailsEl);
+						'</section>'
+					);
+					bindThumbClicks($detailsEl[0]);
 					bindDetailInteractions(job);
 				}
 
 				function loadDetails(jobId, rerenderRows, includeImages) {
-					statusEl.textContent = 'Loading job details...';
+					$statusEl.text('Loading job details...');
 					var detailPath = '/' + encodeURIComponent(jobId) + (includeImages ? '?include_images=1' : '');
 					api(detailPath).then(function (job) {
 						renderDetails(job);
-						statusEl.textContent = 'Queue updated ' + new Date().toLocaleTimeString();
+						$statusEl.text('Queue updated ' + new Date().toLocaleTimeString());
 						if (rerenderRows) {
 							loadList();
 						}
 					}).catch(function (error) {
-						statusEl.textContent = 'Failed to load job details: ' + getErrorMessage(error);
+						$statusEl.text('Failed to load job details: ' + getErrorMessage(error));
 					});
 				}
 
 				function loadList() {
-					statusEl.textContent = 'Loading queue...';
-					api('').then(function (payload) {
+					$statusEl.text('Loading queue...');
+					return api('').then(function (payload) {
 						renderRows(payload);
-						statusEl.textContent = 'Queue updated ' + new Date().toLocaleTimeString();
+						$statusEl.text('Queue updated ' + new Date().toLocaleTimeString());
 						if (selectedJobId && !hasRenderedDetails) {
-							loadDetails(selectedJobId, false, false);
+							return loadDetails(selectedJobId, false, false);
 						}
 					}).catch(function (error) {
-						rowsEl.innerHTML = '<tr><td colspan="6">Failed to load queue.</td></tr>';
-						statusEl.textContent = 'Failed to load queue: ' + getErrorMessage(error);
+						$rowsEl.html('<tr><td colspan="6">Failed to load queue.</td></tr>');
+						$statusEl.text('Failed to load queue: ' + getErrorMessage(error));
 					});
 				}
 
-				refreshBtn.addEventListener('click', function () {
+				$refreshBtn.on('click', function () {
 					loadList();
 					if (selectedJobId) {
 						loadDetails(selectedJobId, false, false);
 					}
+				});
+
+				$app.find('[data-role="manual-refresh"]').on('click', function () {
+						loadList();
+						if (selectedJobId) {
+							loadDetails(selectedJobId, false, false);
+						}
+				});
+
+				$operatorForm.on('click', 'button[type="submit"]', function (event) {
+					event.preventDefault();
+					var $button = $(this);
+					var action = $button.val();
+					var confirmMessage = $button.data('confirm') || '';
+
+					if (!action) {
+						return;
+					}
+
+					if (confirmMessage && !window.confirm(confirmMessage)) {
+						return;
+					}
+
+					setActionButtonsDisabled(true);
+					$statusEl.text('Running queue action...');
+
+					runQueueAction(action).then(function (payload) {
+						renderNotice(payload.notice || null);
+						if (payload.result && Array.isArray(payload.result.job_ids) && selectedJobId && payload.result.job_ids.indexOf(selectedJobId) !== -1) {
+							selectedJobId = null;
+							resetDetails();
+						}
+						setStats(payload.stats || {});
+						return loadList().then(function () {
+							if (selectedJobId) {
+								return loadDetails(selectedJobId, false, false);
+							}
+						});
+					}).catch(function (error) {
+						renderNotice({ type: 'error', message: getErrorMessage(error) });
+						$statusEl.text('Queue action failed: ' + getErrorMessage(error));
+					}).always(function () {
+						setActionButtonsDisabled(false);
+					});
 				});
 
 				document.addEventListener('keydown', function (event) {
@@ -488,7 +867,7 @@ class Admin_Image_Queue {
 					if (refreshTimer) window.clearInterval(refreshTimer);
 					closeLightbox();
 				});
-			}());
+			});
 		</script>
 		<?php
 	}

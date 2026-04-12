@@ -21,6 +21,7 @@ class Admin_Menu {
 	 */
 	public static function register() {
 		add_action( 'admin_init', array( Admin_Cost_Matrix::class, 'handle_actions' ) );
+		add_action( 'admin_init', array( Admin_Image_Queue::class, 'handle_actions' ) );
 		add_menu_page(
 			__( 'Alorbach AI Gateway', 'alorbach-ai-gateway' ),
 			__( 'AI Gateway', 'alorbach-ai-gateway' ),
