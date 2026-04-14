@@ -35,6 +35,7 @@ require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Base.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/OpenAI_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Azure_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Google_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Hugging_Face_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/GitHub_Models_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-codex-oauth.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Codex_Provider.php';

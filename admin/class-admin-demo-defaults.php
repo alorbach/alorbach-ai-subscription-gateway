@@ -75,7 +75,7 @@ class Admin_Demo_Defaults {
 	public static function get_image_models() {
 		$models = get_option( 'alorbach_image_models', array() );
 		$models = is_array( $models ) ? $models : array();
-		$models = array_values( array_filter( $models, 'is_string' ) );
+		$models = self::filter_models_by_capability( array_values( array_filter( $models, 'is_string' ) ), 'images' );
 		sort( $models );
 		return ! empty( $models ) ? $models : array( 'dall-e-3', 'gpt-image-1.5' );
 	}
@@ -109,8 +109,47 @@ class Admin_Demo_Defaults {
 		$costs  = get_option( $option_key, array() );
 		$costs  = is_array( $costs ) ? $costs : array();
 		$models = array_keys( $costs );
+		if ( $option_key === 'alorbach_audio_costs' ) {
+			$models = self::filter_models_by_capability( $models, 'audio' );
+		} elseif ( $option_key === 'alorbach_video_costs' ) {
+			$models = self::filter_models_by_capability( $models, 'video' );
+		}
 		sort( $models );
 		return ! empty( $models ) ? $models : $default_fallback;
+	}
+
+	/**
+	 * Filter model IDs to only those supported by the currently resolved provider capability.
+	 *
+	 * @param array  $models           Model IDs.
+	 * @param string $capability_group images, audio, or video.
+	 * @return array
+	 */
+	private static function filter_models_by_capability( $models, $capability_group ) {
+		$models = is_array( $models ) ? $models : array();
+		return array_values( array_filter( $models, function ( $model ) use ( $capability_group ) {
+			if ( ! is_string( $model ) || $model === '' ) {
+				return false;
+			}
+
+			$provider_id = \Alorbach\AIGateway\API_Client::get_provider_for_model( $model );
+			$provider    = \Alorbach\AIGateway\Providers\Provider_Registry::get( $provider_id );
+			if ( ! $provider ) {
+				return true;
+			}
+
+			if ( $capability_group === 'images' ) {
+				return (bool) $provider->supports_images();
+			}
+			if ( $capability_group === 'audio' ) {
+				return (bool) $provider->supports_audio();
+			}
+			if ( $capability_group === 'video' ) {
+				return (bool) $provider->supports_video();
+			}
+
+			return true;
+		} ) );
 	}
 
 	/**

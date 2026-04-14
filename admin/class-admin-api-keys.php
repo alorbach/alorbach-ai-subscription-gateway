@@ -36,6 +36,7 @@ class Admin_API_Keys {
 		'openai'        => 'OpenAI',
 		'azure'         => 'Azure OpenAI / Foundry',
 		'google'        => 'Google (Gemini)',
+		'huggingface'   => 'Hugging Face',
 		'github_models' => 'GitHub Models',
 		'codex'         => 'OpenAI Codex (OAuth)',
 	);
@@ -60,7 +61,7 @@ class Admin_API_Keys {
 			$raw     = isset( $_POST['entries'] ) && is_array( $_POST['entries'] ) ? $_POST['entries'] : array();
 			foreach ( $raw as $e ) {
 				$type = isset( $e['type'] ) ? sanitize_text_field( $e['type'] ) : '';
-				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'github_models', 'codex' ), true ) ) {
+				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'huggingface', 'github_models', 'codex' ), true ) ) {
 					continue;
 				}
 				$entry = array(
@@ -70,7 +71,7 @@ class Admin_API_Keys {
 					'enabled' => ! empty( $e['enabled'] ),
 					'name'    => isset( $e['name'] ) ? sanitize_text_field( wp_unslash( $e['name'] ) ) : '',
 				);
-				if ( $type === 'azure' && isset( $e['endpoint'] ) ) {
+				if ( in_array( $type, array( 'azure', 'huggingface' ), true ) && isset( $e['endpoint'] ) ) {
 					$entry['endpoint'] = esc_url_raw( wp_unslash( $e['endpoint'] ) );
 				}
 				if ( $type === 'github_models' ) {
@@ -157,7 +158,8 @@ class Admin_API_Keys {
 			.alorbach-api-keys .col-enabled { width: 6%; }
 			.alorbach-api-keys .col-actions { width: 8%; }
 			.alorbach-api-keys .entry-endpoint, .alorbach-api-keys .entry-org, .alorbach-api-keys .entry-free { visibility: hidden; }
-			.alorbach-api-keys tr[data-type="azure"] .entry-endpoint { visibility: visible; }
+			.alorbach-api-keys tr[data-type="azure"] .entry-endpoint,
+			.alorbach-api-keys tr[data-type="huggingface"] .entry-endpoint { visibility: visible; }
 			.alorbach-api-keys tr[data-type="github_models"] .entry-org, .alorbach-api-keys tr[data-type="github_models"] .entry-free { visibility: visible; }
 			.alorbach-api-keys tr[data-type="codex"] .entry-endpoint,
 			.alorbach-api-keys tr[data-type="codex"] .entry-org { display: none; }
@@ -321,6 +323,9 @@ class Admin_API_Keys {
 		$enabled  = ! empty( $entry['enabled'] );
 		$name     = $entry['name'] ?? '';
 		$endpoint = $entry['endpoint'] ?? '';
+		$endpoint_placeholder = ( $type === 'huggingface' )
+			? 'https://router.huggingface.co/v1'
+			: 'https://xxx.services.ai.azure.com';
 		$org      = $entry['org'] ?? '';
 		$free     = ! empty( $entry['free_pass_through'] );
 		$key_id   = 'key-' . ( is_numeric( $index ) ? $index : str_replace( '{{INDEX}}', 'tpl', $index ) );
@@ -387,7 +392,7 @@ class Admin_API_Keys {
 			</td>
 			<?php if ( $type !== 'codex' ) : ?>
 			<td class="entry-endpoint">
-				<input type="url" name="entries[<?php echo esc_attr( $index ); ?>][endpoint]" value="<?php echo esc_attr( $endpoint ); ?>" placeholder="https://xxx.services.ai.azure.com" class="large-text" />
+				<input type="url" name="entries[<?php echo esc_attr( $index ); ?>][endpoint]" value="<?php echo esc_attr( $endpoint ); ?>" placeholder="<?php echo esc_attr( $endpoint_placeholder ); ?>" class="large-text" />
 			</td>
 			<td class="entry-org">
 				<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][org]" value="<?php echo esc_attr( $org ); ?>" placeholder="<?php esc_attr_e( 'Optional', 'alorbach-ai-gateway' ); ?>" class="regular-text" />

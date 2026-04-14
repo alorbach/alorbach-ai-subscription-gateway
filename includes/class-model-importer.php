@@ -34,6 +34,7 @@ class Model_Importer {
 	private static $text_prefixes = array(
 		'openai'        => array( 'gpt-', 'o1', 'o3', 'o4' ),
 		'google'        => array( 'gemini-' ),
+		'huggingface'   => array(), // Router /v1/models already returns chat-compatible models.
 		'azure'         => array(), // Azure returns base model IDs; we accept all from the list.
 		'github_models' => array(), // GitHub uses publisher/model format; accept all.
 	);
@@ -133,6 +134,7 @@ class Model_Importer {
 			'openai'        => 'OpenAI',
 			'azure'         => 'Azure OpenAI / Foundry',
 			'google'        => 'Google (Gemini)',
+			'huggingface'   => 'Hugging Face',
 			'github_models' => 'GitHub Models',
 			'codex'         => 'OpenAI Codex (ChatGPT)',
 		);
@@ -507,6 +509,7 @@ class Model_Importer {
 		$image_to_add = ( $selected_image !== null )
 			? $selected_image
 			: ( $selected_entries !== null ? array() : array_merge( array( 'dall-e-3', 'gpt-image-1.5' ), self::$image_sizes ) );
+		$explicit_image_selection = ( $selected_image !== null || $selected_entries !== null );
 		if ( $selected_entries !== null ) {
 			foreach ( $selected_entries as $entry_id => $sel ) {
 				$ids = isset( $sel['image'] ) && is_array( $sel['image'] ) ? $sel['image'] : array();
@@ -524,7 +527,9 @@ class Model_Importer {
 			if ( empty( $item ) ) {
 				continue;
 			}
-			$is_model = ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
+			$is_model = $explicit_image_selection
+				? ! (bool) preg_match( '/^\d+x\d+$/', $item )
+				: ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
 			$is_size  = (bool) preg_match( '/^\d+x\d+$/', $item );
 			if ( $is_model ) {
 				if ( ! $overwrite && in_array( $item, $image_models, true ) ) {
@@ -536,8 +541,8 @@ class Model_Importer {
 				if ( strpos( $item, 'gpt-image' ) === 0 && ! isset( $image_model_costs[ $item ] ) ) {
 					$image_model_costs[ $item ] = $gpt_image_default_costs;
 				}
-				// Imagen/Gemini/FLUX image: use default cost if not set (e.g. 40000 UC per image).
-				if ( ( strpos( $item, 'imagen-' ) === 0 || strpos( $item, 'gemini-' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 ) && ! isset( $image_model_costs[ $item ] ) ) {
+				// Non-GPT image models default to a flat starter cost until tuned manually.
+				if ( ! isset( $image_model_costs[ $item ] ) ) {
 					$image_model_costs[ $item ] = array(
 						'low'    => array( '1024x1024' => 40000 ),
 						'medium' => array( '1024x1024' => 40000 ),

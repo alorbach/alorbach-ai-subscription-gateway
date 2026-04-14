@@ -253,9 +253,12 @@ class Demo_Shortcodes {
 	 */
 	public static function enqueue_assets() {
 		$url = ALORBACH_PLUGIN_URL;
-		$ver = ALORBACH_VERSION;
-		wp_enqueue_style( 'alorbach-demo-pages', $url . 'assets/css/demo-pages.css', array(), $ver );
-		wp_enqueue_script( 'alorbach-demo-pages', $url . 'assets/js/demo-pages.js', array(), $ver, true );
+		$css_path = ALORBACH_PLUGIN_DIR . 'assets/css/demo-pages.css';
+		$js_path  = ALORBACH_PLUGIN_DIR . 'assets/js/demo-pages.js';
+		$css_ver  = file_exists( $css_path ) ? (string) filemtime( $css_path ) : ALORBACH_VERSION;
+		$js_ver   = file_exists( $js_path ) ? (string) filemtime( $js_path ) : ALORBACH_VERSION;
+		wp_enqueue_style( 'alorbach-demo-pages', $url . 'assets/css/demo-pages.css', array(), $css_ver );
+		wp_enqueue_script( 'alorbach-demo-pages', $url . 'assets/js/demo-pages.js', array(), $js_ver, true );
 		wp_localize_script( 'alorbach-demo-pages', 'alorbachDemo', array(
 			'restUrl'              => rest_url( 'alorbach/v1' ),
 			'nonce'                => wp_create_nonce( 'wp_rest' ),

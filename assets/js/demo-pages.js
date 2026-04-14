@@ -764,6 +764,7 @@
 					if (!r.ok) return r.json().then(function (d) { throw d; });
 					return r.json();
 				}).then(function (job) {
+					activeJobId = job.job_id || null;
 					if (job.progress_mode === 'estimated') {
 						beginEstimatedProgress();
 					} else if (progressTimer) {

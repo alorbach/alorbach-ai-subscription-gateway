@@ -54,9 +54,23 @@ class API_Client {
 			return 'google';
 		}
 
+		$imported_provider = self::get_provider_for_imported_model( $model );
+		if ( $imported_provider && $helper::has_provider( $imported_provider ) ) {
+			return $imported_provider;
+		}
+
+		// Hugging Face router models may use publisher/model:policy or publisher/model:provider.
+		if ( strpos( $model, '/' ) !== false && strpos( $model, ':' ) !== false && $helper::has_provider( 'huggingface' ) ) {
+			return 'huggingface';
+		}
+
 		// GitHub Models uses publisher/model format (e.g. azure-openai/gpt-5, openai/gpt-4.1).
 		if ( strpos( $model, '/' ) !== false && $helper::has_provider( 'github_models' ) ) {
 			return 'github_models';
+		}
+
+		if ( strpos( $model, '/' ) !== false && $helper::has_provider( 'huggingface' ) ) {
+			return 'huggingface';
 		}
 
 		// Codex models: route to the dedicated OAuth provider when available.
@@ -95,6 +109,110 @@ class API_Client {
 		}
 
 		return $helper::has_provider( 'azure' ) ? 'azure' : 'openai';
+	}
+
+	/**
+	 * Resolve a provider from imported model metadata when possible.
+	 *
+	 * @param string $model Model ID.
+	 * @return string|null
+	 */
+	private static function get_provider_for_imported_model( $model ) {
+		$lookup_ids = array( (string) $model );
+		if ( strpos( $model, '/' ) !== false && strpos( $model, ':' ) !== false ) {
+			$lookup_ids[] = preg_replace( '/:[^\/:]+$/', '', (string) $model );
+		}
+
+		$cost_matrix = Cost_Matrix::get_cost_matrix();
+		$rows        = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
+		foreach ( $lookup_ids as $lookup_id ) {
+			foreach ( $rows as $row ) {
+				if ( empty( $row['model'] ) || $row['model'] !== $lookup_id ) {
+					continue;
+				}
+				$entry_id = isset( $row['entry_id'] ) ? (string) $row['entry_id'] : '';
+				if ( '' === $entry_id || $entry_id === 'legacy' ) {
+					continue;
+				}
+				$entry = API_Keys_Helper::get_entry_by_id( $entry_id );
+				if ( $entry && ! empty( $entry['enabled'] ) && ! empty( $entry['type'] ) ) {
+					return (string) $entry['type'];
+				}
+			}
+		}
+
+		$image_models = get_option( 'alorbach_image_models', array() );
+		$image_models = is_array( $image_models ) ? $image_models : array();
+		foreach ( $lookup_ids as $lookup_id ) {
+			if ( ! in_array( $lookup_id, $image_models, true ) ) {
+				continue;
+			}
+			if ( strpos( $lookup_id, 'gemini-' ) === 0 || strpos( $lookup_id, 'imagen-' ) === 0 ) {
+				return 'google';
+			}
+			if ( strpos( $lookup_id, 'gpt-image' ) === 0 || strpos( $lookup_id, 'dall-e' ) === 0 ) {
+				return API_Keys_Helper::has_provider( 'openai' ) ? 'openai' : ( API_Keys_Helper::has_provider( 'azure' ) ? 'azure' : null );
+			}
+			if ( strpos( $lookup_id, '/' ) !== false && API_Keys_Helper::has_provider( 'huggingface' ) ) {
+				return 'huggingface';
+			}
+		}
+
+		$video_costs = get_option( 'alorbach_video_costs', array() );
+		$video_costs = is_array( $video_costs ) ? $video_costs : array();
+		foreach ( $lookup_ids as $lookup_id ) {
+			if ( ! array_key_exists( $lookup_id, $video_costs ) ) {
+				continue;
+			}
+			if ( strpos( strtolower( $lookup_id ), 'veo-' ) === 0 ) {
+				return 'google';
+			}
+			if ( strpos( strtolower( $lookup_id ), 'sora' ) === 0 ) {
+				return API_Keys_Helper::has_provider( 'openai' ) ? 'openai' : ( API_Keys_Helper::has_provider( 'azure' ) ? 'azure' : null );
+			}
+			if ( strpos( $lookup_id, '/' ) !== false && API_Keys_Helper::has_provider( 'huggingface' ) ) {
+				return 'huggingface';
+			}
+		}
+
+		$audio_costs = get_option( 'alorbach_audio_costs', array() );
+		$audio_costs = is_array( $audio_costs ) ? $audio_costs : array();
+		foreach ( $lookup_ids as $lookup_id ) {
+			if ( ! array_key_exists( $lookup_id, $audio_costs ) ) {
+				continue;
+			}
+			if ( strpos( $lookup_id, 'whisper-' ) === 0 || strpos( $lookup_id, 'gpt-' ) === 0 ) {
+				return API_Keys_Helper::has_provider( 'openai' ) ? 'openai' : ( API_Keys_Helper::has_provider( 'azure' ) ? 'azure' : null );
+			}
+			if ( strpos( $lookup_id, '/' ) !== false && API_Keys_Helper::has_provider( 'huggingface' ) ) {
+				return 'huggingface';
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Format provider name for user-facing messages.
+	 *
+	 * @param string $provider Provider ID.
+	 * @return string
+	 */
+	private static function get_provider_label( $provider ) {
+		switch ( (string) $provider ) {
+			case 'openai':
+				return 'OpenAI';
+			case 'azure':
+				return 'Azure';
+			case 'google':
+				return 'Google';
+			case 'github_models':
+				return 'GitHub Models';
+			case 'huggingface':
+				return 'Hugging Face';
+			default:
+				return (string) $provider;
+		}
 	}
 
 	/**
@@ -426,10 +544,37 @@ class API_Client {
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
 		}
+		if ( $provider === 'huggingface' && $n > 1 ) {
+			$merged = array( 'data' => array() );
+			for ( $index = 0; $index < $n; $index++ ) {
+				$request = $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images );
+				if ( ! $request || is_wp_error( $request ) ) {
+					return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
+				}
+				$response = self::execute_image_request( $request );
+				if ( is_wp_error( $response ) ) {
+					return $response;
+				}
+				if ( ! empty( $response['data'] ) && is_array( $response['data'] ) ) {
+					$merged['data'] = array_merge( $merged['data'], $response['data'] );
+				}
+			}
+			return $merged;
+		}
 		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
+		return self::execute_image_request( $request );
+	}
+
+	/**
+	 * Execute one image-generation request and normalize the provider response.
+	 *
+	 * @param array $request Request array from the provider.
+	 * @return array|\WP_Error
+	 */
+	private static function execute_image_request( $request ) {
 		$response = wp_remote_post( $request['url'], array(
 			'headers' => $request['headers'],
 			'body'    => $request['body'],
@@ -439,11 +584,21 @@ class API_Client {
 			return $response;
 		}
 		$code = wp_remote_retrieve_response_code( $response );
+		$content_type = (string) wp_remote_retrieve_header( $response, 'content-type' );
 		$raw_body = wp_remote_retrieve_body( $response );
 		$body_response = json_decode( $raw_body, true );
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
 			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+		}
+		if ( strpos( strtolower( $content_type ), 'image/' ) === 0 && $raw_body !== '' ) {
+			return array(
+				'data' => array(
+					array(
+						'b64_json' => base64_encode( $raw_body ),
+					),
+				),
+			);
 		}
 		// Normalize Google Imagen response to OpenAI-style format.
 		if ( isset( $body_response['predictions'] ) && is_array( $body_response['predictions'] ) ) {
@@ -775,8 +930,18 @@ class API_Client {
 		}
 		$provider = self::get_provider_for_model( $model );
 		$prov     = Provider_Registry::get( $provider );
-		if ( ! $prov || ! $prov->supports_audio() ) {
+		if ( ! $prov ) {
 			return new \WP_Error( 'no_provider', __( 'No audio provider configured.', 'alorbach-ai-gateway' ) );
+		}
+		if ( ! $prov->supports_audio() ) {
+			return new \WP_Error(
+				'unsupported_provider',
+				sprintf(
+					/* translators: 1: provider name */
+					__( 'Audio transcription is not supported for %1$s models yet.', 'alorbach-ai-gateway' ),
+					self::get_provider_label( $provider )
+				)
+			);
 		}
 		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
@@ -824,19 +989,29 @@ class API_Client {
 	public static function create_video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
 		$provider = self::get_provider_for_model( $model );
 		$prov     = Provider_Registry::get( $provider );
-		if ( ! $prov || ! $prov->supports_video() ) {
+		if ( ! $prov ) {
 			return new \WP_Error( 'no_api_key', sprintf(
 				/* translators: 1: provider name */
 				__( 'API key not configured for %1$s. Video generation requires a configured API key for the model\'s provider.', 'alorbach-ai-gateway' ),
-				$provider === 'openai' ? 'OpenAI' : ( $provider === 'azure' ? 'Azure' : ( $provider === 'google' ? 'Google' : $provider ) )
+				self::get_provider_label( $provider )
 			) );
+		}
+		if ( ! $prov->supports_video() ) {
+			return new \WP_Error(
+				'unsupported_provider',
+				sprintf(
+					/* translators: 1: provider name */
+					__( 'Video generation is not supported for %1$s models yet.', 'alorbach-ai-gateway' ),
+					self::get_provider_label( $provider )
+				)
+			);
 		}
 		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', sprintf(
 				/* translators: 1: provider name */
 				__( 'API key not configured for %1$s. Video generation requires a configured API key for the model\'s provider.', 'alorbach-ai-gateway' ),
-				$provider === 'openai' ? 'OpenAI' : ( $provider === 'azure' ? 'Azure' : ( $provider === 'google' ? 'Google' : $provider ) )
+				self::get_provider_label( $provider )
 			) );
 		}
 		$request = $prov->build_video_request( $prompt, $model, $size, $duration_seconds, $creds );

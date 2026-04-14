@@ -17,6 +17,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Admin_Cost_Matrix {
 
 	/**
+	 * Sanitize a model identifier while preserving provider/model and provider suffix forms.
+	 *
+	 * @param string $model Raw model ID.
+	 * @return string
+	 */
+	private static function sanitize_model_id( $model ) {
+		$model = sanitize_text_field( (string) $model );
+		return preg_replace( '/[^a-zA-Z0-9\-_.:\/]/', '', $model );
+	}
+
+	/**
 	 * Get the provider to use when testing a model.
 	 *
 	 * @param string $model    Model ID.
@@ -29,6 +40,34 @@ class Admin_Cost_Matrix {
 			return $entry ? ( $entry['type'] ?? \Alorbach\AIGateway\API_Client::get_provider_for_model( $model ) ) : \Alorbach\AIGateway\API_Client::get_provider_for_model( $model );
 		}
 		return \Alorbach\AIGateway\API_Client::get_provider_for_model( $model );
+	}
+
+	/**
+	 * Determine whether the resolved provider supports testing for a capability.
+	 *
+	 * @param string $model      Model ID.
+	 * @param string $capability Capability name: chat, image, audio, video.
+	 * @param string $entry_id   Optional. When set, get provider from that entry.
+	 * @return bool
+	 */
+	public static function model_supports_test_capability( $model, $capability, $entry_id = '' ) {
+		$provider = self::get_test_provider_for_model( $model, $entry_id );
+		$prov     = \Alorbach\AIGateway\Providers\Provider_Registry::get( $provider );
+		if ( ! $prov ) {
+			return false;
+		}
+
+		switch ( $capability ) {
+			case 'video':
+				return (bool) $prov->supports_video();
+			case 'audio':
+				return (bool) $prov->supports_audio();
+			case 'image':
+				return (bool) $prov->supports_images();
+			case 'chat':
+			default:
+				return (bool) $prov->supports_chat();
+		}
 	}
 
 	/**
@@ -46,7 +85,7 @@ class Admin_Cost_Matrix {
 
 		// Add custom text model.
 		if ( isset( $_GET['alorbach_add_model'] ) && isset( $_GET['model'] ) ) {
-			$new_model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$new_model = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
 			$entry_id  = isset( $_GET['entry_id'] ) ? sanitize_text_field( wp_unslash( $_GET['entry_id'] ) ) : '';
 			if ( ! empty( $new_model ) && wp_verify_nonce( $nonce, 'alorbach_add_model' ) && $new_model !== 'default' ) {
 				$cost_matrix = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
@@ -65,7 +104,7 @@ class Admin_Cost_Matrix {
 
 		// Remove custom text model.
 		if ( isset( $_GET['alorbach_remove_model'] ) && isset( $_GET['model'] ) ) {
-			$remove_model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$remove_model = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
 			$entry_id     = isset( $_GET['entry_id'] ) ? sanitize_text_field( wp_unslash( $_GET['entry_id'] ) ) : '';
 			if ( ! empty( $remove_model ) && wp_verify_nonce( $nonce, 'alorbach_remove_model' ) && $remove_model !== 'default' ) {
 				$cost_matrix = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
@@ -99,7 +138,7 @@ class Admin_Cost_Matrix {
 
 		// Add custom audio model.
 		if ( isset( $_GET['alorbach_add_audio'] ) && isset( $_GET['model'] ) ) {
-			$new_audio = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$new_audio = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
 			if ( ! empty( $new_audio ) && wp_verify_nonce( $nonce, 'alorbach_add_audio' ) ) {
 				self::add_option_entry( 'alorbach_audio_costs', $new_audio, 100, array( 'alorbach_add_audio', 'model', '_wpnonce' ) );
 			}
@@ -107,7 +146,7 @@ class Admin_Cost_Matrix {
 
 		// Remove custom audio model.
 		if ( isset( $_GET['alorbach_remove_audio'] ) && isset( $_GET['model'] ) ) {
-			$remove_audio = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$remove_audio = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
 			if ( ! empty( $remove_audio ) && wp_verify_nonce( $nonce, 'alorbach_remove_audio' ) ) {
 				self::remove_option_entry( 'alorbach_audio_costs', $remove_audio, array( 'alorbach_remove_audio', 'model', '_wpnonce' ) );
 			}
@@ -115,7 +154,7 @@ class Admin_Cost_Matrix {
 
 		// Add custom video model.
 		if ( isset( $_GET['alorbach_add_video'] ) && isset( $_GET['model'] ) ) {
-			$new_video = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$new_video = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
 			if ( ! empty( $new_video ) && wp_verify_nonce( $nonce, 'alorbach_add_video' ) ) {
 				self::add_option_entry( 'alorbach_video_costs', $new_video, 400000, array( 'alorbach_add_video', 'model', '_wpnonce' ) );
 			}
@@ -123,9 +162,30 @@ class Admin_Cost_Matrix {
 
 		// Remove custom video model.
 		if ( isset( $_GET['alorbach_remove_video'] ) && isset( $_GET['model'] ) ) {
-			$remove_video = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( wp_unslash( $_GET['model'] ) ) );
+			$remove_video = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
 			if ( ! empty( $remove_video ) && wp_verify_nonce( $nonce, 'alorbach_remove_video' ) ) {
 				self::remove_option_entry( 'alorbach_video_costs', $remove_video, array( 'alorbach_remove_video', 'model', '_wpnonce' ) );
+			}
+		}
+
+		// Remove imported image model.
+		if ( isset( $_GET['alorbach_remove_image_model'] ) && isset( $_GET['model'] ) ) {
+			$remove_image_model = self::sanitize_model_id( wp_unslash( $_GET['model'] ) );
+			if ( ! empty( $remove_image_model ) && wp_verify_nonce( $nonce, 'alorbach_remove_image_model' ) ) {
+				$image_models = get_option( 'alorbach_image_models', array() );
+				$image_models = is_array( $image_models ) ? $image_models : array();
+				$image_models = array_values( array_filter( $image_models, function ( $model ) use ( $remove_image_model ) {
+					return (string) $model !== $remove_image_model;
+				} ) );
+
+				$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
+				$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
+				unset( $image_model_costs[ $remove_image_model ] );
+
+				update_option( 'alorbach_image_models', $image_models );
+				update_option( 'alorbach_image_model_costs', $image_model_costs );
+				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_image_model', 'model', '_wpnonce' ) ) );
+				exit;
 			}
 		}
 	}
@@ -178,6 +238,15 @@ class Admin_Cost_Matrix {
 		$image_models     = is_array( $image_models ) ? $image_models : array( 'dall-e-3', 'gpt-image-1.5' );
 		$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
 		$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
+		$has_openai_style_image_provider = \Alorbach\AIGateway\API_Keys_Helper::has_provider( 'openai' ) || \Alorbach\AIGateway\API_Keys_Helper::has_provider( 'azure' );
+		$has_dalle_family_models = false;
+		foreach ( $image_models as $img_model_id ) {
+			if ( strpos( (string) $img_model_id, 'dall-e' ) === 0 || strpos( (string) $img_model_id, 'gpt-image' ) === 0 ) {
+				$has_dalle_family_models = true;
+				break;
+			}
+		}
+		$show_dalle_section = $has_openai_style_image_provider || $has_dalle_family_models || ! empty( $image_costs );
 		$video_costs = get_option( 'alorbach_video_costs', array() );
 		$video_costs = is_array( $video_costs ) ? $video_costs : array();
 		$audio_costs = get_option( 'alorbach_audio_costs', array() );
@@ -196,7 +265,7 @@ class Admin_Cost_Matrix {
 				foreach ( wp_unslash( $_POST['cost_matrix'] ) as $key => $costs ) {
 					$parts = explode( '::', $key, 2 );
 					$entry_id = isset( $parts[0] ) ? sanitize_text_field( $parts[0] ) : '';
-					$model    = isset( $parts[1] ) ? preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( $parts[1] ) ) : '';
+					$model    = isset( $parts[1] ) ? self::sanitize_model_id( $parts[1] ) : '';
 					if ( empty( $model ) || $model === 'default' ) {
 						continue;
 					}
@@ -224,7 +293,7 @@ class Admin_Cost_Matrix {
 				$existing = is_array( $existing ) ? $existing : array();
 				$image_model_costs = $existing;
 				foreach ( wp_unslash( $_POST['image_model_costs'] ) as $model => $qualities ) {
-					$model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( $model ) );
+					$model = self::sanitize_model_id( $model );
 					if ( empty( $model ) || ! is_array( $qualities ) ) {
 						continue;
 					}
@@ -248,7 +317,7 @@ class Admin_Cost_Matrix {
 			if ( isset( $_POST['video_costs'] ) && is_array( $_POST['video_costs'] ) ) {
 				$video_costs = array();
 				foreach ( wp_unslash( $_POST['video_costs'] ) as $model => $cost ) {
-					$model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( $model ) );
+					$model = self::sanitize_model_id( $model );
 					if ( ! empty( $model ) ) {
 						$video_costs[ $model ] = absint( $cost );
 					}
@@ -257,7 +326,7 @@ class Admin_Cost_Matrix {
 			if ( isset( $_POST['audio_costs'] ) && is_array( $_POST['audio_costs'] ) ) {
 				$audio_costs = array();
 				foreach ( wp_unslash( $_POST['audio_costs'] ) as $model => $rate ) {
-					$model = preg_replace( '/[^a-zA-Z0-9\-_.]/', '', sanitize_text_field( $model ) );
+					$model = self::sanitize_model_id( $model );
 					if ( ! empty( $model ) ) {
 						$audio_costs[ $model ] = absint( $rate );
 					}
@@ -275,7 +344,7 @@ class Admin_Cost_Matrix {
 		$models_by_entry = array();
 		$models_array    = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
 		$entries         = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
-		$type_labels     = array( 'openai' => 'OpenAI', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'github_models' => 'GitHub Models' );
+		$type_labels     = array( 'openai' => 'OpenAI', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'github_models' => 'GitHub Models' );
 		foreach ( $models_array as $row ) {
 			$eid = $row['entry_id'] ?? 'legacy';
 			if ( ! isset( $models_by_entry[ $eid ] ) ) {
@@ -321,7 +390,16 @@ class Admin_Cost_Matrix {
 					<h2 id="alorbach_import_modal_title"><?php esc_html_e( 'Select models to import', 'alorbach-ai-gateway' ); ?></h2>
 					<p id="alorbach_import_modal_errors" class="notice notice-error" style="display:none;"></p>
 					<nav id="alorbach_import_tab_nav" class="alorbach-import-tabs" role="tablist"></nav>
-					<p style="margin:8px 0;"><input type="text" id="alorbach_import_filter" class="regular-text" placeholder="<?php esc_attr_e( 'Filter models...', 'alorbach-ai-gateway' ); ?>" /></p>
+					<div class="alorbach-import-toolbar">
+						<input type="text" id="alorbach_import_filter" class="regular-text" placeholder="<?php esc_attr_e( 'Filter models...', 'alorbach-ai-gateway' ); ?>" />
+						<select id="alorbach_import_sort" aria-label="<?php esc_attr_e( 'Sort models', 'alorbach-ai-gateway' ); ?>">
+							<option value="alpha"><?php esc_html_e( 'Sort: Alphabetical', 'alorbach-ai-gateway' ); ?></option>
+							<option value="usage"><?php esc_html_e( 'Sort: Most used', 'alorbach-ai-gateway' ); ?></option>
+							<option value="date"><?php esc_html_e( 'Sort: Newest first', 'alorbach-ai-gateway' ); ?></option>
+							<option value="provider"><?php esc_html_e( 'Sort: Provider order', 'alorbach-ai-gateway' ); ?></option>
+						</select>
+					</div>
+					<div id="alorbach_import_summary" class="alorbach-import-summary" aria-live="polite"></div>
 					<div id="alorbach_import_modal_body"></div>
 					<p class="alorbach-modal-actions">
 						<button type="button" class="button button-primary" id="alorbach_import_modal_confirm"><?php esc_html_e( 'Import selected', 'alorbach-ai-gateway' ); ?></button>
@@ -331,10 +409,15 @@ class Admin_Cost_Matrix {
 				</div>
 			</div>
 			<style>
-			.alorbach-modal { position: fixed; z-index: 100000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow: auto; }
-			.alorbach-modal-content { background: #fff; margin: 5% auto; padding: 20px; max-width: 700px; max-height: 90vh; overflow-y: auto; border-radius: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); }
-			#alorbach_import_modal_body { max-height: 58vh; overflow-y: auto; }
-			.alorbach-import-tabs { display: flex; flex-wrap: wrap; gap: 0; margin: 8px 0 0 0; border-bottom: 2px solid #c3c4c7; }
+			.alorbach-modal { position: fixed; z-index: 100000; inset: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); overflow: auto; padding: 16px; box-sizing: border-box; }
+			.alorbach-modal-content { background: #fff; margin: 0 auto; padding: 20px; width: min(1100px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: hidden; border-radius: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); display: flex; flex-direction: column; box-sizing: border-box; }
+			#alorbach_import_modal_body { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
+			.alorbach-import-tabs { display: flex; flex-wrap: wrap; gap: 0; margin: 8px 0 0 0; border-bottom: 2px solid #c3c4c7; position: sticky; top: 0; background: #fff; z-index: 2; }
+			.alorbach-import-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; position: sticky; top: 40px; background: #fff; z-index: 2; padding: 8px 0; }
+			.alorbach-import-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 10px 0; position: sticky; top: 96px; background: #fff; z-index: 2; padding-bottom: 8px; }
+			.alorbach-import-summary span { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; background: #f6f7f7; border: 1px solid #dcdcde; border-radius: 999px; font-size: 12px; color: #1d2327; }
+			.alorbach-import-toolbar input { flex: 1 1 320px; min-width: 180px; }
+			.alorbach-import-toolbar select { flex: 0 0 auto; min-width: 190px; }
 			.alorbach-import-tab { background: #f0f0f1; border: 1px solid #c3c4c7; border-bottom: none; padding: 7px 14px; cursor: pointer; font-size: 13px; border-radius: 3px 3px 0 0; margin-bottom: -2px; color: #3c434a; }
 			.alorbach-import-tab.alorbach-tab-active { background: #fff; border-bottom-color: #fff; font-weight: 600; color: #1d2327; }
 			.alorbach-import-tab:hover:not(.alorbach-tab-active) { background: #e2e4e7; }
@@ -342,12 +425,17 @@ class Admin_Cost_Matrix {
 			.alorbach-import-entry.alorbach-tab-visible { display: block; }
 			.alorbach-import-entry-label { margin: 0 0 8px 0; color: #1d2327; }
 			.alorbach-import-section { margin-bottom: 16px; }
-			.alorbach-import-section h4 { margin: 0 0 6px 0; font-size: 13px; }
-			.alorbach-import-list { max-height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
-			.alorbach-import-item { margin: 6px 0; }
-			.alorbach-import-item label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-			.alorbach-capabilities { font-size: 11px; color: #666; }
-			.alorbach-modal-actions { margin-top: 20px; }
+			.alorbach-import-section h4 { margin: 0 0 6px 0; font-size: 13px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+			.alorbach-import-section-count { color: #646970; font-weight: 400; }
+			.alorbach-import-list { max-height: min(28vh, 260px); overflow-y: auto; border: 1px solid #ccc; padding: 10px; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px 12px; align-content: start; }
+			.alorbach-import-item { margin: 0; min-width: 0; }
+			.alorbach-import-item label { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: center; cursor: pointer; min-width: 0; padding: 6px 8px; border: 1px solid #e2e4e7; border-radius: 4px; background: #fff; }
+			.alorbach-import-item-copy { min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden; }
+			.alorbach-import-item-main { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+			.alorbach-import-item-name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.alorbach-capabilities { font-size: 11px; color: #666; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.alorbach-modal-actions { margin-top: 20px; flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px; }
+			.alorbach-import-provider-hint { margin: 0 0 12px 0; }
 			#alorbach_import_account_filters { margin: 8px 0 12px 0; max-height: 120px; overflow-y: auto; }
 			#alorbach_import_account_filters label { display: block; margin-bottom: 4px; cursor: pointer; }
 			.alorbach-test-result-modal .alorbach-modal-content { max-width: 560px; }
@@ -370,6 +458,15 @@ class Admin_Cost_Matrix {
 			.alorbach-cost-grid .alorbach-test-result:hover .alorbach-tooltip-content { display: block; }
 			.alorbach-cost-grid-wrapper { overflow-x: auto; }
 			body.alorbach-admin-loading { cursor: wait !important; }
+			@media (max-width: 782px) {
+				.alorbach-modal { padding: 8px; }
+				.alorbach-modal-content { width: calc(100vw - 16px); max-height: calc(100vh - 16px); padding: 16px; }
+				.alorbach-import-toolbar { align-items: stretch; }
+				.alorbach-import-toolbar select { width: 100%; }
+				.alorbach-import-list { grid-template-columns: 1fr; }
+				.alorbach-import-item label { align-items: center; }
+				.alorbach-modal-actions { position: sticky; bottom: 0; background: #fff; padding-top: 12px; }
+			}
 			</style>
 
 			<div id="alorbach_test_result_modal" class="alorbach-modal alorbach-test-result-modal" style="display:none;">
@@ -510,8 +607,9 @@ class Admin_Cost_Matrix {
 				<h2><?php esc_html_e( 'Image', 'alorbach-ai-gateway' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Gateway-wide image defaults now live in AI Gateway -> Settings -> General Defaults. Manage image model costs here.', 'alorbach-ai-gateway' ); ?></p>
 
-				<h3><?php esc_html_e( 'DALL-E: Cost per image by size', 'alorbach-ai-gateway' ); ?></h3>
-				<p class="description"><?php esc_html_e( 'Flat cost per size for DALL-E. Add custom sizes as needed.', 'alorbach-ai-gateway' ); ?> <?php esc_html_e( 'Test generates 1 image (costs credits on OpenAI).', 'alorbach-ai-gateway' ); ?></p>
+				<?php if ( $show_dalle_section ) : ?>
+				<h3><?php esc_html_e( 'DALL-E / GPT Image: Cost per image by size', 'alorbach-ai-gateway' ); ?></h3>
+				<p class="description"><?php esc_html_e( 'Legacy size-based costs for OpenAI image models. Add custom sizes as needed.', 'alorbach-ai-gateway' ); ?> <?php esc_html_e( 'Test generates 1 image and uses your OpenAI-style image provider.', 'alorbach-ai-gateway' ); ?></p>
 				<div class="alorbach-cost-grid-wrapper">
 					<table class="alorbach-cost-grid form-table">
 						<thead>
@@ -552,6 +650,7 @@ class Admin_Cost_Matrix {
 						</tbody>
 					</table>
 				</div>
+				<?php endif; ?>
 
 				<?php
 				$gpt_sizes = array( '1024x1024', '1024x1536', '1536x1024' );
@@ -562,14 +661,8 @@ class Admin_Cost_Matrix {
 				<p class="description"><?php esc_html_e( 'Cost varies by quality (low/medium/high) and resolution. Values in UC; USD shown next to each field.', 'alorbach-ai-gateway' ); ?></p>
 				<?php foreach ( $image_model_costs as $img_model => $qualities ) :
 					$is_gpt = ( strpos( $img_model, 'gpt-image' ) === 0 );
-					$is_imagen = ( strpos( $img_model, 'imagen-' ) === 0 );
-					$is_dalle = ( strpos( $img_model, 'dall-e' ) === 0 );
-					$is_flux = ( strpos( strtolower( $img_model ), 'flux' ) === 0 );
-					$is_gemini_img = ( strpos( $img_model, 'gemini-' ) === 0 && ( strpos( $img_model, '-image' ) !== false || strpos( $img_model, 'image-' ) !== false ) );
-					if ( ! $is_gpt && ! $is_imagen && ! $is_dalle && ! $is_flux && ! $is_gemini_img ) {
-						continue;
-					}
 					$sizes_for_model = $is_gpt ? $gpt_sizes : array( '1024x1024' );
+					$remove_image_model_url = wp_nonce_url( add_query_arg( array( 'alorbach_remove_image_model' => '1', 'model' => $img_model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_image_model', '_wpnonce' );
 					?>
 				<div class="alorbach-cost-grid-wrapper" style="margin-bottom: 1.5rem;">
 					<h4><?php echo esc_html( $img_model ); ?></h4>
@@ -604,6 +697,7 @@ class Admin_Cost_Matrix {
 						</tbody>
 					</table>
 					<p class="description" style="margin-top: 8px;">
+						<a href="<?php echo esc_url( $remove_image_model_url ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
 						<button type="button" class="button button-small alorbach-test-image-model" data-model="<?php echo esc_attr( $img_model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?> <?php echo esc_html( $img_model ); ?></button>
 						<span class="alorbach-test-result" data-type="image-model" data-model="<?php echo esc_attr( $img_model ); ?>"></span>
 					</p>
@@ -611,7 +705,7 @@ class Admin_Cost_Matrix {
 				<?php endforeach; ?>
 				<?php endif; ?>
 
-				<h2><?php esc_html_e( 'Video (Sora)', 'alorbach-ai-gateway' ); ?></h2>
+				<h2><?php esc_html_e( 'Video', 'alorbach-ai-gateway' ); ?></h2>
 				<p class="description"><?php esc_html_e( 'Cost for 8 seconds per model (scales by duration: 4s = ½, 12s = 1.5×). Add custom models as needed.', 'alorbach-ai-gateway' ); ?></p>
 				<div class="alorbach-cost-grid-wrapper">
 					<table class="alorbach-cost-grid form-table">
@@ -627,6 +721,7 @@ class Admin_Cost_Matrix {
 								list( $video_base, $video_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $model );
 								$video_display = $video_version ? $video_base . ' (' . $video_version . ')' : $model;
 								$cost_int = (int) $cost;
+								$can_test_video = self::model_supports_test_capability( $model, 'video' );
 							?>
 								<tr>
 									<td><?php echo esc_html( $video_display ); ?></td>
@@ -638,7 +733,11 @@ class Admin_Cost_Matrix {
 									</td>
 									<td class="alorbach-actions">
 										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_video' => '1', 'model' => $model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_video', '_wpnonce' ) ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
-										<button type="button" class="button alorbach-test-video" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<?php if ( $can_test_video ) : ?>
+											<button type="button" class="button alorbach-test-video" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<?php else : ?>
+											<button type="button" class="button" disabled title="<?php esc_attr_e( 'Testing is not available for this provider yet.', 'alorbach-ai-gateway' ); ?>"><?php esc_html_e( 'Unsupported', 'alorbach-ai-gateway' ); ?></button>
+										<?php endif; ?>
 										<span class="alorbach-test-result" data-type="video" data-model="<?php echo esc_attr( $model ); ?>"></span>
 									</td>
 								</tr>
@@ -670,6 +769,7 @@ class Admin_Cost_Matrix {
 								list( $audio_base, $audio_version ) = \Alorbach\AIGateway\Model_Importer::parse_model_display( $model );
 								$audio_display = $audio_version ? $audio_base . ' (' . $audio_version . ')' : $model;
 								$rate_int = (int) $rate;
+								$can_test_audio = self::model_supports_test_capability( $model, 'audio' );
 							?>
 								<tr>
 									<td><?php echo esc_html( $audio_display ); ?></td>
@@ -681,7 +781,11 @@ class Admin_Cost_Matrix {
 									</td>
 									<td class="alorbach-actions">
 										<a href="<?php echo esc_url( wp_nonce_url( add_query_arg( array( 'alorbach_remove_audio' => '1', 'model' => $model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_audio', '_wpnonce' ) ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
-										<button type="button" class="button alorbach-test-audio" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<?php if ( $can_test_audio ) : ?>
+											<button type="button" class="button alorbach-test-audio" data-model="<?php echo esc_attr( $model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+										<?php else : ?>
+											<button type="button" class="button" disabled title="<?php esc_attr_e( 'Testing is not available for this provider yet.', 'alorbach-ai-gateway' ); ?>"><?php esc_html_e( 'Unsupported', 'alorbach-ai-gateway' ); ?></button>
+										<?php endif; ?>
 										<span class="alorbach-test-result" data-type="audio" data-model="<?php echo esc_attr( $model ); ?>"></span>
 									</td>
 								</tr>
@@ -974,16 +1078,21 @@ class Admin_Cost_Matrix {
 					var labels = data.capability_labels || {};
 					var googleImportDefault = data.google_import_default || 'all';
 					var filterInput = document.getElementById('alorbach_import_filter');
+					var sortInput = document.getElementById('alorbach_import_sort');
+					var summaryEl = document.getElementById('alorbach_import_summary');
 					if (filterInput) filterInput.value = '';
+					if (sortInput) sortInput.value = 'alpha';
+					if (summaryEl) summaryEl.innerHTML = '';
 					var body = document.getElementById('alorbach_import_modal_body');
 					body.innerHTML = '';
 					var tabNav = document.getElementById('alorbach_import_tab_nav');
 					tabNav.innerHTML = '';
 					var entries = data.entries || [];
-					var typeLabels = { text: '<?php echo esc_js( __( 'Text (chat)', 'alorbach-ai-gateway' ) ); ?>', image: '<?php echo esc_js( __( 'Image', 'alorbach-ai-gateway' ) ); ?>', video: '<?php echo esc_js( __( 'Video (Sora)', 'alorbach-ai-gateway' ) ); ?>', audio: '<?php echo esc_js( __( 'Audio', 'alorbach-ai-gateway' ) ); ?>' };
+					var typeLabels = { text: '<?php echo esc_js( __( 'Text (chat)', 'alorbach-ai-gateway' ) ); ?>', image: '<?php echo esc_js( __( 'Image', 'alorbach-ai-gateway' ) ); ?>', video: '<?php echo esc_js( __( 'Video', 'alorbach-ai-gateway' ) ); ?>', audio: '<?php echo esc_js( __( 'Audio', 'alorbach-ai-gateway' ) ); ?>' };
 					entries.forEach(function(entry) {
 						var entryId = entry.entry_id || '';
 						var isGoogle = (entry.type || '') === 'google';
+						var isHuggingFace = (entry.type || '') === 'huggingface';
 						var defaultChecked = !(isGoogle && googleImportDefault === 'none');
 
 						// Build tab button
@@ -1002,9 +1111,14 @@ class Admin_Cost_Matrix {
 						section.dataset.entryType = entry.type || '';
 						if (isGoogle) {
 							var hint = document.createElement('p');
-							hint.className = 'alorbach-import-google-hint description';
+							hint.className = 'alorbach-import-provider-hint description';
 							hint.innerHTML = '<?php echo esc_js( __( 'Google lists all catalog models. Check', 'alorbach-ai-gateway' ) ); ?> <a href="https://aistudio.google.com/app/rate_limit" target="_blank" rel="noopener"><?php echo esc_js( __( 'AI Studio Rate Limit', 'alorbach-ai-gateway' ) ); ?></a> <?php echo esc_js( __( 'to see which models you have access to. Only select models with non-zero limits.', 'alorbach-ai-gateway' ) ); ?>';
 							section.appendChild(hint);
+						} else if (isHuggingFace) {
+							var hfHint = document.createElement('p');
+							hfHint.className = 'alorbach-import-provider-hint description';
+							hfHint.textContent = '<?php echo esc_js( __( 'Hugging Face image imports are filtered to models exposed through hf-inference, which matches this plugin\'s current runtime support. Text/chat models still come from the router catalog. Audio and video remain intentionally unsupported for this provider today.', 'alorbach-ai-gateway' ) ); ?>';
+							section.appendChild(hfHint);
 						}
 						['text','image','video','audio'].forEach(function(type) {
 							var items = entry[type] || [];
@@ -1015,16 +1129,25 @@ class Admin_Cost_Matrix {
 							typeDiv.dataset.entryId = entryId;
 							var btnSel = '<button type="button" class="button button-small alorbach-select-all" data-type="' + type + '" data-entry-id="' + entryId + '"><?php echo esc_js( __( 'Select all', 'alorbach-ai-gateway' ) ); ?></button>';
 							var btnUnsel = '<button type="button" class="button button-small alorbach-unselect-all" data-type="' + type + '" data-entry-id="' + entryId + '"><?php echo esc_js( __( 'Unselect all', 'alorbach-ai-gateway' ) ); ?></button>';
-							typeDiv.innerHTML = '<h4>' + (typeLabels[type] || type) + ' ' + btnSel + ' ' + btnUnsel + '</h4><div class="alorbach-import-list" data-type="' + type + '" data-entry-id="' + entryId + '"></div>';
+							typeDiv.innerHTML = '<h4><span>' + (typeLabels[type] || type) + '</span><span class="alorbach-import-section-count">(' + items.length + ')</span> ' + btnSel + ' ' + btnUnsel + '</h4><div class="alorbach-import-list" data-type="' + type + '" data-entry-id="' + entryId + '"></div>';
 							var list = typeDiv.querySelector('.alorbach-import-list');
-							items.forEach(function(item) {
+							items.forEach(function(item, index) {
 								var caps = (item.capabilities || []).map(function(c) { return labels[c] || c; }).join(', ');
 								var display = item.version ? (item.base || item.id) + ' (' + item.version + ')' : (item.id || '');
+								var usageScore = Number(item.downloads || item.usage || item.popularity || item.likes || 0);
+								var dateScore = Date.parse(item.last_modified || item.created_at || item.released_at || '') || 0;
+								var safeDisplay = display.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+								var safeCaps = caps.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+								var safeTitle = ((item.id || '') + (caps ? ' [' + caps + ']' : '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 								var div = document.createElement('div');
 								div.className = 'alorbach-import-item';
 								div.dataset.modelId = (item.id || '').toLowerCase();
+								div.dataset.modelDisplay = (display || '').toLowerCase();
+								div.dataset.sortUsage = String(usageScore);
+								div.dataset.sortDate = String(dateScore);
+								div.dataset.sortProvider = String(index);
 								var checkedAttr = defaultChecked ? ' checked' : '';
-								div.innerHTML = '<label><input type="checkbox" class="alorbach-import-cb" data-type="' + type + '" data-entry-id="' + entryId + '" data-id="' + (item.id || '').replace(/"/g, '&quot;') + '"' + checkedAttr + '> <span>' + display.replace(/</g, '&lt;') + '</span> <span class="alorbach-capabilities">(' + caps.replace(/</g, '&lt;') + ')</span></label>';
+								div.innerHTML = '<label title="' + safeTitle + '"><input type="checkbox" class="alorbach-import-cb" data-type="' + type + '" data-entry-id="' + entryId + '" data-id="' + (item.id || '').replace(/"/g, '&quot;') + '"' + checkedAttr + '> <span class="alorbach-import-item-copy"><span class="alorbach-import-item-main"><span class="alorbach-import-item-name">' + safeDisplay + '</span></span> <span class="alorbach-capabilities">(' + safeCaps + ')</span></span></label>';
 								list.appendChild(div);
 							});
 							section.appendChild(typeDiv);
@@ -1049,6 +1172,7 @@ class Admin_Cost_Matrix {
 							if (target) target.classList.add('alorbach-tab-visible');
 							if (filterInput) filterInput.value = '';
 							applyImportFilter();
+							updateImportSummary();
 						});
 					});
 
@@ -1057,6 +1181,7 @@ class Admin_Cost_Matrix {
 							var t = this.getAttribute('data-type');
 							var eid = this.getAttribute('data-entry-id') || '';
 							document.querySelectorAll('.alorbach-import-cb[data-type="' + t + '"][data-entry-id="' + eid + '"]').forEach(function(cb) { cb.checked = true; });
+							updateImportSummary();
 						};
 					});
 					document.querySelectorAll('.alorbach-unselect-all').forEach(function(btn) {
@@ -1064,12 +1189,92 @@ class Admin_Cost_Matrix {
 							var t = this.getAttribute('data-type');
 							var eid = this.getAttribute('data-entry-id') || '';
 							document.querySelectorAll('.alorbach-import-cb[data-type="' + t + '"][data-entry-id="' + eid + '"]').forEach(function(cb) { cb.checked = false; });
+							updateImportSummary();
 						};
 					});
 					var hasGoogle = entries.some(function(e) { return (e.type || '') === 'google'; });
 					var saveWhitelistBtn = document.getElementById('alorbach_save_google_whitelist_btn');
 					if (saveWhitelistBtn) saveWhitelistBtn.style.display = hasGoogle ? '' : 'none';
+					bindImportCheckboxes();
+					sortImportLists();
 					applyImportFilter();
+					updateImportSummary();
+				}
+
+				function updateImportSummary() {
+					var summaryEl = document.getElementById('alorbach_import_summary');
+					if (!summaryEl) return;
+					var selected = { total: 0, text: 0, image: 0, video: 0, audio: 0 };
+					document.querySelectorAll('.alorbach-import-cb:checked').forEach(function(cb) {
+						var type = cb.getAttribute('data-type') || 'text';
+						selected.total++;
+						if (selected[type] !== undefined) selected[type]++;
+					});
+					var activeEntry = document.querySelector('.alorbach-import-entry.alorbach-tab-visible');
+					var visibleParts = [];
+					if (activeEntry) {
+						['text', 'image', 'video', 'audio'].forEach(function(type) {
+							var visible = 0;
+							activeEntry.querySelectorAll('.alorbach-import-list[data-type="' + type + '"] .alorbach-import-item').forEach(function(item) {
+								if (item.style.display !== 'none') visible++;
+							});
+							if (visible) visibleParts.push(type + ': ' + visible);
+						});
+					}
+					summaryEl.innerHTML = '';
+					[
+						'Selected: ' + selected.total,
+						'Text: ' + selected.text,
+						'Image: ' + selected.image,
+						'Video: ' + selected.video,
+						'Audio: ' + selected.audio,
+						visibleParts.length ? ('Visible in tab: ' + visibleParts.join(', ')) : ''
+					].filter(Boolean).forEach(function(text) {
+						var chip = document.createElement('span');
+						chip.textContent = text;
+						summaryEl.appendChild(chip);
+					});
+				}
+
+				function bindImportCheckboxes() {
+					document.querySelectorAll('.alorbach-import-cb').forEach(function(cb) {
+						cb.addEventListener('change', updateImportSummary);
+					});
+				}
+
+				function compareImportItems(a, b) {
+					var sortInput = document.getElementById('alorbach_import_sort');
+					var mode = sortInput ? sortInput.value : 'alpha';
+					var alphaA = a.dataset.modelDisplay || a.dataset.modelId || '';
+					var alphaB = b.dataset.modelDisplay || b.dataset.modelId || '';
+
+					if (mode === 'usage') {
+						var usageA = Number(a.dataset.sortUsage || 0);
+						var usageB = Number(b.dataset.sortUsage || 0);
+						if (usageA !== usageB) return usageB - usageA;
+					}
+
+					if (mode === 'date') {
+						var dateA = Number(a.dataset.sortDate || 0);
+						var dateB = Number(b.dataset.sortDate || 0);
+						if (dateA !== dateB) return dateB - dateA;
+					}
+
+					if (mode === 'provider') {
+						var providerA = Number(a.dataset.sortProvider || 0);
+						var providerB = Number(b.dataset.sortProvider || 0);
+						if (providerA !== providerB) return providerA - providerB;
+					}
+
+					return alphaA.localeCompare(alphaB);
+				}
+
+				function sortImportLists() {
+					document.querySelectorAll('.alorbach-import-list').forEach(function(list) {
+						var items = Array.prototype.slice.call(list.querySelectorAll('.alorbach-import-item'));
+						items.sort(compareImportItems);
+						items.forEach(function(item) { list.appendChild(item); });
+					});
 				}
 
 				function applyImportFilter() {
@@ -1087,6 +1292,7 @@ class Admin_Cost_Matrix {
 							section.style.display = visible > 0 || !q ? '' : 'none';
 						});
 					});
+						updateImportSummary();
 				}
 
 				function getSelected() {
@@ -1103,6 +1309,11 @@ class Admin_Cost_Matrix {
 				}
 
 				document.getElementById('alorbach_import_filter').addEventListener('input', applyImportFilter);
+				document.getElementById('alorbach_import_sort').addEventListener('change', function() {
+					sortImportLists();
+					applyImportFilter();
+					updateImportSummary();
+				});
 
 				modalCancel.addEventListener('click', function() { modal.style.display = 'none'; pendingAction = null; });
 
