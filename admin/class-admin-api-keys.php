@@ -384,8 +384,9 @@ class Admin_API_Keys {
 						__( 'If the Space is private or protected, create a Hugging Face access token with the required permissions. Public Spaces can leave API Key empty.', 'alorbach-ai-gateway' ),
 						__( 'Add a row with type "Hugging Face Spaces".', 'alorbach-ai-gateway' ),
 						__( 'Enter the Space ID in the Space ID field.', 'alorbach-ai-gateway' ),
-						__( 'Choose the request mode. Use Custom HTTP for stable custom endpoints, or Gradio API only for Spaces that expose a compatible Gradio surface.', 'alorbach-ai-gateway' ),
-						__( 'Enter Endpoint only when you want to override the detected hf.space URL or target a custom path such as /generate.', 'alorbach-ai-gateway' ),
+						__( 'Choose the request mode. Use Custom HTTP for stable custom endpoints, or Gradio API for Spaces that publish /gradio_api documentation.', 'alorbach-ai-gateway' ),
+						__( 'For Gradio API Spaces, enter the base app URL such as https://owner-space.hf.space, not the MCP URL.', 'alorbach-ai-gateway' ),
+						__( 'For Custom HTTP Spaces, enter Endpoint only when you want to override the detected hf.space URL or target a custom path such as /generate.', 'alorbach-ai-gateway' ),
 						__( 'Treat this integration as experimental for now because it has not been fully end-to-end tested yet.', 'alorbach-ai-gateway' ),
 						__( 'Save API Keys, then click Test.', 'alorbach-ai-gateway' ),
 					)

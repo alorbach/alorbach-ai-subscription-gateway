@@ -118,11 +118,43 @@ class Model_Importer {
 	);
 
 	/**
+	 * Normalize an optional list of entry IDs into a lookup map.
+	 *
+	 * @param array|string|null $entry_ids Entry IDs to include, or null for all.
+	 * @return array<string, bool>|null
+	 */
+	private static function normalize_entry_id_filter( $entry_ids ) {
+		if ( null === $entry_ids ) {
+			return null;
+		}
+
+		if ( is_string( $entry_ids ) ) {
+			$entry_ids = explode( ',', $entry_ids );
+		}
+
+		if ( ! is_array( $entry_ids ) ) {
+			return array();
+		}
+
+		$normalized = array();
+		foreach ( $entry_ids as $entry_id ) {
+			$entry_id = is_string( $entry_id ) ? sanitize_text_field( $entry_id ) : '';
+			if ( '' !== $entry_id ) {
+				$normalized[ $entry_id ] = true;
+			}
+		}
+
+		return $normalized;
+	}
+
+	/**
 	 * Fetch importable models from all configured providers, grouped by entry.
+	 *
+	 * @param array|string|null $entry_ids Optional entry ID filter.
 	 *
 	 * @return array{entries: array, capability_labels: array, errors: array}
 	 */
-	public static function fetch_importable_models() {
+	public static function fetch_importable_models( $entry_ids = null ) {
 		$result = array(
 			'entries'                 => array(),
 			'capability_labels'      => self::$capability_labels,
@@ -131,6 +163,7 @@ class Model_Importer {
 		);
 
 		$entries = API_Keys_Helper::get_entries();
+		$entry_filter = self::normalize_entry_id_filter( $entry_ids );
 		$type_labels = array(
 			'openai'        => 'OpenAI',
 			'azure'         => 'Azure OpenAI / Foundry',
@@ -142,6 +175,10 @@ class Model_Importer {
 		);
 
 		foreach ( $entries as $entry ) {
+			$entry_id = $entry['id'] ?? '';
+			if ( null !== $entry_filter && ( '' === $entry_id || ! isset( $entry_filter[ $entry_id ] ) ) ) {
+				continue;
+			}
 			if ( empty( $entry['enabled'] ) ) {
 				continue;
 			}
@@ -185,7 +222,7 @@ class Model_Importer {
 			}
 
 			$entry_data = array(
-				'entry_id' => $entry['id'] ?? '',
+				'entry_id' => $entry_id,
 				'type'     => $type,
 				'name'     => $entry['name'] ?? '',
 				'label'    => ( $type_labels[ $type ] ?? $type ) . ( ! empty( $entry['name'] ) ? ' / ' . $entry['name'] : '' ),

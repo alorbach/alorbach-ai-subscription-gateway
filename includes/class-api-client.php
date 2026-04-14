@@ -615,6 +615,10 @@ class API_Client {
 	 * @return array|\WP_Error
 	 */
 	private static function execute_image_request( $request ) {
+		if ( isset( $request['transport'] ) && 'gradio_api' === $request['transport'] ) {
+			return self::execute_gradio_image_request( $request );
+		}
+
 		$response = wp_remote_post( $request['url'], array(
 			'headers' => $request['headers'],
 			'body'    => $request['body'],
@@ -652,6 +656,195 @@ class API_Client {
 			$body_response = array( 'data' => $data );
 		}
 		return $body_response;
+	}
+
+	/**
+	 * Execute a Gradio API image request.
+	 *
+	 * @param array $request Request array from the provider.
+	 * @return array|\WP_Error
+	 */
+	private static function execute_gradio_image_request( $request ) {
+		$response = wp_remote_post(
+			$request['url'],
+			array(
+				'headers' => $request['headers'],
+				'body'    => $request['body'],
+				'timeout' => 30,
+			)
+		);
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		$code          = wp_remote_retrieve_response_code( $response );
+		$raw_body      = wp_remote_retrieve_body( $response );
+		$body_response = json_decode( $raw_body, true );
+		if ( $code >= 400 ) {
+			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
+			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+		}
+
+		$event_id = is_array( $body_response ) ? (string) ( $body_response['event_id'] ?? $body_response['id'] ?? '' ) : '';
+		if ( '' === $event_id ) {
+			return new \WP_Error( 'api_error', __( 'Gradio API did not return an event ID.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
+		}
+
+		$poll_template = isset( $request['poll_url'] ) ? (string) $request['poll_url'] : trailingslashit( (string) $request['url'] ) . '%s';
+		$poll_response = wp_remote_get(
+			sprintf( $poll_template, rawurlencode( $event_id ) ),
+			array(
+				'headers' => isset( $request['poll_headers'] ) && is_array( $request['poll_headers'] ) ? $request['poll_headers'] : $request['headers'],
+				'timeout' => 180,
+			)
+		);
+		if ( is_wp_error( $poll_response ) ) {
+			return $poll_response;
+		}
+
+		$poll_code = wp_remote_retrieve_response_code( $poll_response );
+		$poll_body = wp_remote_retrieve_body( $poll_response );
+		if ( $poll_code >= 400 ) {
+			$decoded = json_decode( $poll_body, true );
+			$msg = self::extract_api_error_message( $decoded, $poll_body, $poll_code );
+			return new \WP_Error( 'api_error', $msg, array( 'status' => $poll_code ) );
+		}
+
+		return self::normalize_gradio_image_response( $poll_body );
+	}
+
+	/**
+	 * Normalize a Gradio event-stream image response.
+	 *
+	 * @param string $raw_body Raw response body.
+	 * @return array|\WP_Error
+	 */
+	private static function normalize_gradio_image_response( $raw_body ) {
+		$buffer           = (string) $raw_body;
+		$last_payload     = null;
+		$complete_payload = null;
+		$error_payload    = null;
+		$saw_error_event  = false;
+
+		while ( null !== ( $block = self::shift_stream_block( $buffer ) ) ) {
+			$parsed = self::parse_sse_block( $block );
+			if ( ! $parsed ) {
+				continue;
+			}
+			if ( 'error' === $parsed['event'] ) {
+				$saw_error_event = true;
+				$error_payload = $parsed['data'];
+				continue;
+			}
+			if ( null !== $parsed['data'] ) {
+				$last_payload = $parsed['data'];
+				if ( 'complete' === $parsed['event'] ) {
+					$complete_payload = $parsed['data'];
+				}
+			}
+		}
+
+		if ( '' !== trim( $buffer ) ) {
+			$parsed = self::parse_sse_block( $buffer );
+			if ( $parsed ) {
+				if ( 'error' === $parsed['event'] ) {
+					$saw_error_event = true;
+					$error_payload = $parsed['data'];
+				} elseif ( null !== $parsed['data'] ) {
+					$last_payload = $parsed['data'];
+					if ( 'complete' === $parsed['event'] ) {
+						$complete_payload = $parsed['data'];
+					}
+				}
+			}
+		}
+
+		if ( $saw_error_event ) {
+			return new \WP_Error( 'api_error', self::extract_gradio_error_message( $error_payload ), array( 'status' => 502 ) );
+		}
+
+		$payload = null !== $complete_payload ? $complete_payload : $last_payload;
+		if ( null === $payload ) {
+			$decoded = json_decode( trim( (string) $raw_body ), true );
+			if ( is_array( $decoded ) ) {
+				$payload = $decoded;
+			}
+		}
+
+		$images = self::extract_image_items_from_payload( $payload );
+		if ( empty( $images ) ) {
+			return new \WP_Error( 'api_error', __( 'Gradio API returned no image data.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
+		}
+
+		return array( 'data' => $images );
+	}
+
+	/**
+	 * Parse an SSE block into event/data parts.
+	 *
+	 * @param string $block Raw SSE block.
+	 * @return array|null
+	 */
+	private static function parse_sse_block( $block ) {
+		$block = trim( (string) $block );
+		if ( '' === $block ) {
+			return null;
+		}
+
+		$event      = '';
+		$data_lines = array();
+		foreach ( preg_split( "/\r?\n/", $block ) as $line ) {
+			$line = trim( (string) $line );
+			if ( strncmp( $line, 'event:', 6 ) === 0 ) {
+				$event = trim( substr( $line, 6 ) );
+				continue;
+			}
+			if ( strncmp( $line, 'data:', 5 ) === 0 ) {
+				$data_lines[] = trim( substr( $line, 5 ) );
+			}
+		}
+
+		$raw_data = trim( implode( "\n", $data_lines ) );
+		if ( '' === $raw_data ) {
+			return array( 'event' => $event, 'data' => null );
+		}
+
+		$decoded = json_decode( $raw_data, true );
+		$data    = ( JSON_ERROR_NONE === json_last_error() ) ? $decoded : $raw_data;
+
+		return array(
+			'event' => $event,
+			'data'  => $data,
+		);
+	}
+
+	/**
+	 * Extract a human-readable error message from Gradio error payloads.
+	 *
+	 * @param mixed $payload Error payload.
+	 * @return string
+	 */
+	private static function extract_gradio_error_message( $payload ) {
+		if ( is_string( $payload ) && '' !== trim( $payload ) ) {
+			return trim( $payload );
+		}
+
+		if ( is_array( $payload ) ) {
+			foreach ( array( 'message', 'error', 'detail' ) as $key ) {
+				if ( isset( $payload[ $key ] ) && is_string( $payload[ $key ] ) && '' !== trim( $payload[ $key ] ) ) {
+					return trim( $payload[ $key ] );
+				}
+			}
+			if ( isset( $payload[0] ) && is_string( $payload[0] ) && '' !== trim( $payload[0] ) ) {
+				return trim( $payload[0] );
+			}
+		}
+
+		if ( null === $payload || '' === $payload || array() === $payload ) {
+			return __( 'Hugging Face Space returned an empty Gradio error event. The Space backend likely failed or is temporarily overloaded.', 'alorbach-ai-gateway' );
+		}
+
+		return __( 'Gradio API request failed.', 'alorbach-ai-gateway' );
 	}
 
 	/**

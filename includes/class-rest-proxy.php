@@ -473,7 +473,7 @@ class REST_Proxy {
 		) );
 
 		register_rest_route( 'alorbach/v1', '/admin/fetch-importable-models', array(
-			'methods'             => 'GET',
+			'methods'             => array( 'GET', 'POST' ),
 			'callback'            => array( __CLASS__, 'admin_fetch_importable_models' ),
 			'permission_callback' => $admin_permission,
 		) );
@@ -1601,8 +1601,37 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_fetch_importable_models( $request ) {
-		$result = Model_Importer::fetch_importable_models();
+		$entry_ids = self::parse_entry_ids_filter( $request );
+		$result    = Model_Importer::fetch_importable_models( $entry_ids );
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Parse an optional entry ID filter from the request.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return array|string|null
+	 */
+	private static function parse_entry_ids_filter( $request ) {
+		$body = $request->get_body();
+		if ( ! empty( $body ) ) {
+			$json = json_decode( $body, true );
+			if ( is_array( $json ) && isset( $json['entry_ids'] ) ) {
+				return $json['entry_ids'];
+			}
+		}
+
+		$json = $request->get_json_params();
+		if ( is_array( $json ) && isset( $json['entry_ids'] ) ) {
+			return $json['entry_ids'];
+		}
+
+		$entry_ids = self::get_json_or_query_param( $request, 'entry_ids', null );
+		if ( is_array( $entry_ids ) || is_string( $entry_ids ) ) {
+			return $entry_ids;
+		}
+
+		return null;
 	}
 
 	/**

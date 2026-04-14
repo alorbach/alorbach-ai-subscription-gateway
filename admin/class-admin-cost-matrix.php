@@ -344,7 +344,32 @@ class Admin_Cost_Matrix {
 		$models_by_entry = array();
 		$models_array    = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
 		$entries         = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
-		$type_labels     = array( 'openai' => 'OpenAI', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'github_models' => 'GitHub Models' );
+		$type_labels     = array( 'openai' => 'OpenAI', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
+		$import_entry_choices = array();
+		foreach ( $entries as $entry ) {
+			if ( empty( $entry['enabled'] ) ) {
+				continue;
+			}
+			$type = $entry['type'] ?? '';
+			if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				continue;
+			}
+			if ( 'azure' === $type && empty( $entry['endpoint'] ) ) {
+				continue;
+			}
+			if ( 'huggingface_spaces' === $type && empty( $entry['space_id'] ) ) {
+				continue;
+			}
+			$entry_id = isset( $entry['id'] ) ? (string) $entry['id'] : '';
+			if ( '' === $entry_id ) {
+				continue;
+			}
+			$import_entry_choices[] = array(
+				'id'    => $entry_id,
+				'type'  => $type,
+				'label' => ( $type_labels[ $type ] ?? $type ) . ( ! empty( $entry['name'] ) ? ' / ' . $entry['name'] : '' ),
+			);
+		}
 		foreach ( $models_array as $row ) {
 			$eid = $row['entry_id'] ?? 'legacy';
 			if ( ! isset( $models_by_entry[ $eid ] ) ) {
@@ -389,6 +414,10 @@ class Admin_Cost_Matrix {
 				<div class="alorbach-modal-content">
 					<h2 id="alorbach_import_modal_title"><?php esc_html_e( 'Select models to import', 'alorbach-ai-gateway' ); ?></h2>
 					<p id="alorbach_import_modal_errors" class="notice notice-error" style="display:none;"></p>
+					<div id="alorbach_import_account_filters_step" class="alorbach-import-entry-step">
+						<p class="description"><?php esc_html_e( 'Choose which enabled API keys to query before fetching models.', 'alorbach-ai-gateway' ); ?></p>
+						<div id="alorbach_import_account_filters"></div>
+					</div>
 					<nav id="alorbach_import_tab_nav" class="alorbach-import-tabs" role="tablist"></nav>
 					<div class="alorbach-import-toolbar">
 						<input type="text" id="alorbach_import_filter" class="regular-text" placeholder="<?php esc_attr_e( 'Filter models...', 'alorbach-ai-gateway' ); ?>" />
@@ -436,6 +465,7 @@ class Admin_Cost_Matrix {
 			.alorbach-capabilities { font-size: 11px; color: #666; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 			.alorbach-modal-actions { margin-top: 20px; flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px; }
 			.alorbach-import-provider-hint { margin: 0 0 12px 0; }
+			.alorbach-import-entry-step { margin: 8px 0 12px 0; }
 			#alorbach_import_account_filters { margin: 8px 0 12px 0; max-height: 120px; overflow-y: auto; }
 			#alorbach_import_account_filters label { display: block; margin-bottom: 4px; cursor: pointer; }
 			.alorbach-test-result-modal .alorbach-modal-content { max-width: 560px; }
@@ -1072,7 +1102,58 @@ class Admin_Cost_Matrix {
 				var modalErrors = document.getElementById('alorbach_import_modal_errors');
 				var modalConfirm = document.getElementById('alorbach_import_modal_confirm');
 				var modalCancel = document.getElementById('alorbach_import_modal_cancel');
+				var modalEntryStep = document.getElementById('alorbach_import_account_filters_step');
 				var pendingAction = null; // 'import' | 'reset'
+				var modalStage = 'entries';
+				var importEntryChoices = <?php echo wp_json_encode( $import_entry_choices ); ?>;
+
+				function getSelectedEntryIds() {
+					return Array.prototype.slice.call(document.querySelectorAll('.alorbach-include-entry:checked')).map(function(cb) {
+						return cb.getAttribute('data-entry-id') || '';
+					}).filter(Boolean);
+				}
+
+				function renderEntryPicker() {
+					var wrap = document.getElementById('alorbach_import_account_filters');
+					if (!wrap) return;
+					wrap.innerHTML = '';
+					if (!importEntryChoices.length) {
+						wrap.innerHTML = '<p class="description"><?php echo esc_js( __( 'No enabled API key entries are ready for model import.', 'alorbach-ai-gateway' ) ); ?></p>';
+						return;
+					}
+					importEntryChoices.forEach(function(entry) {
+						var row = document.createElement('label');
+						var cb = document.createElement('input');
+						cb.type = 'checkbox';
+						cb.className = 'alorbach-include-entry';
+						cb.checked = true;
+						cb.setAttribute('data-entry-id', entry.id || '');
+						row.appendChild(cb);
+						row.appendChild(document.createTextNode(' ' + (entry.label || entry.id || '')));
+						wrap.appendChild(row);
+					});
+				}
+
+				function setImportModalStage(stage) {
+					var tabNav = document.getElementById('alorbach_import_tab_nav');
+					var toolbar = modal.querySelector('.alorbach-import-toolbar');
+					var summary = document.getElementById('alorbach_import_summary');
+					var body = document.getElementById('alorbach_import_modal_body');
+					var saveWhitelistBtn = document.getElementById('alorbach_save_google_whitelist_btn');
+					var isEntryStage = stage === 'entries';
+					modalStage = stage;
+					if (modalEntryStep) modalEntryStep.style.display = isEntryStage ? '' : 'none';
+					if (tabNav) tabNav.style.display = isEntryStage ? 'none' : '';
+					if (toolbar) toolbar.style.display = isEntryStage ? 'none' : '';
+					if (summary) summary.style.display = isEntryStage ? 'none' : '';
+					if (body) body.style.display = isEntryStage ? 'none' : '';
+					if (saveWhitelistBtn && isEntryStage) saveWhitelistBtn.style.display = 'none';
+					modalConfirm.textContent = isEntryStage
+						? '<?php echo esc_js( __( 'Load models', 'alorbach-ai-gateway' ) ); ?>'
+						: (pendingAction === 'reset'
+							? '<?php echo esc_js( __( 'Reset and import selected', 'alorbach-ai-gateway' ) ); ?>'
+							: '<?php echo esc_js( __( 'Import selected', 'alorbach-ai-gateway' ) ); ?>');
+				}
 
 				function renderModal(data) {
 					var labels = data.capability_labels || {};
@@ -1199,6 +1280,7 @@ class Admin_Cost_Matrix {
 					sortImportLists();
 					applyImportFilter();
 					updateImportSummary();
+					setImportModalStage('models');
 				}
 
 				function updateImportSummary() {
@@ -1315,7 +1397,11 @@ class Admin_Cost_Matrix {
 					updateImportSummary();
 				});
 
-				modalCancel.addEventListener('click', function() { modal.style.display = 'none'; pendingAction = null; });
+				modalCancel.addEventListener('click', function() {
+					modal.style.display = 'none';
+					pendingAction = null;
+					modalStage = 'entries';
+				});
 
 				document.getElementById('alorbach_save_google_whitelist_btn').addEventListener('click', function() {
 					var googleEntryIds = {};
@@ -1357,6 +1443,51 @@ class Admin_Cost_Matrix {
 
 				modalConfirm.addEventListener('click', function() {
 					if (!pendingAction) return;
+					if (modalStage === 'entries') {
+						var selectedEntryIds = getSelectedEntryIds();
+						if (!selectedEntryIds.length) {
+							modalErrors.textContent = '<?php echo esc_js( __( 'Select at least one API key entry first.', 'alorbach-ai-gateway' ) ); ?>';
+							modalErrors.style.display = 'block';
+							return;
+						}
+						modalErrors.style.display = 'none';
+						setLoading(1);
+						fetch(restFetch, { method: 'POST', headers: headers, body: JSON.stringify({ entry_ids: selectedEntryIds }) })
+							.then(function(r) { return r.json(); })
+							.then(function(data) {
+								var entries = Array.isArray(data.entries) ? data.entries : [];
+								var hasModels = entries.some(function(entry) {
+									return ['text', 'image', 'video', 'audio'].some(function(type) {
+										return Array.isArray(entry[type]) && entry[type].length > 0;
+									});
+								});
+								if (!hasModels) {
+									var messages = [];
+									if (data.errors && data.errors.length) {
+										messages = messages.concat(data.errors);
+									}
+									messages.push('<?php echo esc_js( __( 'No importable models were found for the selected API key entries.', 'alorbach-ai-gateway' ) ); ?>');
+									modalErrors.textContent = messages.join('; ');
+									modalErrors.style.display = 'block';
+									setImportModalStage('entries');
+									return;
+								}
+								if (data.errors && data.errors.length) {
+									modalErrors.textContent = data.errors.join('; ');
+									modalErrors.style.display = 'block';
+								} else {
+									modalErrors.style.display = 'none';
+								}
+								renderModal(data);
+							})
+							.catch(function(err) {
+								modalErrors.textContent = err.message || errText;
+								modalErrors.style.display = 'block';
+								setImportModalStage('entries');
+							})
+							.finally(function() { setLoading(-1); });
+						return;
+					}
 					var resultEl = document.getElementById('alorbach_import_result');
 					var selected = getSelected();
 					if (debugEnabled) { console.log('[alorbach-import] payload sent:', JSON.stringify({ selected: selected })); }
@@ -1382,25 +1513,9 @@ class Admin_Cost_Matrix {
 					pendingAction = action;
 					modalErrors.style.display = 'none';
 					modalTitle.textContent = action === 'reset' ? '<?php echo esc_js( __( 'Select models to import (reset will clear existing first)', 'alorbach-ai-gateway' ) ); ?>' : '<?php echo esc_js( __( 'Select models to import', 'alorbach-ai-gateway' ) ); ?>';
-					modalConfirm.textContent = action === 'reset' ? '<?php echo esc_js( __( 'Reset and import selected', 'alorbach-ai-gateway' ) ); ?>' : '<?php echo esc_js( __( 'Import selected', 'alorbach-ai-gateway' ) ); ?>';
-					setLoading(1);
-					fetch(restFetch, { headers: { 'X-WP-Nonce': nonce } })
-						.then(function(r) { return r.json(); })
-						.then(function(data) {
-							if (data.errors && data.errors.length) {
-								modalErrors.textContent = data.errors.join('; ');
-								modalErrors.style.display = 'block';
-							}
-							renderModal(data);
-							modal.style.display = 'block';
-						})
-						.catch(function(err) {
-							modalErrors.textContent = err.message || errText;
-							modalErrors.style.display = 'block';
-							renderModal({ entries: [], capability_labels: {} });
-							modal.style.display = 'block';
-						})
-						.finally(function() { setLoading(-1); });
+					renderEntryPicker();
+					setImportModalStage('entries');
+					modal.style.display = 'block';
 				}
 
 				document.getElementById('alorbach_import_models_btn').addEventListener('click', function() {
