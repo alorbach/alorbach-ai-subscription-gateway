@@ -7,6 +7,7 @@
 
 namespace Alorbach\AIGateway;
 
+use Alorbach\AIGateway\Providers\Hugging_Face_Spaces_Provider;
 use Alorbach\AIGateway\Providers\Provider_Registry;
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -49,6 +50,10 @@ class API_Client {
 	 */
 	public static function get_provider_for_model( $model ) {
 		$helper = API_Keys_Helper::class;
+
+		if ( strpos( (string) $model, 'hf-space:' ) === 0 && $helper::has_provider( 'huggingface_spaces' ) ) {
+			return 'huggingface_spaces';
+		}
 
 		if ( strpos( $model, 'gemini' ) === 0 || strpos( $model, 'imagen-' ) === 0 || strpos( $model, 'veo-' ) === 0 ) {
 			return 'google';
@@ -147,6 +152,9 @@ class API_Client {
 			if ( ! in_array( $lookup_id, $image_models, true ) ) {
 				continue;
 			}
+			if ( strpos( $lookup_id, 'hf-space:' ) === 0 && API_Keys_Helper::has_provider( 'huggingface_spaces' ) ) {
+				return 'huggingface_spaces';
+			}
 			if ( strpos( $lookup_id, 'gemini-' ) === 0 || strpos( $lookup_id, 'imagen-' ) === 0 ) {
 				return 'google';
 			}
@@ -210,9 +218,40 @@ class API_Client {
 				return 'GitHub Models';
 			case 'huggingface':
 				return 'Hugging Face';
+			case 'huggingface_spaces':
+				return 'Hugging Face Spaces';
 			default:
 				return (string) $provider;
 		}
+	}
+
+	/**
+	 * Resolve an imported model to its configured entry ID.
+	 *
+	 * @param string $model Model ID.
+	 * @return string
+	 */
+	private static function get_entry_id_for_imported_model( $model ) {
+		$lookup_ids = array( (string) $model );
+		if ( strpos( $model, '/' ) !== false && strpos( $model, ':' ) !== false ) {
+			$lookup_ids[] = preg_replace( '/:[^\/:]+$/', '', (string) $model );
+		}
+
+		$cost_matrix = Cost_Matrix::get_cost_matrix();
+		$rows        = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
+		foreach ( $lookup_ids as $lookup_id ) {
+			foreach ( $rows as $row ) {
+				if ( empty( $row['model'] ) || $row['model'] !== $lookup_id ) {
+					continue;
+				}
+				$entry_id = isset( $row['entry_id'] ) ? (string) $row['entry_id'] : '';
+				if ( '' !== $entry_id && 'legacy' !== $entry_id ) {
+					return $entry_id;
+				}
+			}
+		}
+
+		return '';
 	}
 
 	/**
@@ -540,11 +579,12 @@ class API_Client {
 		if ( ! $prov || ! $prov->supports_images() ) {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
 		}
-		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$entry_id = self::get_entry_id_for_imported_model( $model );
+		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
 		}
-		if ( $provider === 'huggingface' && $n > 1 ) {
+		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
 			for ( $index = 0; $index < $n; $index++ ) {
 				$request = $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images );
@@ -642,7 +682,8 @@ class API_Client {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
 		}
 
-		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$entry_id = self::get_entry_id_for_imported_model( $model );
+		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
 		}

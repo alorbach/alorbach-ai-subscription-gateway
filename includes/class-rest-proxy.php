@@ -400,7 +400,7 @@ class REST_Proxy {
 				'provider'  => array(
 					'required'          => true,
 					'type'              => 'string',
-					'enum'              => array( 'openai', 'azure', 'google', 'huggingface', 'github_models' ),
+					'enum'              => array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ),
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 				'entry_id'  => array(
@@ -1522,7 +1522,7 @@ class REST_Proxy {
 	public static function admin_verify_api_key( $request ) {
 		$provider = self::get_json_or_query_param( $request, 'provider' );
 		$entry_id = self::get_json_or_query_param( $request, 'entry_id' );
-		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'huggingface', 'github_models', 'codex' ), true ) ) {
+		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
 			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
 		}
 		$result = API_Validator::verify_key( $provider, $entry_id );

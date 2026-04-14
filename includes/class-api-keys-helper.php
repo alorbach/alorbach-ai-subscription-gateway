@@ -109,8 +109,8 @@ class API_Keys_Helper {
 		$result  = array();
 		foreach ( $entries as $entry ) {
 			if ( ( $entry['type'] ?? '' ) === $type && ! empty( $entry['enabled'] ) ) {
-				// Codex uses OAuth — no api_key required.
-				if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+				// Codex uses OAuth and Hugging Face Spaces can be public, so no API key is required.
+				if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$result[] = $entry;
@@ -141,8 +141,8 @@ class API_Keys_Helper {
 		if ( ! $entry ) {
 			return null;
 		}
-		// Codex uses OAuth — no api_key required.
-		if ( ( $entry['type'] ?? '' ) !== 'codex' && empty( $entry['api_key'] ) ) {
+		// Codex uses OAuth and Hugging Face Spaces may be public.
+		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		return self::entry_to_credentials( $entry );
@@ -155,8 +155,8 @@ class API_Keys_Helper {
 	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool}|null
 	 */
 	private static function entry_to_credentials( $entry ) {
-		// Codex uses OAuth — no api_key required.
-		if ( ( $entry['type'] ?? '' ) !== 'codex' && empty( $entry['api_key'] ) ) {
+		// Codex uses OAuth and Hugging Face Spaces may be public.
+		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		$creds = array( 'api_key' => $entry['api_key'] ?? '' );
@@ -165,6 +165,15 @@ class API_Keys_Helper {
 		}
 		if ( isset( $entry['org'] ) ) {
 			$creds['org'] = $entry['org'];
+		}
+		if ( isset( $entry['space_id'] ) ) {
+			$creds['space_id'] = $entry['space_id'];
+		}
+		if ( isset( $entry['request_mode'] ) ) {
+			$creds['request_mode'] = $entry['request_mode'];
+		}
+		if ( isset( $entry['schema_preset'] ) ) {
+			$creds['schema_preset'] = $entry['schema_preset'];
 		}
 		if ( ! empty( $entry['free_pass_through'] ) ) {
 			$creds['free_pass_through'] = true;
@@ -185,6 +194,9 @@ class API_Keys_Helper {
 		}
 		if ( $type === 'azure' ) {
 			return ! empty( $creds['endpoint'] );
+		}
+		if ( $type === 'huggingface_spaces' ) {
+			return ! empty( $creds['space_id'] );
 		}
 		return true;
 	}
@@ -253,6 +265,16 @@ class API_Keys_Helper {
 			}
 			if ( isset( $e['org'] ) ) {
 				$entry['org'] = sanitize_text_field( $e['org'] );
+			}
+			if ( isset( $e['space_id'] ) ) {
+				$entry['space_id'] = sanitize_text_field( $e['space_id'] );
+			}
+			if ( isset( $e['request_mode'] ) ) {
+				$request_mode = sanitize_key( $e['request_mode'] );
+				$entry['request_mode'] = in_array( $request_mode, array( 'custom_http', 'gradio_api' ), true ) ? $request_mode : 'custom_http';
+			}
+			if ( isset( $e['schema_preset'] ) ) {
+				$entry['schema_preset'] = sanitize_text_field( $e['schema_preset'] );
 			}
 			if ( isset( $e['free_pass_through'] ) ) {
 				$entry['free_pass_through'] = ! empty( $e['free_pass_through'] );

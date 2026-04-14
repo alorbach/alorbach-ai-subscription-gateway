@@ -34,6 +34,7 @@ class Provider_Registry {
 		self::register( new Azure_Provider() );
 		self::register( new Google_Provider() );
 		self::register( new Hugging_Face_Provider() );
+		self::register( new Hugging_Face_Spaces_Provider() );
 		self::register( new GitHub_Models_Provider() );
 
 		/**

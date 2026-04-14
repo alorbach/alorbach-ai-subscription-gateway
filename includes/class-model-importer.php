@@ -35,6 +35,7 @@ class Model_Importer {
 		'openai'        => array( 'gpt-', 'o1', 'o3', 'o4' ),
 		'google'        => array( 'gemini-' ),
 		'huggingface'   => array(), // Router /v1/models already returns chat-compatible models.
+		'huggingface_spaces' => array(),
 		'azure'         => array(), // Azure returns base model IDs; we accept all from the list.
 		'github_models' => array(), // GitHub uses publisher/model format; accept all.
 	);
@@ -135,6 +136,7 @@ class Model_Importer {
 			'azure'         => 'Azure OpenAI / Foundry',
 			'google'        => 'Google (Gemini)',
 			'huggingface'   => 'Hugging Face',
+			'huggingface_spaces' => 'Hugging Face Spaces',
 			'github_models' => 'GitHub Models',
 			'codex'         => 'OpenAI Codex (ChatGPT)',
 		);
@@ -144,11 +146,14 @@ class Model_Importer {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
-			// Codex authenticates via OAuth, not an API key.
-			if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+			// Codex authenticates via OAuth and Hugging Face Spaces can be public.
+			if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
+				continue;
+			}
+			if ( $type === 'huggingface_spaces' && empty( $entry['space_id'] ) ) {
 				continue;
 			}
 			$prov = Provider_Registry::get( $type );
@@ -163,6 +168,15 @@ class Model_Importer {
 			}
 			if ( isset( $entry['org'] ) ) {
 				$creds['org'] = $entry['org'];
+			}
+			if ( isset( $entry['space_id'] ) ) {
+				$creds['space_id'] = $entry['space_id'];
+			}
+			if ( isset( $entry['request_mode'] ) ) {
+				$creds['request_mode'] = $entry['request_mode'];
+			}
+			if ( isset( $entry['schema_preset'] ) ) {
+				$creds['schema_preset'] = $entry['schema_preset'];
 			}
 			$items = $prov->fetch_models( $creds );
 			if ( is_wp_error( $items ) ) {
@@ -401,7 +415,7 @@ class Model_Importer {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
-				if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$entry_id = $entry['id'] ?? '';
@@ -440,10 +454,13 @@ class Model_Importer {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
-				if ( $type !== 'codex' && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
+					continue;
+				}
+				if ( $type === 'huggingface_spaces' && empty( $entry['space_id'] ) ) {
 					continue;
 				}
 				$prov = Provider_Registry::get( $type );
@@ -458,6 +475,15 @@ class Model_Importer {
 				}
 				if ( isset( $entry['org'] ) ) {
 					$creds['org'] = $entry['org'];
+				}
+				if ( isset( $entry['space_id'] ) ) {
+					$creds['space_id'] = $entry['space_id'];
+				}
+				if ( isset( $entry['request_mode'] ) ) {
+					$creds['request_mode'] = $entry['request_mode'];
+				}
+				if ( isset( $entry['schema_preset'] ) ) {
+					$creds['schema_preset'] = $entry['schema_preset'];
 				}
 				$items = $prov->fetch_models( $creds );
 				if ( is_wp_error( $items ) ) {
