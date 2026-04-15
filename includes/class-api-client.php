@@ -751,7 +751,11 @@ class API_Client {
 		if ( $poll_code >= 400 ) {
 			$decoded = json_decode( $poll_body, true );
 			$msg = self::extract_api_error_message( $decoded, $poll_body, $poll_code );
-			return new \WP_Error( 'api_error', $msg, array( 'status' => $poll_code ) );
+			return new \WP_Error(
+				'api_error',
+				sprintf( __( 'Gradio polling failed: %s', 'alorbach-ai-gateway' ), $msg ),
+				array( 'status' => $poll_code )
+			);
 		}
 
 		return self::normalize_gradio_image_response( $poll_body );
@@ -804,7 +808,11 @@ class API_Client {
 		}
 
 		if ( $saw_error_event ) {
-			return new \WP_Error( 'api_error', self::extract_gradio_error_message( $error_payload ), array( 'status' => 502 ) );
+			return new \WP_Error(
+				'api_error',
+				sprintf( __( 'Hugging Face Space returned a Gradio error event: %s', 'alorbach-ai-gateway' ), self::extract_gradio_error_message( $error_payload ) ),
+				array( 'status' => 502 )
+			);
 		}
 
 		$payload = null !== $complete_payload ? $complete_payload : $last_payload;
@@ -817,7 +825,11 @@ class API_Client {
 
 		$images = self::extract_image_items_from_payload( $payload );
 		if ( empty( $images ) ) {
-			return new \WP_Error( 'api_error', __( 'Gradio API returned no image data.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
+			return new \WP_Error(
+				'api_error',
+				__( 'Gradio API returned no supported image payload. This Space may require a custom schema mapping.', 'alorbach-ai-gateway' ),
+				array( 'status' => 502 )
+			);
 		}
 
 		return array( 'data' => $images );

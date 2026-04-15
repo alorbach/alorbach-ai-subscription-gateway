@@ -397,7 +397,7 @@ class Admin_API_Keys {
 				); ?>
 				<?php self::render_setup_guide_card(
 					__( 'Hugging Face Spaces', 'alorbach-ai-gateway' ),
-					__( 'Use this for curated Space-based image integrations. This is separate from the normal Hugging Face router provider. This provider is not fully tested yet.', 'alorbach-ai-gateway' ),
+					__( 'Use this for manual single-Space image integrations. This is separate from the normal Hugging Face router provider and is currently a partial feature rather than a curated catalog.', 'alorbach-ai-gateway' ),
 					array(
 						__( 'Identify the Space you want to connect, for example owner/space-name.', 'alorbach-ai-gateway' ),
 						__( 'If the Space is private or protected, create a Hugging Face access token with the required permissions. Public Spaces can leave API Key empty.', 'alorbach-ai-gateway' ),
@@ -406,7 +406,8 @@ class Admin_API_Keys {
 						__( 'Choose the request mode. Use Custom HTTP for stable custom endpoints, or Gradio API for Spaces that publish /gradio_api documentation.', 'alorbach-ai-gateway' ),
 						__( 'For Gradio API Spaces, enter the base app URL such as https://owner-space.hf.space, not the MCP URL.', 'alorbach-ai-gateway' ),
 						__( 'For Custom HTTP Spaces, enter Endpoint only when you want to override the detected hf.space URL or target a custom path such as /generate.', 'alorbach-ai-gateway' ),
-						__( 'Treat this integration as experimental for now because it has not been fully end-to-end tested yet.', 'alorbach-ai-gateway' ),
+						__( 'Schema preset is an advanced manual field for selecting a named Gradio endpoint. It is not a curated preset catalog.', 'alorbach-ai-gateway' ),
+						__( 'The supported path today is one manual entry mapped to one imported image model for that Space.', 'alorbach-ai-gateway' ),
 						__( 'Save API Keys, then click Test.', 'alorbach-ai-gateway' ),
 					)
 				); ?>
@@ -554,7 +555,7 @@ class Admin_API_Keys {
 						<option value="custom_http" <?php selected( $request_mode, 'custom_http' ); ?>><?php esc_html_e( 'Custom HTTP', 'alorbach-ai-gateway' ); ?></option>
 						<option value="gradio_api" <?php selected( $request_mode, 'gradio_api' ); ?>><?php esc_html_e( 'Gradio API', 'alorbach-ai-gateway' ); ?></option>
 					</select>
-					<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][schema_preset]" value="<?php echo esc_attr( $schema_preset ); ?>" placeholder="Optional schema preset" class="regular-text" />
+					<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][schema_preset]" value="<?php echo esc_attr( $schema_preset ); ?>" placeholder="Optional manual endpoint name" class="regular-text" />
 				</div>
 			</td>
 			<td class="entry-org">

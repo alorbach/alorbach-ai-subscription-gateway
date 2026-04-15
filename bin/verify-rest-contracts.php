@@ -54,6 +54,20 @@ function alorbach_require_keys( array $payload, array $keys, $label ) {
 	}
 }
 
+/**
+ * Require a payload key to be an array.
+ *
+ * @param array  $payload Payload array.
+ * @param string $key     Key name.
+ * @param string $label   Human label.
+ * @return void
+ */
+function alorbach_require_array_key( array $payload, $key, $label ) {
+	if ( ! isset( $payload[ $key ] ) || ! is_array( $payload[ $key ] ) ) {
+		throw new RuntimeException( sprintf( '%s key "%s" must be an array.', $label, $key ) );
+	}
+}
+
 try {
 	$config  = alorbach_verify_request( '/alorbach/v1/integration/config' );
 	$plans   = alorbach_verify_request( '/alorbach/v1/integration/plans' );
@@ -65,6 +79,19 @@ try {
 	alorbach_require_keys( $account, array( 'user_id', 'balance', 'usage_month', 'billing_urls', 'active_plan' ), '/integration/account' );
 	alorbach_require_keys( $models, array( 'text', 'image', 'audio', 'video' ), '/me/models' );
 	alorbach_require_keys( $models['image'], array( 'supports_progress', 'supports_provider_progress', 'supports_preview_images', 'progress_mode', 'job_endpoint' ), '/me/models.image' );
+	alorbach_require_array_key( $models['image'], 'provider_progress_models', '/me/models.image' );
+	alorbach_require_array_key( $models['image'], 'preview_models', '/me/models.image' );
+	alorbach_require_array_key( $models['image']['model'], 'options', '/me/models.image.model' );
+
+	if ( ! in_array( $models['image']['progress_mode'], array( 'provider', 'estimated' ), true ) ) {
+		throw new RuntimeException( '/me/models.image.progress_mode must be "provider" or "estimated".' );
+	}
+
+	foreach ( $models['image']['preview_models'] as $preview_model ) {
+		if ( ! in_array( $preview_model, $models['image']['provider_progress_models'], true ) ) {
+			throw new RuntimeException( 'Every preview model must also be listed as a provider-progress model.' );
+		}
+	}
 
 	echo "REST contract verification passed.\n";
 	exit( 0 );

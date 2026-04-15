@@ -141,6 +141,8 @@ Image capability metadata can include:
 - `image.provider_progress_models`
 - `image.preview_models`
 
+These flags are capability hints, not blanket guarantees for every configured image model. Use the per-model lists instead of assuming that all image providers support provider progress or preview frames.
+
 Use this endpoint when building frontend pages so the UI does not hardcode model assumptions.
 
 ### `GET /me/estimate`
@@ -230,6 +232,13 @@ Typical response fields:
 - `supports_previews`
 - `preview_images`
 - `final_images`
+
+Hugging Face Spaces note:
+
+- current support is text-to-image only
+- no chat support through this provider
+- no reference-image support yet
+- no guaranteed preview-frame support even when async job mode is available
 
 ### `GET /images/jobs/<job_id>`
 
@@ -471,8 +480,9 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - typical use cases: image generation, preview frames, downloadable final artwork
-- main providers: OpenAI, Azure OpenAI, Google
+- main providers: OpenAI, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - supports both synchronous and async job flows
+- imported Hugging Face and Hugging Face Spaces image models may appear in `/me/models` when configured
 
 ### Audio Models
 

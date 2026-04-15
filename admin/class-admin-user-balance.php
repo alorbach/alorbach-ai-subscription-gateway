@@ -77,6 +77,7 @@ class Admin_User_Balance {
 			.alorbach-user-balance-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 			.alorbach-user-balance-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 			@media (max-width: 782px) {
+				.alorbach-user-balance-table-wrap { overflow-x: visible; }
 				.alorbach-user-balance-form { flex-direction: column; align-items: stretch; }
 				.alorbach-user-balance-form input[type="number"],
 				.alorbach-user-balance-form select,
@@ -84,6 +85,34 @@ class Admin_User_Balance {
 				.alorbach-user-balance-filters select,
 				.alorbach-user-balance-filters .button { width: 100% !important; max-width: 100%; }
 				.alorbach-user-balance-filters { align-items: stretch; }
+				.alorbach-user-balance-table-wrap table,
+				.alorbach-user-balance-table-wrap tbody,
+				.alorbach-user-balance-table-wrap tr,
+				.alorbach-user-balance-table-wrap td { display: block; width: 100%; box-sizing: border-box; }
+				.alorbach-user-balance-table-wrap table.widefat { border: 0; background: transparent; box-shadow: none; }
+				.alorbach-user-balance-table-wrap table.widefat thead { display: none; }
+				.alorbach-user-balance-table-wrap table.widefat tbody { display: grid; gap: 12px; }
+				.alorbach-user-balance-table-wrap table.widefat tr {
+					margin: 0;
+					padding: 14px;
+					border: 1px solid #dcdcde;
+					border-radius: 8px;
+					background: #fff;
+				}
+				.alorbach-user-balance-table-wrap table.widefat td {
+					padding: 8px 0;
+					border: 0;
+				}
+				.alorbach-user-balance-table-wrap table.widefat td::before {
+					content: attr(data-label);
+					display: block;
+					margin-bottom: 4px;
+					font-size: 12px;
+					font-weight: 600;
+					color: #50575e;
+					text-transform: uppercase;
+					letter-spacing: .04em;
+				}
 			}
 			</style>
 			<div class="alorbach-user-balance-table-wrap">
@@ -102,16 +131,16 @@ class Admin_User_Balance {
 						$balance = isset( $all_balances[ $user->ID ] ) ? $all_balances[ $user->ID ] : 0;
 						?>
 						<tr>
-							<td>
+							<td data-label="<?php esc_attr_e( 'User', 'alorbach-ai-gateway' ); ?>">
 								<?php
 								$user_transactions_url = add_query_arg( array( 'page' => 'alorbach-user-balance', 'user_id' => $user->ID ), admin_url( 'admin.php' ) );
 								?>
 								<a href="<?php echo esc_url( $user_transactions_url ); ?>"><?php echo esc_html( $user->user_login ); ?></a> (<?php echo esc_html( $user->user_email ); ?>)
 							</td>
-							<td><?php echo esc_html( number_format_i18n( $balance ) ); ?></td>
-							<td><?php echo esc_html( self::format_credits_str( $balance ) ); ?></td>
-							<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?></td>
-							<td>
+							<td data-label="<?php esc_attr_e( 'Balance (UC)', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( number_format_i18n( $balance ) ); ?></td>
+							<td data-label="<?php esc_attr_e( 'Balance (Credits)', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( self::format_credits_str( $balance ) ); ?></td>
+							<td data-label="<?php esc_attr_e( 'Balance ($)', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?></td>
+							<td data-label="<?php esc_attr_e( 'Actions', 'alorbach-ai-gateway' ); ?>">
 								<form method="post" class="alorbach-user-balance-form">
 									<?php wp_nonce_field( 'alorbach_balance', 'alorbach_balance_nonce' ); ?>
 									<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>" />
@@ -150,9 +179,9 @@ class Admin_User_Balance {
 						$usage = isset( $all_usage[ $user->ID ] ) ? $all_usage[ $user->ID ] : 0;
 						?>
 						<tr>
-							<td><?php echo esc_html( $user->user_login ); ?> (<?php echo esc_html( $user->user_email ); ?>)</td>
-							<td><?php echo esc_html( number_format_i18n( $usage ) ); ?></td>
-							<td><?php echo esc_html( self::format_credits_str( $usage ) ); ?></td>
+							<td data-label="<?php esc_attr_e( 'User', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( $user->user_login ); ?> (<?php echo esc_html( $user->user_email ); ?>)</td>
+							<td data-label="<?php esc_attr_e( 'Usage (UC)', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( number_format_i18n( $usage ) ); ?></td>
+							<td data-label="<?php esc_attr_e( 'Usage (Credits)', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( self::format_credits_str( $usage ) ); ?></td>
 						</tr>
 					<?php endforeach; ?>
 				</tbody>
@@ -172,10 +201,13 @@ class Admin_User_Balance {
 			$total    = $result['total'];
 			$pages    = $total > 0 ? (int) ceil( $total / $per_page ) : 0;
 			$base_url = add_query_arg( 'page', 'alorbach-user-balance', admin_url( 'admin.php' ) );
-			$csv_url  = add_query_arg( array(
-				'action'   => 'download_transactions_csv',
-				'_wpnonce' => wp_create_nonce( 'alorbach_download_transactions_csv' ),
-			), $base_url );
+			$csv_url  = add_query_arg(
+				array(
+					'action'   => 'download_transactions_csv',
+					'_wpnonce' => wp_create_nonce( 'alorbach_download_transactions_csv' ),
+				),
+				$base_url
+			);
 			if ( $filter_user_id > 0 ) {
 				$csv_url = add_query_arg( 'user_id', $filter_user_id, $csv_url );
 			}
@@ -214,21 +246,22 @@ class Admin_User_Balance {
 						</tr>
 					</thead>
 					<tbody>
-						<?php foreach ( $rows as $row ) :
-						$row_user   = self::resolve_row_user( $row );
-						$user_login = $row_user['login'];
-						$user_email = $row_user['email'];
-						$api_cost_uc = self::get_row_api_cost_uc( $row );
+						<?php foreach ( $rows as $row ) : ?>
+							<?php
+							$row_user    = self::resolve_row_user( $row );
+							$user_login  = $row_user['login'];
+							$user_email  = $row_user['email'];
+							$api_cost_uc = self::get_row_api_cost_uc( $row );
 							?>
 							<tr>
-								<td><?php echo esc_html( $row['transaction_id'] ); ?></td>
-								<td><?php echo esc_html( $user_login ? $user_login . ' (' . $user_email . ')' : $row['user_id'] ); ?></td>
-								<td><?php echo esc_html( Admin_Helper::get_transaction_type_label( $row['transaction_type'] ) ); ?></td>
-								<td><?php echo esc_html( $row['model_used'] ?? '—' ); ?></td>
-								<td><?php echo $api_cost_uc !== null ? esc_html( number_format_i18n( $api_cost_uc ) ) : '—'; ?></td>
-								<td><?php echo esc_html( number_format_i18n( $row['uc_amount'] ) ); ?></td>
-								<td><?php echo esc_html( self::format_credits_str( $row['uc_amount'] ) ); ?></td>
-								<td><?php echo esc_html( $row['created_at'] ); ?></td>
+								<td data-label="<?php esc_attr_e( 'ID', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( $row['transaction_id'] ); ?></td>
+								<td data-label="<?php esc_attr_e( 'User', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( $user_login ? $user_login . ' (' . $user_email . ')' : $row['user_id'] ); ?></td>
+								<td data-label="<?php esc_attr_e( 'Type', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( Admin_Helper::get_transaction_type_label( $row['transaction_type'] ) ); ?></td>
+								<td data-label="<?php esc_attr_e( 'Model', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( $row['model_used'] ?? '-' ); ?></td>
+								<td data-label="<?php esc_attr_e( 'AI Budget (UC)', 'alorbach-ai-gateway' ); ?>"><?php echo $api_cost_uc !== null ? esc_html( number_format_i18n( $api_cost_uc ) ) : '-'; ?></td>
+								<td data-label="<?php esc_attr_e( 'User Charge (UC)', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( number_format_i18n( $row['uc_amount'] ) ); ?></td>
+								<td data-label="<?php esc_attr_e( 'Credits', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( self::format_credits_str( $row['uc_amount'] ) ); ?></td>
+								<td data-label="<?php esc_attr_e( 'Date', 'alorbach-ai-gateway' ); ?>"><?php echo esc_html( $row['created_at'] ); ?></td>
 							</tr>
 						<?php endforeach; ?>
 					</tbody>
@@ -270,7 +303,7 @@ class Admin_User_Balance {
 	/**
 	 * Extract the api_cost_uc value from a transaction row.
 	 *
-	 * Returns null when the field is absent or empty so callers can render '—' / '' consistently.
+	 * Returns null when the field is absent or empty so callers can render '-' / '' consistently.
 	 *
 	 * @param array $row Transaction row from Ledger::get_transactions().
 	 * @return int|null
@@ -316,18 +349,21 @@ class Admin_User_Balance {
 				$user_login  = $row_user['login'];
 				$user_email  = $row_user['email'];
 				$api_cost_uc = self::get_row_api_cost_uc( $row );
-				fputcsv( $out, array(
-					$row['transaction_id'],
-					$row['user_id'],
-					$user_login,
-					$user_email,
-					$row['transaction_type'],
-					$row['model_used'] ?? '',
-					$api_cost_uc !== null ? $api_cost_uc : '',
-					$row['uc_amount'],
-					\Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] ),
-					$row['created_at'],
-				) );
+				fputcsv(
+					$out,
+					array(
+						$row['transaction_id'],
+						$row['user_id'],
+						$user_login,
+						$user_email,
+						$row['transaction_type'],
+						$row['model_used'] ?? '',
+						$api_cost_uc !== null ? $api_cost_uc : '',
+						$row['uc_amount'],
+						\Alorbach\AIGateway\User_Display::uc_to_credits( $row['uc_amount'] ),
+						$row['created_at'],
+					)
+				);
 			}
 			$page++;
 		} while ( count( $rows ) >= $batch_size );

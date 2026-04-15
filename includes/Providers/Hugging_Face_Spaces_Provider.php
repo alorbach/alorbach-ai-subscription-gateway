@@ -7,6 +7,8 @@
 
 namespace Alorbach\AIGateway\Providers;
 
+use Alorbach\AIGateway\API_Keys_Helper;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -62,9 +64,18 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 	 * {@inheritdoc}
 	 */
 	public function get_image_job_capabilities( $model = '' ) {
+		$request_mode = self::get_request_mode_for_model( $model );
+		if ( 'gradio_api' === $request_mode ) {
+			return array(
+				'async_jobs'        => true,
+				'provider_progress' => true,
+				'preview_images'    => false,
+			);
+		}
+
 		return array(
-			'async_jobs'        => true,
-			'provider_progress' => true,
+			'async_jobs'        => false,
+			'provider_progress' => false,
 			'preview_images'    => false,
 		);
 	}
@@ -98,6 +109,16 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 		if ( '' === $endpoint ) {
 			return new \WP_Error( 'missing_endpoint', __( 'Hugging Face Space endpoint could not be determined.', 'alorbach-ai-gateway' ) );
 		}
+
+		self::log_debug(
+			'build_images_request',
+			array(
+				'space_id'     => $space_id,
+				'request_mode' => $request_mode,
+				'endpoint'     => $endpoint,
+				'model'        => (string) $model,
+			)
+		);
 
 		$headers = array(
 			'Content-Type' => 'application/json',
@@ -161,6 +182,13 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 
 		$metadata = self::fetch_space_metadata( $space_id, $headers );
 		if ( is_wp_error( $metadata ) ) {
+			self::log_error(
+				'verify_key_metadata_failed',
+				array(
+					'space_id' => $space_id,
+					'message'  => $metadata->get_error_message(),
+				)
+			);
 			return array( 'success' => false, 'message' => $metadata->get_error_message() );
 		}
 
@@ -173,6 +201,15 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 			$gradio_base = self::normalize_gradio_base_url( $endpoint );
 			$gradio_info = self::fetch_gradio_api_info( $gradio_base, $headers );
 			if ( is_wp_error( $gradio_info ) ) {
+				self::log_error(
+					'verify_key_gradio_info_failed',
+					array(
+						'space_id'     => $space_id,
+						'request_mode' => $request_mode,
+						'endpoint'     => $endpoint,
+						'message'      => $gradio_info->get_error_message(),
+					)
+				);
 				return array( 'success' => false, 'message' => $gradio_info->get_error_message() );
 			}
 
@@ -184,10 +221,25 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 			return array( 'success' => true );
 		}
 
-		return self::make_verified_get(
-			$endpoint,
-			$headers,
-			__( 'Hugging Face Space endpoint is not reachable.', 'alorbach-ai-gateway' )
+		$probe = self::verify_custom_http_endpoint( $space_id, $endpoint, $credentials, $headers );
+		if ( ! empty( $probe['success'] ) ) {
+			return array( 'success' => true );
+		}
+
+		$message = isset( $probe['message'] ) ? (string) $probe['message'] : __( 'Hugging Face Space endpoint is not reachable.', 'alorbach-ai-gateway' );
+		self::log_error(
+			'verify_key_custom_http_failed',
+			array(
+				'space_id'     => $space_id,
+				'request_mode' => $request_mode,
+				'endpoint'     => $endpoint,
+				'message'      => $message,
+			)
+		);
+
+		return array(
+			'success' => false,
+			'message' => $message,
 		);
 	}
 
@@ -245,6 +297,13 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 		$gradio_base = self::normalize_gradio_base_url( $endpoint );
 		$gradio_info = self::fetch_gradio_api_info( $gradio_base, $headers );
 		if ( is_wp_error( $gradio_info ) ) {
+			self::log_error(
+				'build_gradio_images_request_info_failed',
+				array(
+					'endpoint' => $endpoint,
+					'message'  => $gradio_info->get_error_message(),
+				)
+			);
 			return $gradio_info;
 		}
 
@@ -254,6 +313,20 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 		}
 
 		$payload = self::build_gradio_generate_payload( $gradio_info, $api_name, $prompt, $width, $height, $quality );
+		if ( is_wp_error( $payload ) ) {
+			self::log_error(
+				'build_gradio_images_request_payload_failed',
+				array(
+					'endpoint'      => $endpoint,
+					'api_name'      => $api_name,
+					'message'       => $payload->get_error_message(),
+					'space_id'      => self::normalize_space_id( $credentials['space_id'] ?? '' ),
+					'schema_preset' => isset( $credentials['schema_preset'] ) ? (string) $credentials['schema_preset'] : '',
+				)
+			);
+			return $payload;
+		}
+
 		$api_name = ltrim( $api_name, '/' );
 
 		return array(
@@ -357,6 +430,13 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 			)
 		);
 		if ( is_wp_error( $response ) ) {
+			self::log_error(
+				'fetch_gradio_api_info_request_failed',
+				array(
+					'gradio_base' => $gradio_base,
+					'message'     => $response->get_error_message(),
+				)
+			);
 			return $response;
 		}
 
@@ -365,6 +445,14 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 		$body = json_decode( $raw, true );
 		if ( $code >= 400 || ! is_array( $body ) ) {
 			$message = is_array( $body ) && isset( $body['error'] ) ? (string) $body['error'] : __( 'Could not load Hugging Face Space Gradio API metadata.', 'alorbach-ai-gateway' );
+			self::log_error(
+				'fetch_gradio_api_info_failed',
+				array(
+					'gradio_base' => $gradio_base,
+					'status'      => $code,
+					'message'     => $message,
+				)
+			);
 			return new \WP_Error( 'hf_space_gradio_info_error', $message, array( 'status' => $code ) );
 		}
 
@@ -418,20 +506,33 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 	 * @param int    $width       Width.
 	 * @param int    $height      Height.
 	 * @param string $quality     Quality selection.
-	 * @return array
+	 * @return array|\WP_Error
 	 */
 	private static function build_gradio_generate_payload( $gradio_info, $api_name, $prompt, $width, $height, $quality ) {
 		$endpoint_key = '/' . ltrim( (string) $api_name, '/' );
 		$definition   = isset( $gradio_info['named_endpoints'][ $endpoint_key ] ) && is_array( $gradio_info['named_endpoints'][ $endpoint_key ] ) ? $gradio_info['named_endpoints'][ $endpoint_key ] : array();
 		$parameters   = isset( $definition['parameters'] ) && is_array( $definition['parameters'] ) ? $definition['parameters'] : array();
-		$payload      = array();
-		$mode_choice  = null;
+		if ( empty( $parameters ) ) {
+			return new \WP_Error(
+				'hf_space_schema_unsupported',
+				__( 'This Hugging Face Space Gradio endpoint does not expose a supported parameter schema for image generation.', 'alorbach-ai-gateway' ),
+				array( 'status' => 400 )
+			);
+		}
+
+		$payload        = array();
+		$mode_choice    = null;
+		$matched_prompt = false;
 
 		foreach ( $parameters as $parameter ) {
 			$name = strtolower( (string) ( $parameter['parameter_name'] ?? '' ) );
 			switch ( $name ) {
 				case 'prompt':
+				case 'text':
+				case 'query':
+				case 'input_text':
 					$value = (string) $prompt;
+					$matched_prompt = true;
 					break;
 				case 'input_images':
 				case 'image_list':
@@ -469,6 +570,14 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 			}
 
 			$payload[] = $value;
+		}
+
+		if ( ! $matched_prompt ) {
+			return new \WP_Error(
+				'hf_space_schema_unsupported',
+				__( 'This Hugging Face Space Gradio endpoint does not expose a supported prompt field for text-to-image generation.', 'alorbach-ai-gateway' ),
+				array( 'status' => 400 )
+			);
 		}
 
 		return $payload;
@@ -635,5 +744,123 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 		}
 
 		return array( 1024, 1024 );
+	}
+
+	/**
+	 * Verify a custom HTTP endpoint using a POST probe rather than a GET reachability check.
+	 *
+	 * @param string $space_id    Space identifier.
+	 * @param string $endpoint    Endpoint URL.
+	 * @param array  $credentials Provider credentials.
+	 * @param array  $headers     Auth headers.
+	 * @return array
+	 */
+	private static function verify_custom_http_endpoint( $space_id, $endpoint, $credentials, $headers ) {
+		$request = self::build_images_request(
+			'Verification probe',
+			'1024x1024',
+			1,
+			self::build_model_id( $space_id, $credentials['schema_preset'] ?? '' ),
+			'medium',
+			'png',
+			$credentials
+		);
+
+		if ( is_wp_error( $request ) ) {
+			return array(
+				'success' => false,
+				'message' => $request->get_error_message(),
+			);
+		}
+
+		$response = wp_remote_post(
+			$endpoint,
+			array(
+				'headers' => $headers,
+				'body'    => $request['body'],
+				'timeout' => 20,
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'message' => $response->get_error_message(),
+			);
+		}
+
+		$status  = (int) wp_remote_retrieve_response_code( $response );
+		$raw     = (string) wp_remote_retrieve_body( $response );
+		$decoded = json_decode( $raw, true );
+
+		if ( 200 <= $status && $status < 300 ) {
+			return array( 'success' => true );
+		}
+
+		if ( in_array( $status, array( 400, 405, 409, 415, 422, 429 ), true ) ) {
+			return array( 'success' => true );
+		}
+
+		$message = is_array( $decoded ) && ! empty( $decoded['message'] )
+			? (string) $decoded['message']
+			: ( is_array( $decoded ) && ! empty( $decoded['error'] ) ? (string) $decoded['error'] : __( 'Hugging Face Space endpoint rejected the verification probe.', 'alorbach-ai-gateway' ) );
+
+		return array(
+			'success' => false,
+			'message' => $message,
+		);
+	}
+
+	/**
+	 * Resolve the configured request mode for a model when possible.
+	 *
+	 * @param string $model Model identifier.
+	 * @return string
+	 */
+	private static function get_request_mode_for_model( $model ) {
+		$model = trim( (string) $model );
+		if ( '' === $model ) {
+			return '';
+		}
+
+		$entries = API_Keys_Helper::get_all_entries_for_type( 'huggingface_spaces' );
+		foreach ( $entries as $entry ) {
+			if ( empty( $entry['enabled'] ) ) {
+				continue;
+			}
+
+			$entry_model_id = self::build_model_id( $entry['space_id'] ?? '', $entry['schema_preset'] ?? '' );
+			if ( $entry_model_id === $model ) {
+				return self::normalize_request_mode( $entry['request_mode'] ?? '' );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Write a provider log entry when gateway debug mode is enabled.
+	 *
+	 * @param string $event   Event label.
+	 * @param array  $context Event context.
+	 * @return void
+	 */
+	private static function log_debug( $event, $context = array() ) {
+		if ( ! (bool) get_option( 'alorbach_debug_enabled', false ) ) {
+			return;
+		}
+
+		error_log( '[alorbach-hf-spaces] ' . sanitize_key( $event ) . ' ' . wp_json_encode( $context ) );
+	}
+
+	/**
+	 * Write an error-flavored provider log entry when gateway debug mode is enabled.
+	 *
+	 * @param string $event   Event label.
+	 * @param array  $context Event context.
+	 * @return void
+	 */
+	private static function log_error( $event, $context = array() ) {
+		self::log_debug( $event, $context );
 	}
 }

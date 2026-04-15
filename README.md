@@ -12,11 +12,11 @@ A precise credit-based AI API billing layer for WordPress. Bridges fixed-price s
 - **BPE tokenization** via [tiktoken](https://github.com/yethee/tiktoken-php) for pre-flight cost estimation
 - **Post-flight reconciliation** with actual token counts from the API response
 - **Immutable SQL ledger** - every credit and deduction is written as an append-only row
-- **Multi-provider support** - OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex (OAuth)
+- **Multi-provider support** - OpenAI, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
 - **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
 - **WooCommerce Subscriptions** - auto-credit on renewal, failed payment handling with retry scheduler
 - **Stripe webhook** support
-- **Async image jobs** - provider-backed progress, streamed preview frames, and queue visibility
+- **Async image jobs** - provider-backed progress, capability-dependent previews, and queue visibility
 - **Demo shortcodes** - ready-to-deploy chat, image, audio, and video UI components
 - **Admin panel** - API keys, cost matrix, model importer, plans, user balance, usage, developer docs
 
@@ -59,7 +59,7 @@ All pages are under the **AI Gateway** top-level menu.
 
 | Page | Purpose |
 |---|---|
-| **API Keys** | Manage credentials for OpenAI, Azure, Google, GitHub Models, Codex |
+| **API Keys** | Manage credentials for OpenAI, Azure, Google, Hugging Face, Hugging Face Spaces, GitHub Models, Codex |
 | **Settings** | Tabbed gateway-wide defaults, rate limits, quotas, billing/account URLs, provider import settings, advanced controls |
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Demo-only UI controls and sample page creation |
@@ -102,7 +102,7 @@ The gateway currently exposes model configuration in these functional categories
 Used for chat-style generation via `/chat`.
 
 - Typical use cases: chat assistants, text generation, structured output, multi-step flows
-- Main providers: OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex
+- Main providers: OpenAI, Azure OpenAI, Google Gemini, Hugging Face, GitHub Models, Codex
 - Demo surface: `[alorbach_demo_chat]`
 
 ### Image Models
@@ -110,12 +110,14 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - Typical use cases: image generation, preview frames, downloadable final artwork
-- Main providers: OpenAI, Azure OpenAI, Google
+- Main providers: OpenAI, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- Hugging Face Spaces support is currently manual-entry based and image-only
 - Demo surface: `[alorbach_demo_image]`
 - Supports both:
   - synchronous generation with `/images`
   - async generation with `/images/jobs`, `/images/jobs/<job_id>`, and `/images/jobs/<job_id>/stream`
 - Preview-capable models expose progress metadata through `/me/models`
+- Not every async-capable image model exposes preview frames
 
 ### Audio Models
 
@@ -213,7 +215,7 @@ Base URL: `/wp-json/alorbach/v1`
 - The image sample page now prefers `/images/jobs` and uses `/images/jobs/<job_id>/stream` plus status polling for preview-capable models.
 - `/me/models` includes image preview/progress capability metadata used by the sample UI.
 - Credits are checked before job creation and deducted only after successful completion.
-- Preview images can be inspected in both the sample page and the Image Queue admin screen.
+- Preview images can be inspected in both the sample page and the Image Queue admin screen when the selected model supports them.
 
 ---
 
