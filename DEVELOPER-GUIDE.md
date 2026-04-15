@@ -135,8 +135,10 @@ Each category also includes an `enabled` flag for the current user.
 Image capability metadata can include:
 
 - `image.supports_progress`
+- `image.supports_provider_progress`
 - `image.supports_preview_images`
 - `image.progress_mode`
+- `image.provider_progress_models`
 - `image.preview_models`
 
 Use this endpoint when building frontend pages so the UI does not hardcode model assumptions.
@@ -224,6 +226,7 @@ Typical response fields:
 - `progress_stage`
 - `progress_percent`
 - `progress_mode`
+- `provider_progress`
 - `supports_previews`
 - `preview_images`
 - `final_images`
@@ -239,6 +242,7 @@ Typical response fields:
 - `progress_stage`
 - `progress_percent`
 - `progress_mode`
+- `provider_progress`
 - `supports_previews`
 - `preview_images`
 - `final_images`
@@ -313,6 +317,20 @@ Query params:
 - `include_inactive` optional boolean
 
 Use this when another plugin wants to render gateway-owned plan data instead of duplicating it.
+
+The response shape is an object with a top-level `plans` array:
+
+```json
+{
+  "plans": [
+    {
+      "plan_key": "basic",
+      "name": "Basic",
+      "is_free": true
+    }
+  ]
+}
+```
 
 Each plan row includes:
 
@@ -531,6 +549,7 @@ Image job payloads can include:
 - `progress_stage`
 - `progress_percent`
 - `progress_mode`
+- `provider_progress`
 - `supports_previews`
 - `preview_images`
 - `final_images`

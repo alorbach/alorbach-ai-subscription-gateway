@@ -47,6 +47,17 @@ class Google_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
+	public function get_image_job_capabilities( $model = '' ) {
+		return array(
+			'async_jobs'        => false,
+			'provider_progress' => false,
+			'preview_images'    => false,
+		);
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
 	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {

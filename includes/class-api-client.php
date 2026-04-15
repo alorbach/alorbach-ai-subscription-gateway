@@ -27,18 +27,62 @@ class API_Client {
 	 * @return bool
 	 */
 	public static function supports_partial_image_streaming( $model, $provider = null ) {
+		$capabilities = self::get_image_job_capabilities( $model, $provider );
+		return ! empty( $capabilities['preview_images'] );
+	}
+
+	/**
+	 * Whether a model/provider combination supports provider-backed image jobs.
+	 *
+	 * @param string      $model    Model ID.
+	 * @param string|null $provider Optional provider override.
+	 * @return bool
+	 */
+	public static function supports_async_image_jobs( $model, $provider = null ) {
+		$capabilities = self::get_image_job_capabilities( $model, $provider );
+		return ! empty( $capabilities['async_jobs'] );
+	}
+
+	/**
+	 * Whether a model/provider combination exposes provider-backed progress states.
+	 *
+	 * @param string      $model    Model ID.
+	 * @param string|null $provider Optional provider override.
+	 * @return bool
+	 */
+	public static function supports_provider_image_progress( $model, $provider = null ) {
+		$capabilities = self::get_image_job_capabilities( $model, $provider );
+		return ! empty( $capabilities['provider_progress'] );
+	}
+
+	/**
+	 * Get normalized image-job capabilities for a model/provider combination.
+	 *
+	 * @param string      $model    Model ID.
+	 * @param string|null $provider Optional provider override.
+	 * @return array{async_jobs: bool, provider_progress: bool, preview_images: bool}
+	 */
+	public static function get_image_job_capabilities( $model, $provider = null ) {
 		$model    = (string) $model;
 		$provider = $provider ?: self::get_provider_for_model( $model );
+		$prov     = Provider_Registry::get( $provider );
 
-		if ( strpos( $model, 'gpt-image' ) !== 0 ) {
-			return false;
+		if ( ! $prov || ! method_exists( $prov, 'get_image_job_capabilities' ) ) {
+			return array(
+				'async_jobs'        => false,
+				'provider_progress' => false,
+				'preview_images'    => false,
+			);
 		}
 
-		if ( ! in_array( $provider, array( 'openai', 'azure' ), true ) ) {
-			return false;
-		}
+		$capabilities = $prov->get_image_job_capabilities( $model );
+		$capabilities = is_array( $capabilities ) ? $capabilities : array();
 
-		return function_exists( 'curl_init' );
+		return array(
+			'async_jobs'        => ! empty( $capabilities['async_jobs'] ),
+			'provider_progress' => ! empty( $capabilities['provider_progress'] ),
+			'preview_images'    => ! empty( $capabilities['preview_images'] ),
+		);
 	}
 
 	/**

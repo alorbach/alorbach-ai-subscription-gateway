@@ -52,7 +52,25 @@ class Admin_User_Plans {
 		<div class="wrap">
 			<h1><?php esc_html_e( 'User Plans', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description"><?php esc_html_e( 'Assign a manual plan override to a user or clear it to fall back to WooCommerce subscriptions and then Basic.', 'alorbach-ai-gateway' ); ?></p>
+			<style>
+			.alorbach-user-plans-table-wrap { max-width: 100%; overflow-x: auto; }
+			.alorbach-user-plans-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+			@media (max-width: 782px) {
+				.alorbach-user-plans-table-wrap table,
+				.alorbach-user-plans-table-wrap tbody,
+				.alorbach-user-plans-table-wrap tr,
+				.alorbach-user-plans-table-wrap td,
+				.alorbach-user-plans-table-wrap th { display: block; width: 100%; box-sizing: border-box; }
+				.alorbach-user-plans-table-wrap thead { display: none; }
+				.alorbach-user-plans-table-wrap tr { margin: 0 0 16px; padding: 12px; border: 1px solid #dcdcde; border-radius: 8px; background: #fff; }
+				.alorbach-user-plans-table-wrap td { padding: 6px 0; border: 0; }
+				.alorbach-user-plans-form { flex-direction: column; align-items: stretch; }
+				.alorbach-user-plans-form select,
+				.alorbach-user-plans-form .button { width: 100%; }
+			}
+			</style>
 
+			<div class="alorbach-user-plans-table-wrap">
 			<table class="widefat striped">
 				<thead>
 					<tr>
@@ -75,7 +93,7 @@ class Admin_User_Plans {
 							<td><?php echo esc_html( $resolved['public_name'] ?? $resolved['slug'] ?? '' ); ?> <code><?php echo esc_html( $resolved['slug'] ?? '' ); ?></code></td>
 							<td><?php echo esc_html( self::get_source_label( (string) $resolution['source'] ) ); ?></td>
 							<td>
-								<form method="post">
+								<form method="post" class="alorbach-user-plans-form">
 									<?php wp_nonce_field( 'alorbach_user_plans', 'alorbach_user_plans_nonce' ); ?>
 									<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>" />
 									<select name="manual_plan_slug">
@@ -98,6 +116,7 @@ class Admin_User_Plans {
 					<?php endif; ?>
 				</tbody>
 			</table>
+			</div>
 		</div>
 		<?php
 	}

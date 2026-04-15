@@ -120,27 +120,29 @@ class Admin_API_Keys {
 				<?php wp_nonce_field( 'alorbach_api_keys', 'alorbach_api_keys_nonce' ); ?>
 				<input type="hidden" name="codex_disconnect" value="0" id="alorbach-codex-disconnect-flag" />
 
-				<table class="widefat striped alorbach-api-keys-table">
-					<thead>
-						<tr>
-							<th class="col-type"><?php esc_html_e( 'API Type', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-name"><?php esc_html_e( 'Name', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-key"><?php esc_html_e( 'API Key', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-endpoint"><?php esc_html_e( 'Endpoint', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-org"><?php esc_html_e( 'Organization', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-free"><?php esc_html_e( 'Free pass-through', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-enabled"><?php esc_html_e( 'Enabled', 'alorbach-ai-gateway' ); ?></th>
-							<th class="col-actions"><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
-						</tr>
-					</thead>
-					<tbody id="alorbach-entries-tbody">
-						<?php
-						foreach ( $entries as $i => $entry ) {
-							self::render_entry_row( $i, $entry );
-						}
-						?>
-					</tbody>
-				</table>
+				<div class="alorbach-api-keys-table-wrap">
+					<table class="widefat striped alorbach-api-keys-table">
+						<thead>
+							<tr>
+								<th class="col-type"><?php esc_html_e( 'API Type', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-name"><?php esc_html_e( 'Name', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-key"><?php esc_html_e( 'API Key', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-endpoint"><?php esc_html_e( 'Endpoint', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-org"><?php esc_html_e( 'Organization', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-free"><?php esc_html_e( 'Free pass-through', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-enabled"><?php esc_html_e( 'Enabled', 'alorbach-ai-gateway' ); ?></th>
+								<th class="col-actions"><?php esc_html_e( 'Actions', 'alorbach-ai-gateway' ); ?></th>
+							</tr>
+						</thead>
+						<tbody id="alorbach-entries-tbody">
+							<?php
+							foreach ( $entries as $i => $entry ) {
+								self::render_entry_row( $i, $entry );
+							}
+							?>
+						</tbody>
+					</table>
+				</div>
 
 				<p class="submit">
 					<button type="button" class="button" id="alorbach-add-entry"><?php esc_html_e( 'Add API Key', 'alorbach-ai-gateway' ); ?></button>
@@ -161,6 +163,7 @@ class Admin_API_Keys {
 
 			<style>
 			.alorbach-api-keys { max-width: 1400px; }
+			.alorbach-api-keys .alorbach-api-keys-table-wrap { max-width: 100%; overflow-x: auto; }
 			.alorbach-api-keys .alorbach-api-keys-table { width: 100%; max-width: 1400px; margin-top: 1rem; table-layout: fixed; }
 			.alorbach-api-keys .col-type { width: 12%; }
 			.alorbach-api-keys .col-name { width: 10%; }
@@ -206,6 +209,22 @@ class Admin_API_Keys {
 			.alorbach-api-keys .setup-guide-card ol { margin: 0 0 10px 18px; }
 			.alorbach-api-keys .setup-guide-card li { margin-bottom: 6px; }
 			.alorbach-api-keys .setup-guide-card .description { color: #50575e; }
+			@media (max-width: 782px) {
+				.alorbach-api-keys .alorbach-api-keys-table { table-layout: auto; min-width: 0; }
+				.alorbach-api-keys .alorbach-api-keys-table thead { display: none; }
+				.alorbach-api-keys .alorbach-api-keys-table,
+				.alorbach-api-keys .alorbach-api-keys-table tbody,
+				.alorbach-api-keys .alorbach-api-keys-table tr,
+				.alorbach-api-keys .alorbach-api-keys-table td { display: block; width: 100%; box-sizing: border-box; }
+				.alorbach-api-keys .alorbach-api-keys-table tr { margin: 0 0 16px; padding: 12px; border: 1px solid #dcdcde; border-radius: 8px; background: #fff; }
+				.alorbach-api-keys .alorbach-api-keys-table td { padding: 6px 0; border: 0; }
+				.alorbach-api-keys .alorbach-api-keys-table td.entry-actions { padding-top: 10px; }
+				.alorbach-api-keys .alorbach-api-keys-table td.entry-actions .button { width: 100%; justify-content: center; }
+				.alorbach-api-keys .input-with-actions { flex-direction: column; align-items: stretch; }
+				.alorbach-api-keys .input-with-actions .button { width: 100%; }
+				.alorbach-api-keys .entry-enabled,
+				.alorbach-api-keys .entry-free { display: flex !important; align-items: center; }
+			}
 			</style>
 		<script>
 		(function() {

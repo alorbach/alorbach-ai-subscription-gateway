@@ -744,11 +744,14 @@ class REST_Proxy {
 		$max_tokens_options = $admin::get_max_tokens_options();
 		$default_max_tokens = $settings_admin::get_default_max_tokens();
 		$image_models = isset( $config['capabilities']['image_models'] ) && is_array( $config['capabilities']['image_models'] ) ? $config['capabilities']['image_models'] : array();
-		$streamable_image_models = array_values( array_filter( $image_models, function ( $model ) {
+		$provider_progress_models = array_values( array_filter( $image_models, function ( $model ) {
+			return API_Client::supports_provider_image_progress( $model );
+		} ) );
+		$preview_image_models = array_values( array_filter( $image_models, function ( $model ) {
 			return API_Client::supports_partial_image_streaming( $model );
 		} ) );
 		$default_image_model = isset( $config['defaults']['image_model'] ) ? $config['defaults']['image_model'] : '';
-		$default_supports_stream = API_Client::supports_partial_image_streaming( $default_image_model );
+		$default_image_capabilities = API_Client::get_image_job_capabilities( $default_image_model );
 
 		return rest_ensure_response( array(
 			'text'  => array(
@@ -779,10 +782,12 @@ class REST_Proxy {
  					'options'      => $config['capabilities']['image_qualities'],
  				),
 				'supports_progress'       => true,
-				'supports_preview_images' => ! empty( $streamable_image_models ),
-				'progress_mode'           => $default_supports_stream ? 'provider' : 'estimated',
+				'supports_provider_progress' => ! empty( $provider_progress_models ),
+				'supports_preview_images' => ! empty( $preview_image_models ),
+				'progress_mode'           => ! empty( $default_image_capabilities['provider_progress'] ) ? 'provider' : 'estimated',
 				'job_endpoint'            => rest_url( 'alorbach/v1/images/jobs' ),
-				'preview_models'          => $streamable_image_models,
+				'provider_progress_models' => $provider_progress_models,
+				'preview_models'          => $preview_image_models,
  			),
 			'audio' => array(
 				'enabled'      => ! empty( $config['plan_capabilities']['audio'] ),

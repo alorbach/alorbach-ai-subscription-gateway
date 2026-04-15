@@ -61,6 +61,17 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
+	public function get_image_job_capabilities( $model = '' ) {
+		return array(
+			'async_jobs'        => true,
+			'provider_progress' => true,
+			'preview_images'    => false,
+		);
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
 	public function build_chat_request( $body, $credentials ) {
 		return new \WP_Error( 'unsupported_provider', __( 'Hugging Face Spaces does not support chat completions in this plugin.', 'alorbach-ai-gateway' ) );
 	}

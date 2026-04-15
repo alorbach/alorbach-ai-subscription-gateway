@@ -54,6 +54,20 @@ class Azure_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
+	public function get_image_job_capabilities( $model = '' ) {
+		$model = (string) $model;
+		$supports_preview_images = function_exists( 'curl_init' ) && strpos( $model, 'gpt-image' ) === 0;
+
+		return array(
+			'async_jobs'        => $supports_preview_images,
+			'provider_progress' => $supports_preview_images,
+			'preview_images'    => $supports_preview_images,
+		);
+	}
+
+	/**
+	 * {@inheritdoc}
+	 */
 	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';

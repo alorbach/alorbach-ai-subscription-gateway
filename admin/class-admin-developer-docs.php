@@ -21,7 +21,22 @@ class Admin_Developer_Docs {
 	 */
 	public static function render() {
 		?>
-		<div class="wrap">
+		<div class="wrap alorbach-developer-docs">
+			<style>
+			.alorbach-developer-docs pre {
+				max-width: 100%;
+				overflow-x: auto;
+				-webkit-overflow-scrolling: touch;
+			}
+			.alorbach-developer-docs pre code {
+				display: block;
+				min-width: 0;
+				white-space: pre;
+			}
+			.alorbach-developer-docs table {
+				max-width: 100%;
+			}
+			</style>
 			<h1><?php esc_html_e( 'Developer Documentation', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description"><?php esc_html_e( 'Stable downstream integration APIs, demo endpoints, hooks, and example usage for the Alorbach AI Subscription Gateway.', 'alorbach-ai-gateway' ); ?></p>
 
@@ -151,7 +166,8 @@ class Admin_Developer_Docs {
 
 		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// Public plan + config fetch
 const config = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/config' ) ); ?>').then(r => r.json());
-const plans = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json());
+const plansResponse = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json());
+const plans = plansResponse.plans || [];
 
 // Logged-in account fetch using your own localized nonce
 const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/account' ) ); ?>', {
@@ -227,31 +243,33 @@ const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integrat
 		<p><?php esc_html_e( 'When a user is logged in, the payload is filtered to their resolved plan. If a Basic user has a positive credit balance, the full configured catalog is exposed so those credits can be spent across the paid capabilities.', 'alorbach-ai-gateway' ); ?></p>
 
 		<h3><code>/integration/plans</code></h3>
-		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>[
-  {
-    "slug": "basic",
-    "public_name": "Basic",
-    "billing_interval": "month",
-    "price_usd": 0,
-    "included_credits_uc": 0,
-    "included_credits_display": "0 Credits",
-    "display_order": 0,
-    "is_active": true,
-    "is_free": true,
-    "capabilities": {
-      "chat": true,
-      "image": false,
-      "audio": false,
-      "video": false
-    },
-    "allowed_models": {
-      "chat": [],
-      "image": [],
-      "audio": [],
-      "video": []
+		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>{
+  "plans": [
+    {
+      "slug": "basic",
+      "public_name": "Basic",
+      "billing_interval": "month",
+      "price_usd": 0,
+      "included_credits_uc": 0,
+      "included_credits_display": "0 Credits",
+      "display_order": 0,
+      "is_active": true,
+      "is_free": true,
+      "capabilities": {
+        "chat": true,
+        "image": false,
+        "audio": false,
+        "video": false
+      },
+      "allowed_models": {
+        "chat": [],
+        "image": [],
+        "audio": [],
+        "video": []
+      }
     }
-  }
-]</code></pre>
+  ]
+}</code></pre>
 		<p><?php esc_html_e( 'Plans are normalized from stored data. Legacy fields such as `name` and `credits_per_month` are internal storage compatibility details, not the public contract.', 'alorbach-ai-gateway' ); ?></p>
 		<p><?php esc_html_e( 'The protected `basic` plan is always available as the fallback when no manual override or active paid subscription resolves.', 'alorbach-ai-gateway' ); ?></p>
 
@@ -443,14 +461,16 @@ window.myGatewayData = {
   restNonce: '<?php echo esc_js( wp_create_nonce( 'wp_rest' ) ); ?>'
 };
 
-const [config, plans, account] = await Promise.all([
+const [config, plansResponse, account] = await Promise.all([
   fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/config' ) ); ?>').then(r => r.json()),
   fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json()),
   fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/account' ) ); ?>', {
     credentials: 'same-origin',
     headers: { 'X-WP-Nonce': window.myGatewayData.restNonce }
   }).then(r => r.json())
-]);</code></pre>
+]);
+
+const plans = plansResponse.plans || [];</code></pre>
 		<p><?php esc_html_e( 'For WooCommerce-based subscriptions, treat account balance as reliable after the gateway has granted credits and the `alorbach_subscription_renewal_completed` action has fired. Downstream listeners should react to that event rather than inferring renewal state from order status alone.', 'alorbach-ai-gateway' ); ?></p>
 		<?php
 	}

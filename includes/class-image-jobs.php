@@ -169,10 +169,16 @@ class Image_Jobs {
 			);
 		}
 
-		$job_id             = wp_generate_uuid4();
-		$token              = wp_generate_password( 20, false, false );
-		$supports_previews  = empty( $reference_images ) && API_Client::supports_partial_image_streaming( $model );
-		$progress_mode      = $supports_previews ? 'provider' : 'estimated';
+		$job_id               = wp_generate_uuid4();
+		$token                = wp_generate_password( 20, false, false );
+		$image_capabilities   = empty( $reference_images ) ? API_Client::get_image_job_capabilities( $model ) : array(
+			'async_jobs'        => false,
+			'provider_progress' => false,
+			'preview_images'    => false,
+		);
+		$supports_previews    = ! empty( $image_capabilities['preview_images'] );
+		$provider_progress    = ! empty( $image_capabilities['provider_progress'] );
+		$progress_mode        = $provider_progress ? 'provider' : 'estimated';
 		$job     = array(
 			'job_id'             => $job_id,
 			'user_id'            => $user_id,
@@ -181,6 +187,7 @@ class Image_Jobs {
 			'progress_percent'   => 10,
 			'progress_mode'      => $progress_mode,
 			'supports_previews'  => $supports_previews,
+			'provider_progress'  => $provider_progress,
 			'size'               => $size,
 			'n'                  => $n,
 			'quality'            => $quality,
@@ -411,11 +418,17 @@ class Image_Jobs {
 			return self::public_job_payload( $job );
 		}
 
+		$image_capabilities       = empty( $job['reference_images'] ) ? API_Client::get_image_job_capabilities( (string) $job['model'] ) : array(
+			'async_jobs'        => false,
+			'provider_progress' => false,
+			'preview_images'    => false,
+		);
 		$job['status']            = 'in_progress';
 		$job['progress_stage']    = 'drafting';
 		$job['progress_percent']  = 35;
-		$job['supports_previews'] = empty( $job['reference_images'] ) && API_Client::supports_partial_image_streaming( $job['model'] );
-		$job['progress_mode']     = $job['supports_previews'] ? 'provider' : 'estimated';
+		$job['supports_previews'] = ! empty( $image_capabilities['preview_images'] );
+		$job['provider_progress'] = ! empty( $image_capabilities['provider_progress'] );
+		$job['progress_mode']     = ! empty( $job['provider_progress'] ) ? 'provider' : 'estimated';
 		$job['updated_at']        = time();
 		self::save_full_job( $job );
 		if ( is_callable( $on_update ) ) {
@@ -937,6 +950,7 @@ class Image_Jobs {
 			'progress_percent'    => (int) ( $job['progress_percent'] ?? 0 ),
 			'progress_mode'       => (string) ( $job['progress_mode'] ?? 'estimated' ),
 			'supports_previews'   => ! empty( $job['supports_previews'] ),
+			'provider_progress'   => ! empty( $job['provider_progress'] ),
 			'model'               => (string) ( $job['model'] ?? '' ),
 			'size'                => (string) ( $job['size'] ?? '' ),
 			'quality'             => (string) ( $job['quality'] ?? '' ),
@@ -996,6 +1010,7 @@ class Image_Jobs {
 			'progress_percent'   => (int) ( $job['progress_percent'] ?? 0 ),
 			'progress_mode'      => (string) ( $job['progress_mode'] ?? 'estimated' ),
 			'supports_previews'  => ! empty( $job['supports_previews'] ),
+			'provider_progress'  => ! empty( $job['provider_progress'] ),
 			'model'              => (string) ( $job['model'] ?? '' ),
 			'size'               => (string) ( $job['size'] ?? '' ),
 			'quality'            => (string) ( $job['quality'] ?? '' ),
@@ -1036,6 +1051,7 @@ class Image_Jobs {
 			'progress_percent'   => (int) $job['progress_percent'],
 			'progress_mode'      => $job['progress_mode'],
 			'supports_previews'  => ! empty( $job['supports_previews'] ),
+			'provider_progress'  => ! empty( $job['provider_progress'] ),
 			'estimated_progress_mode' => $job['progress_mode'] === 'estimated',
 			'preview_images'     => isset( $job['preview_images'] ) ? $job['preview_images'] : array(),
 			'final_images'       => isset( $job['final_images'] ) ? $job['final_images'] : array(),

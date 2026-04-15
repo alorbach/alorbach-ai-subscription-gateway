@@ -129,12 +129,14 @@
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
-	white-space: nowrap;
+	white-space: normal;
 	flex-shrink: 0;
+	min-width: 0;
 }
 
 .alorbach-demo-settings select {
 	min-width: 140px;
+	max-width: 100%;
 }
 
 .alorbach-demo-model-wrap {
@@ -146,7 +148,7 @@
 }
 
 .alorbach-demo-model-wrap label {
-	white-space: nowrap;
+	white-space: normal;
 	flex-shrink: 0;
 }
 
@@ -275,6 +277,49 @@
 }
 
 @media (max-width: 520px) {
+	.alorbach-demo {
+		padding: 1rem 0;
+	}
+
+	.alorbach-demo-form-card {
+		padding: 1rem;
+	}
+
+	.alorbach-demo-settings {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.alorbach-demo-settings label,
+	.alorbach-demo-model-wrap,
+	.alorbach-demo-size-wrap,
+	.alorbach-demo-quality-wrap,
+	.alorbach-demo-n-wrap,
+	.alorbach-demo-duration-wrap {
+		width: 100%;
+	}
+
+	.alorbach-demo-settings select,
+	.alorbach-demo-settings textarea,
+	.alorbach-demo-settings input[type="number"],
+	.alorbach-demo-model-select,
+	.alorbach-demo-size-select,
+	.alorbach-demo-quality-select,
+	.alorbach-demo-duration-select {
+		width: 100% !important;
+		min-width: 0 !important;
+		max-width: 100% !important;
+	}
+
+	.alorbach-demo-input-row {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.alorbach-demo-input-row .alorbach-demo-send {
+		width: 100%;
+	}
+
 	.alorbach-demo-image-options {
 		flex-direction: column;
 		align-items: stretch;
@@ -761,6 +806,7 @@
 .alorbach-demo select.alorbach-demo-size-select,
 .alorbach-demo select.alorbach-demo-quality-select {
 	min-width: 140px !important;
+	max-width: 100% !important;
 }
 
 .alorbach-demo input[type="text"]:focus,

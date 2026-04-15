@@ -52,6 +52,19 @@ interface Provider_Interface {
 	public function supports_video();
 
 	/**
+	 * Describe the provider's image-job capabilities for a model.
+	 *
+	 * Keys:
+	 * - async_jobs: whether image jobs should be treated as provider-backed async work.
+	 * - provider_progress: whether queued/in-progress/completed states come from the provider/runtime rather than estimated-only UI milestones.
+	 * - preview_images: whether partial preview frames can be surfaced before final completion.
+	 *
+	 * @param string $model Model ID.
+	 * @return array{async_jobs: bool, provider_progress: bool, preview_images: bool}
+	 */
+	public function get_image_job_capabilities( $model = '' );
+
+	/**
 	 * Build chat completion request.
 	 *
 	 * @param array $body        Request body (model, messages, max_tokens, etc.).

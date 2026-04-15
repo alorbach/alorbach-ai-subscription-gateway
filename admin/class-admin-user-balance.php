@@ -72,6 +72,21 @@ class Admin_User_Balance {
 		<div class="wrap">
 			<h1><?php esc_html_e( 'User Balance', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description"><?php esc_html_e( '1 Credit = 1,000 UC. 1 USD = 1,000,000 UC.', 'alorbach-ai-gateway' ); ?></p>
+			<style>
+			.alorbach-user-balance-table-wrap { max-width: 100%; overflow-x: auto; margin-bottom: 20px; }
+			.alorbach-user-balance-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+			.alorbach-user-balance-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+			@media (max-width: 782px) {
+				.alorbach-user-balance-form { flex-direction: column; align-items: stretch; }
+				.alorbach-user-balance-form input[type="number"],
+				.alorbach-user-balance-form select,
+				.alorbach-user-balance-form .button,
+				.alorbach-user-balance-filters select,
+				.alorbach-user-balance-filters .button { width: 100% !important; max-width: 100%; }
+				.alorbach-user-balance-filters { align-items: stretch; }
+			}
+			</style>
+			<div class="alorbach-user-balance-table-wrap">
 			<table class="widefat striped">
 				<thead>
 					<tr>
@@ -97,7 +112,7 @@ class Admin_User_Balance {
 							<td><?php echo esc_html( self::format_credits_str( $balance ) ); ?></td>
 							<td><?php echo esc_html( \Alorbach\AIGateway\User_Display::format_uc_as_usd( $balance ) ); ?></td>
 							<td>
-								<form method="post" style="display:inline;">
+								<form method="post" class="alorbach-user-balance-form">
 									<?php wp_nonce_field( 'alorbach_balance', 'alorbach_balance_nonce' ); ?>
 									<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>" />
 									<input type="number" name="amount" value="0" min="0" step="any" size="8" style="width:80px;" placeholder="0" />
@@ -117,9 +132,11 @@ class Admin_User_Balance {
 					<?php endforeach; ?>
 				</tbody>
 			</table>
+			</div>
 
 			<h2><?php esc_html_e( 'Monthly Usage', 'alorbach-ai-gateway' ); ?></h2>
 			<p><?php echo esc_html( sprintf( __( 'Month: %s', 'alorbach-ai-gateway' ), gmdate( 'Y-m' ) ) ); ?></p>
+			<div class="alorbach-user-balance-table-wrap">
 			<table class="widefat striped">
 				<thead>
 					<tr>
@@ -140,6 +157,7 @@ class Admin_User_Balance {
 					<?php endforeach; ?>
 				</tbody>
 			</table>
+			</div>
 
 			<h2><?php esc_html_e( 'All Transactions', 'alorbach-ai-gateway' ); ?></h2>
 			<?php
@@ -163,7 +181,7 @@ class Admin_User_Balance {
 			}
 			$filtered_user = $filter_user_id > 0 ? get_user_by( 'id', $filter_user_id ) : null;
 			?>
-			<p>
+			<p class="alorbach-user-balance-filters">
 				<label for="alorbach_filter_user"><?php esc_html_e( 'Filter:', 'alorbach-ai-gateway' ); ?></label>
 				<select id="alorbach_filter_user" onchange="if(this.value){window.location.href=this.value;}">
 					<option value="<?php echo esc_url( $base_url ); ?>" <?php selected( ! $filter_user_id ); ?>><?php esc_html_e( 'All users', 'alorbach-ai-gateway' ); ?></option>
@@ -181,6 +199,7 @@ class Admin_User_Balance {
 			<?php if ( empty( $rows ) ) : ?>
 				<p><?php echo esc_html( $filter_user_id > 0 ? __( 'No transactions for this user.', 'alorbach-ai-gateway' ) : __( 'No transactions yet.', 'alorbach-ai-gateway' ) ); ?></p>
 			<?php else : ?>
+				<div class="alorbach-user-balance-table-wrap">
 				<table class="widefat striped">
 					<thead>
 						<tr>
@@ -214,6 +233,7 @@ class Admin_User_Balance {
 						<?php endforeach; ?>
 					</tbody>
 				</table>
+				</div>
 				<?php
 				$pagination_url = $filter_user_id > 0 ? add_query_arg( 'user_id', $filter_user_id, $base_url ) : $base_url;
 				Admin_Helper::render_pagination( $page, $pages, $total, $pagination_url );

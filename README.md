@@ -188,7 +188,7 @@ Base URL: `/wp-json/alorbach/v1`
 | Method | Endpoint | Purpose |
 |---|---|---|
 | `GET` | `/integration/config` | Canonical downstream config: backend defaults, capabilities, billing URLs, and logged-in active-plan filtering |
-| `GET` | `/integration/plans` | Canonical downstream plan catalog with capabilities and model allowlists |
+| `GET` | `/integration/plans` | Canonical downstream plan catalog returned as `{ plans: [...] }` with capabilities and model allowlists |
 
 ### Admin Endpoints _(requires `manage_options`)_
 

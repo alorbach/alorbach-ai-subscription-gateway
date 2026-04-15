@@ -112,6 +112,20 @@ abstract class Provider_Base implements Provider_Interface {
 	}
 
 	/**
+	 * Default image-job capability map.
+	 *
+	 * @param string $model Model ID.
+	 * @return array{async_jobs: bool, provider_progress: bool, preview_images: bool}
+	 */
+	public function get_image_job_capabilities( $model = '' ) {
+		return array(
+			'async_jobs'        => false,
+			'provider_progress' => false,
+			'preview_images'    => false,
+		);
+	}
+
+	/**
 	 * Classify OpenAI-style model ID into type.
 	 *
 	 * @param string $model_id Model ID.
