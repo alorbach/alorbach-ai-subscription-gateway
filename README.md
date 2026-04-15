@@ -376,3 +376,8 @@ The CI workflow builds a clean plugin ZIP and publishes a GitHub Release with au
 ## License
 
 GPL-2.0-or-later - Copyright (c) Andre Lorbach
+
+## Documentation
+
+- [Advanced User Guide](docs/advanced-user.md)
+- [Developer Guide](DEVELOPER-GUIDE.md)

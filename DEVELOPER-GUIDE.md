@@ -1,10 +1,8 @@
-# Developer Guide
+﻿# Developer Guide
 
 External developer documentation for building against the Alorbach AI Subscription Gateway plugin.
 
 This guide is for developers creating themes, plugins, or custom frontend pages that consume the gateway's WordPress-facing functionality.
-
-For internal plugin-development setup, local `wp-env`, and repository workflows, use the root project docs instead.
 
 ---
 
@@ -46,7 +44,7 @@ X-WP-Nonce: <wp_rest nonce>
 The plugin currently exposes these route groups:
 
 - user endpoints for logged-in frontend/application use
-- public downstream endpoints for plugin-to-plugin integration
+- public integration endpoints for WordPress frontend integration and external extensions
 - admin endpoints for operational tools and verification
 - internal-only endpoints used by the plugin itself
 
@@ -66,7 +64,7 @@ Important exception:
 
 - if a user resolves to `basic` and has a positive credit balance, the gateway allows the full configured model catalog and paid capabilities so manually added credits can be spent
 
-Use the downstream account/config endpoints or PHP helpers instead of reproducing this logic in another plugin.
+Use the account/config integration endpoints or helper routines instead of reproducing this logic in your integration.
 
 ---
 
@@ -168,7 +166,7 @@ Typical response fields:
 
 Canonical account summary for the current logged-in user.
 
-Useful for downstream plugins that want a stable user-facing account payload.
+Useful for WordPress plugins, themes, or custom frontends that need a stable user-facing account payload.
 
 The payload includes the resolved `active_plan` summary.
 
@@ -189,7 +187,7 @@ Query params:
 - `page` optional
 - `per_page` optional
 
-Useful for downstream plugins that want to show balance or transaction history without reading plugin internals.
+Useful for WordPress plugins, themes, or custom frontends that need balance/history without reading plugin internals.
 
 ### `POST /images`
 
@@ -282,7 +280,7 @@ Typical use cases:
 
 - uploaded audio transcription
 - dictated notes
-- speech-to-text processing in downstream plugins
+- speech-to-text processing in WordPress integrations
 
 ### `POST /video`
 
@@ -299,13 +297,13 @@ Video generation is handled as a polling-style flow rather than preview-frame st
 
 ---
 
-## Public Downstream Endpoints
+## Public Integration Endpoints
 
 These endpoints do not require login.
 
 ### `GET /integration/config`
 
-Canonical downstream configuration payload.
+Canonical integration configuration payload.
 
 Use this for:
 
@@ -319,13 +317,13 @@ If the logged-in user is on `basic` with a positive balance, the payload exposes
 
 ### `GET /integration/plans`
 
-Canonical downstream plan catalog.
+Canonical integration plan catalog.
 
 Query params:
 
 - `include_inactive` optional boolean
 
-Use this when another plugin wants to render gateway-owned plan data instead of duplicating it.
+Use this when another WordPress integration wants to render gateway-owned plan data instead of duplicating it.
 
 The response shape is an object with a top-level `plans` array:
 
@@ -591,7 +589,7 @@ If you build your own page, keep preview frames visually distinct from final ima
 - credits are deducted only after successful final image completion
 - failed jobs do not deduct credits
 
-This matters if your downstream UI wants to explain when balance changes will occur.
+This matters if your front-end integration needs to explain when balance changes will occur.
 
 It also matters for Basic users with manually granted credits: a positive balance unlocks the full configured capability/model catalog even when the resolved plan is still `basic`.
 
@@ -624,7 +622,7 @@ What cleanup does not delete:
 
 - unrelated WordPress attachments
 - any attachment that is not explicitly marked as owned by the target job
-- final attachments that are already promoted into a downstream permanent workflow unless the cleanup path is forced and the code path explicitly allows that deletion
+- final attachments that are already promoted into a downstream workflow unless the cleanup path is forced and the code path explicitly allows that deletion
 
 Recommended uses:
 
@@ -693,7 +691,23 @@ if ( alorbach_user_can_access_capability( 'image', 'gpt-image-1', $user_id ) ) {
 
 Use the docs in these places for these purposes:
 
-- `docs/` in the repository root: internal maintainer documentation
-- `wordpress-plugin/README.md`: public plugin overview and high-level endpoint summary
-- `wordpress-plugin/DEVELOPER-GUIDE.md`: external integration and REST API reference
+- `README.md`: public plugin overview and high-level endpoint summary
+- `DEVELOPER-GUIDE.md`: external integration and REST API reference
 - `AI Gateway -> Developer` in wp-admin: interactive developer/admin reference and test tooling
+
+## Scope note
+
+This guide is for developers integrating this plugin from themes, custom pages, and third-party WordPress plugins.
+
+For questions about maintaining or changing plugin source code in this repository, use the maintainer onboarding path in your project environment (not this guide).
+
+## Integration validation checklist
+
+Before shipping a custom frontend integration, check:
+
+- endpoint contracts in /wp-json/alorbach/v1 and response fields you depend on
+- authentication and REST nonce behavior for logged-in users
+- error handling (401, 403, 422, and provider-level failures)
+- image job progress behavior for the models you expose
+- secrets policy: never render API keys or provider credentials in the browser or logs
+
