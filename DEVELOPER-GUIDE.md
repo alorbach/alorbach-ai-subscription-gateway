@@ -362,6 +362,8 @@ Used by the plugin admin and developer tooling.
 
 #### `POST /admin/verify-api-key`
 
+Validates provider access. For API-key providers this checks the stored key. For `Codex Images (Local Codex CLI)` it checks the local Codex bridge prerequisites instead.
+
 Request fields:
 
 - `provider` required
@@ -478,7 +480,7 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - typical use cases: image generation, preview frames, downloadable final artwork
-- main providers: OpenAI, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- main providers: OpenAI, Codex Images (Local Codex CLI), Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - supports both synchronous and async job flows
 - imported Hugging Face and Hugging Face Spaces image models may appear in `/me/models` when configured
 
@@ -504,6 +506,17 @@ Codex models are a specialized text-model path for coding and agent-style respon
 - request behavior can use a Responses/SSE-style backend flow rather than a plain chat-completions path
 
 Do not treat Codex as an image, audio, or video category. From an integration perspective it belongs under text-generation workflows.
+
+### Codex Images
+
+Codex image generation is a separate image path in this plugin.
+
+- provider path: `Codex Images (Local Codex CLI)`
+- authentication: local Codex CLI login on the same machine, not Codex OAuth and not an OpenAI API key
+- request behavior: WordPress invokes a local helper script, which runs the installed Codex CLI and reads the generated image from the local Codex image output directory
+- containerized development note: in `wp-env` or Docker on Windows, run `node wordpress-plugin/bin/codex-image-bridge.js serve` on the Windows host so the Linux PHP container can call the host bridge through `host.docker.internal`
+
+This path exists to mirror Codex CLI behavior without reverse-engineering undocumented ChatGPT backend image endpoints. Do not describe it as Codex OAuth image output. The stored Codex OAuth token remains text-only in this plugin.
 
 ---
 
@@ -710,4 +723,3 @@ Before shipping a custom frontend integration, check:
 - error handling (401, 403, 422, and provider-level failures)
 - image job progress behavior for the models you expose
 - secrets policy: never render API keys or provider credentials in the browser or logs
-

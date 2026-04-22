@@ -45,7 +45,7 @@ class Model_Importer {
 	 *
 	 * @var array
 	 */
-	private static $image_sizes = array( '1024x1024', '1792x1024', '1024x1792' );
+	private static $image_sizes = array( '1024x1024', '1024x1536', '1536x1024', '1792x1024', '1024x1792', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
 
 	/**
 	 * Known video models with default UC per video.
@@ -166,6 +166,7 @@ class Model_Importer {
 		$entry_filter = self::normalize_entry_id_filter( $entry_ids );
 		$type_labels = array(
 			'openai'        => 'OpenAI',
+			'codex_images'  => 'Codex Images (Local Codex CLI)',
 			'azure'         => 'Azure OpenAI / Foundry',
 			'google'        => 'Google (Gemini)',
 			'huggingface'   => 'Hugging Face',
@@ -183,8 +184,8 @@ class Model_Importer {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
-			// Codex authenticates via OAuth and Hugging Face Spaces can be public.
-			if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+			// Codex authenticates via OAuth, local Codex images use the local CLI, and Hugging Face Spaces can be public.
+			if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
@@ -197,7 +198,7 @@ class Model_Importer {
 			if ( ! $prov ) {
 				continue;
 			}
-			$creds = $type === 'codex'
+			$creds = in_array( $type, array( 'codex', 'codex_images' ), true )
 				? array()
 				: array( 'api_key' => $entry['api_key'] );
 			if ( ! empty( $entry['endpoint'] ) ) {
@@ -392,6 +393,7 @@ class Model_Importer {
 		update_option( 'alorbach_image_costs', array() );
 		update_option( 'alorbach_image_models', array() );
 		update_option( 'alorbach_image_model_costs', array() );
+		update_option( 'alorbach_image_model_entries', array() );
 		update_option( 'alorbach_video_costs', array() );
 		update_option( 'alorbach_audio_costs', array() );
 		update_option( 'alorbach_model_max_tokens', array() );
@@ -424,6 +426,8 @@ class Model_Importer {
 		$image_models     = is_array( $image_models ) ? $image_models : array();
 		$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
 		$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
+		$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
+		$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
 		$video_costs = get_option( 'alorbach_video_costs', array() );
 		$video_costs = is_array( $video_costs ) ? $video_costs : array();
 		$audio_costs = get_option( 'alorbach_audio_costs', array() );
@@ -452,7 +456,7 @@ class Model_Importer {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
-				if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$entry_id = $entry['id'] ?? '';
@@ -504,7 +508,7 @@ class Model_Importer {
 				if ( ! $prov ) {
 					continue;
 				}
-				$creds = $type === 'codex'
+				$creds = in_array( $type, array( 'codex', 'codex_images' ), true )
 					? array()
 					: array( 'api_key' => $entry['api_key'] );
 				if ( ! empty( $entry['endpoint'] ) ) {
@@ -573,10 +577,17 @@ class Model_Importer {
 			? $selected_image
 			: ( $selected_entries !== null ? array() : array_merge( array( 'dall-e-3', 'gpt-image-1.5' ), self::$image_sizes ) );
 		$explicit_image_selection = ( $selected_image !== null || $selected_entries !== null );
+		$selected_image_entries  = array();
 		if ( $selected_entries !== null ) {
 			foreach ( $selected_entries as $entry_id => $sel ) {
 				$ids = isset( $sel['image'] ) && is_array( $sel['image'] ) ? $sel['image'] : array();
 				$image_to_add = array_merge( $image_to_add, $ids );
+				foreach ( $ids as $image_id ) {
+					$image_id = is_string( $image_id ) ? $image_id : (string) $image_id;
+					if ( '' !== $image_id && ! isset( $selected_image_entries[ $image_id ] ) ) {
+						$selected_image_entries[ $image_id ] = (string) $entry_id;
+					}
+				}
 			}
 			$image_to_add = array_unique( $image_to_add );
 		}
@@ -593,7 +604,7 @@ class Model_Importer {
 			$is_model = $explicit_image_selection
 				? ! (bool) preg_match( '/^\d+x\d+$/', $item )
 				: ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
-			$is_size  = (bool) preg_match( '/^\d+x\d+$/', $item );
+			$is_size  = (bool) preg_match( '/^\d+x\d+$/', $item ) || 'auto' === $item;
 			if ( $is_model ) {
 				if ( ! $overwrite && in_array( $item, $image_models, true ) ) {
 					$result['skipped']['image'][] = $item;
@@ -601,6 +612,9 @@ class Model_Importer {
 				}
 				$image_models[] = $item;
 				$result['added']['image'][] = $item;
+				if ( ! empty( $selected_image_entries[ $item ] ) ) {
+					$image_model_entries[ $item ] = $selected_image_entries[ $item ];
+				}
 				if ( strpos( $item, 'gpt-image' ) === 0 && ! isset( $image_model_costs[ $item ] ) ) {
 					$image_model_costs[ $item ] = $gpt_image_default_costs;
 				}
@@ -674,6 +688,7 @@ class Model_Importer {
 		update_option( 'alorbach_image_costs', $image_costs );
 		update_option( 'alorbach_image_models', $image_models );
 		update_option( 'alorbach_image_model_costs', $image_model_costs );
+		update_option( 'alorbach_image_model_entries', $image_model_entries );
 		update_option( 'alorbach_video_costs', $video_costs );
 		update_option( 'alorbach_audio_costs', $audio_costs );
 

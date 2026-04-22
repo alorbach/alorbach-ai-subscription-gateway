@@ -17,6 +17,46 @@ if ( ! defined( 'ABSPATH' ) ) {
 class REST_Proxy {
 
 	/**
+	 * Normalize requested image quality for a specific model.
+	 *
+	 * Codex local images accept medium/high hints only. Other providers remain
+	 * limited to low/medium/high.
+	 *
+	 * @param string $quality Raw requested quality.
+	 * @param string $model   Requested model.
+	 * @return string
+	 */
+	private static function normalize_image_quality( $quality, $model ) {
+		$quality = strtolower( trim( (string) $quality ) );
+		$model   = (string) $model;
+
+		if ( strpos( $model, 'codex-image-' ) === 0 ) {
+			if ( in_array( $quality, array( 'medium', 'high' ), true ) ) {
+				return $quality;
+			}
+
+			return 'high';
+		}
+
+		if ( in_array( $quality, array( 'low', 'medium', 'high' ), true ) ) {
+			return $quality;
+		}
+
+		return get_option( 'alorbach_image_default_quality', 'medium' );
+	}
+
+	/**
+	 * Map requested image quality to the billable tier.
+	 *
+	 * @param string $quality Normalized requested quality.
+	 * @param string $model   Requested model.
+	 * @return string
+	 */
+	private static function get_billable_image_quality( $quality, $model ) {
+		return (string) $quality;
+	}
+
+	/**
 	 * Transient-based per-user rate limiter. Limits are read from plugin settings.
 	 *
 	 * @param int    $user_id  WordPress user ID.
@@ -400,7 +440,7 @@ class REST_Proxy {
 				'provider'  => array(
 					'required'          => true,
 					'type'              => 'string',
-					'enum'              => array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ),
+					'enum'              => array( 'openai', 'codex_images', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ),
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 				'entry_id'  => array(
@@ -887,10 +927,10 @@ class REST_Proxy {
 
 		if ( $type === 'image' ) {
 			$size    = $request->get_param( 'size' ) ?: '1024x1024';
-			$quality = $request->get_param( 'quality' ) ?: 'medium';
 			$n       = max( 1, min( 10, (int) $request->get_param( 'n' ) ) );
 			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
-			$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
+			$quality = self::normalize_image_quality( $request->get_param( 'quality' ) ?: '', $model );
+			$api_cost = Cost_Matrix::get_image_cost( $size, $model, self::get_billable_image_quality( $quality, $model ) ) * $n;
 			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		} elseif ( $type === 'video' ) {
 			$model    = $request->get_param( 'model' ) ?: \Alorbach\AIGateway\Admin\Admin_Settings::get_default_video_model( array( 'sora-2' ) );
@@ -1029,9 +1069,8 @@ class REST_Proxy {
 		$reference_images = $request->get_param( 'reference_images' );
 		$reference_images = is_array( $reference_images ) ? $reference_images : array();
 		$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
-		$quality = ( $quality && in_array( $quality, array( 'low', 'medium', 'high' ), true ) )
-			? $quality
-			: get_option( 'alorbach_image_default_quality', 'medium' );
+		$quality = self::normalize_image_quality( $quality, $model );
+		$billable_quality = self::get_billable_image_quality( $quality, $model );
 
 		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
 		if ( $plan_error ) {
@@ -1045,7 +1084,7 @@ class REST_Proxy {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 
-		$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
+		$api_cost = Cost_Matrix::get_image_cost( $size, $model, $billable_quality ) * $n;
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
@@ -1527,7 +1566,7 @@ class REST_Proxy {
 	public static function admin_verify_api_key( $request ) {
 		$provider = self::get_json_or_query_param( $request, 'provider' );
 		$entry_id = self::get_json_or_query_param( $request, 'entry_id' );
-		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
+		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'codex_images', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
 			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
 		}
 		$result = API_Validator::verify_key( $provider, $entry_id );

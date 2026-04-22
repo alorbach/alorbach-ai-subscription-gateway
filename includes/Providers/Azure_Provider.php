@@ -98,24 +98,71 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
-	 * Build Responses API request for Codex models.
+	 * Build a Responses API request from a chat-style payload.
 	 * Codex models (gpt-5.x-codex) require the v1 Responses API, not chat/completions.
 	 *
-	 * @param string $model      Model ID (e.g. gpt-5.3-codex).
+	 * @param array  $body        Chat-style request body.
 	 * @param array  $credentials Credentials with endpoint and api_key.
 	 * @return array{url: string, headers: array, body: string}|WP_Error
 	 */
-	public function build_responses_request( $model, $credentials ) {
+	public function build_responses_request( $body, $credentials ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$body = array(
-			'model'             => $model,
-			'input'             => 'Hi',
-			'max_output_tokens' => 64,
+
+		$model     = isset( $body['model'] ) ? (string) $body['model'] : 'gpt-5.3-codex';
+		$body      = self::normalize_chat_body( $body, $model );
+		$messages  = isset( $body['messages'] ) && is_array( $body['messages'] ) ? $body['messages'] : array();
+		$instructions = '';
+		$input        = array();
+
+		foreach ( $messages as $message ) {
+			if ( ! is_array( $message ) ) {
+				continue;
+			}
+
+			$role    = isset( $message['role'] ) ? (string) $message['role'] : 'user';
+			$content = $message['content'] ?? '';
+
+			if ( 'system' === $role ) {
+				if ( is_string( $content ) && '' !== trim( $content ) ) {
+					$instructions .= ( '' !== $instructions ? "\n" : '' ) . trim( $content );
+				}
+				continue;
+			}
+
+			$input[] = array(
+				'role'    => $role,
+				'content' => $content,
+			);
+		}
+
+		if ( empty( $input ) ) {
+			$input[] = array(
+				'role'    => 'user',
+				'content' => '',
+			);
+		}
+
+		$request_body = array(
+			'model' => $model,
+			'input' => $input,
 		);
+
+		if ( '' !== $instructions ) {
+			$request_body['instructions'] = $instructions;
+		}
+		if ( isset( $body['temperature'] ) ) {
+			$request_body['temperature'] = $body['temperature'];
+		}
+		if ( isset( $body['max_completion_tokens'] ) ) {
+			$request_body['max_output_tokens'] = (int) $body['max_completion_tokens'];
+		} elseif ( isset( $body['max_tokens'] ) ) {
+			$request_body['max_output_tokens'] = (int) $body['max_tokens'];
+		}
+
 		$url = $endpoint . '/openai/v1/responses';
 		return array(
 			'url'     => $url,
@@ -123,7 +170,7 @@ class Azure_Provider extends Provider_Base {
 				'Content-Type' => 'application/json',
 				'api-key'     => $api_key,
 			),
-			'body'    => wp_json_encode( $body ),
+			'body'    => wp_json_encode( $request_body ),
 		);
 	}
 
@@ -210,6 +257,7 @@ class Azure_Provider extends Provider_Base {
 
 			foreach ( $reference_images as $index => $item ) {
 				$b64 = isset( $item['b64_json'] ) && is_string( $item['b64_json'] ) ? trim( $item['b64_json'] ) : '';
+				$mime = isset( $item['mime_type'] ) && is_string( $item['mime_type'] ) ? trim( $item['mime_type'] ) : 'image/png';
 				if ( '' === $b64 ) {
 					return new \WP_Error( 'invalid_reference_image', __( 'Reference images must include base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 				}
@@ -219,9 +267,16 @@ class Azure_Provider extends Provider_Base {
 					return new \WP_Error( 'invalid_reference_image', __( 'Reference image data could not be decoded.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 				}
 
+				$extension = match ( strtolower( $mime ) ) {
+					'image/jpeg', 'image/jpg' => 'jpg',
+					'image/webp'              => 'webp',
+					default                   => 'png',
+				};
+				$content_type = in_array( strtolower( $mime ), array( 'image/jpeg', 'image/jpg', 'image/png', 'image/webp' ), true ) ? strtolower( $mime ) : 'image/png';
+
 				$body .= '--' . $boundary . "\r\n";
-				$body .= 'Content-Disposition: form-data; name="image[]"; filename="reference-' . ( $index + 1 ) . '.png"' . "\r\n";
-				$body .= 'Content-Type: image/png' . "\r\n\r\n";
+				$body .= 'Content-Disposition: form-data; name="image[]"; filename="reference-' . ( $index + 1 ) . '.' . $extension . '"' . "\r\n";
+				$body .= 'Content-Type: ' . $content_type . "\r\n\r\n";
 				$body .= $binary . "\r\n";
 			}
 

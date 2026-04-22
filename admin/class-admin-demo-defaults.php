@@ -45,7 +45,7 @@ class Admin_Demo_Defaults {
 	 *
 	 * @var array
 	 */
-	private static $image_dimension_sizes = array( '1024x1024', '1024x1536', '1536x1024', '1792x1024', '1024x1792' );
+	private static $image_dimension_sizes = array( '1024x1024', '1024x1536', '1536x1024', '1792x1024', '1024x1792', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
 
 	/**
 	 * Get available image sizes (dimensions only, e.g. 1024x1024).
@@ -58,7 +58,7 @@ class Admin_Demo_Defaults {
 		$costs = is_array( $costs ) ? $costs : array();
 		$from_costs = array();
 		foreach ( array_keys( $costs ) as $key ) {
-			if ( preg_match( '/^\d+x\d+$/', $key ) ) {
+			if ( preg_match( '/^\d+x\d+$/', $key ) || 'auto' === $key ) {
 				$from_costs[] = $key;
 			}
 		}

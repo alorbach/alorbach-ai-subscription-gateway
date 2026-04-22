@@ -115,6 +115,43 @@ class Image_Jobs {
 	const PREVIEW_RETENTION_SECONDS = DAY_IN_SECONDS;
 
 	/**
+	 * Normalize requested image quality for a specific model.
+	 *
+	 * @param string $quality Raw requested quality.
+	 * @param string $model   Requested model.
+	 * @return string
+	 */
+	private static function normalize_image_quality( $quality, $model ) {
+		$quality = strtolower( trim( (string) $quality ) );
+		$model   = (string) $model;
+
+		if ( strpos( $model, 'codex-image-' ) === 0 ) {
+			if ( in_array( $quality, array( 'medium', 'high' ), true ) ) {
+				return $quality;
+			}
+
+			return 'high';
+		}
+
+		if ( in_array( $quality, array( 'low', 'medium', 'high' ), true ) ) {
+			return $quality;
+		}
+
+		return get_option( 'alorbach_image_default_quality', 'medium' );
+	}
+
+	/**
+	 * Map requested image quality to the billable tier.
+	 *
+	 * @param string $quality Normalized requested quality.
+	 * @param string $model   Requested model.
+	 * @return string
+	 */
+	private static function get_billable_image_quality( $quality, $model ) {
+		return (string) $quality;
+	}
+
+	/**
 	 * Create an async image generation job.
 	 *
 	 * @param int   $user_id User ID.
@@ -136,6 +173,8 @@ class Image_Jobs {
 		$reference_images = self::normalize_reference_images(
 			isset( $args['reference_images'] ) && is_array( $args['reference_images'] ) ? $args['reference_images'] : array()
 		);
+		$quality         = self::normalize_image_quality( $quality, $model );
+		$billable_quality = self::get_billable_image_quality( $quality, $model );
 
 		if ( '' === $original_prompt ) {
 			$original_prompt = $prompt;
@@ -145,7 +184,7 @@ class Image_Jobs {
 			return new \WP_Error( 'missing_prompt', __( 'Prompt is required.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
-		$api_cost = Cost_Matrix::get_image_cost( $size, $model, $quality ) * $n;
+		$api_cost = Cost_Matrix::get_image_cost( $size, $model, $billable_quality ) * $n;
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 
@@ -202,6 +241,9 @@ class Image_Jobs {
 			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $n, md5( wp_json_encode( $reference_images ) ), time() ) ) ),
 			'deduction_applied'  => false,
 			'error'              => '',
+			'revised_prompt'     => '',
+			'provider_usage'     => array(),
+			'provider_details'   => array(),
 			'dispatch_token'     => $token,
 			'dispatched_at'      => 0,
 			'created_at'         => time(),
@@ -218,6 +260,7 @@ class Image_Jobs {
 			array(
 				'prompt'          => $prompt,
 				'original_prompt' => $original_prompt,
+				'internal_prompt' => '',
 			)
 		);
 		self::dispatch_job( $job );
@@ -531,6 +574,10 @@ class Image_Jobs {
 		$job['status']         = 'completed';
 		$job['progress_stage'] = 'completed';
 		$job['progress_percent'] = 100;
+		$job['revised_prompt'] = isset( $response['revised_prompt'] ) && is_string( $response['revised_prompt'] ) ? $response['revised_prompt'] : (string) ( $job['revised_prompt'] ?? '' );
+		$job['internal_prompt'] = isset( $response['internal_prompt'] ) && is_string( $response['internal_prompt'] ) ? $response['internal_prompt'] : (string) ( $job['internal_prompt'] ?? '' );
+		$job['provider_usage'] = isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : ( isset( $job['provider_usage'] ) && is_array( $job['provider_usage'] ) ? $job['provider_usage'] : array() );
+		$job['provider_details'] = isset( $response['provider_details'] ) && is_array( $response['provider_details'] ) ? $response['provider_details'] : ( isset( $job['provider_details'] ) && is_array( $job['provider_details'] ) ? $job['provider_details'] : array() );
 		$job['final_images']   = self::append_asset_items(
 			array(),
 			isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array(),
@@ -957,9 +1004,13 @@ class Image_Jobs {
 			'n'                   => (int) ( $job['n'] ?? 1 ),
 			'prompt'              => (string) ( $job['prompt'] ?? '' ),
 			'original_prompt'     => (string) ( $job['original_prompt'] ?? ( $job['prompt'] ?? '' ) ),
+			'internal_prompt'     => (string) ( $job['internal_prompt'] ?? '' ),
+			'revised_prompt'      => (string) ( $job['revised_prompt'] ?? '' ),
 			'preview_images'      => isset( $job['preview_images'] ) && is_array( $job['preview_images'] ) ? $job['preview_images'] : array(),
 			'final_images'        => isset( $job['final_images'] ) && is_array( $job['final_images'] ) ? $job['final_images'] : array(),
 			'reference_images'    => isset( $job['reference_images'] ) && is_array( $job['reference_images'] ) ? $job['reference_images'] : array(),
+			'provider_usage'      => isset( $job['provider_usage'] ) && is_array( $job['provider_usage'] ) ? $job['provider_usage'] : array(),
+			'provider_details'    => isset( $job['provider_details'] ) && is_array( $job['provider_details'] ) ? $job['provider_details'] : array(),
 			'preview_count'       => (int) ( $job['preview_count'] ?? 0 ),
 			'final_count'         => (int) ( $job['final_count'] ?? 0 ),
 			'reference_count'     => (int) ( $job['reference_count'] ?? 0 ),
@@ -1056,6 +1107,12 @@ class Image_Jobs {
 			'preview_images'     => isset( $job['preview_images'] ) ? $job['preview_images'] : array(),
 			'final_images'       => isset( $job['final_images'] ) ? $job['final_images'] : array(),
 		);
+		if ( ! empty( $job['revised_prompt'] ) ) {
+			$payload['revised_prompt'] = (string) $job['revised_prompt'];
+		}
+		if ( ! empty( $job['provider_usage'] ) && is_array( $job['provider_usage'] ) ) {
+			$payload['usage'] = $job['provider_usage'];
+		}
 
 		if ( ! empty( $job['deduction_applied'] ) || $job['status'] === 'completed' ) {
 			$payload['cost_uc']      = (int) $job['cost_uc'];
@@ -1067,6 +1124,7 @@ class Image_Jobs {
 		}
 		if ( $include_internal ) {
 			$payload['user_id'] = (int) $job['user_id'];
+			$payload['provider_details'] = isset( $job['provider_details'] ) && is_array( $job['provider_details'] ) ? $job['provider_details'] : array();
 		}
 
 		return $payload;
@@ -1309,6 +1367,7 @@ class Image_Jobs {
 		return array(
 			'prompt'          => (string) ( $job['prompt'] ?? '' ),
 			'original_prompt' => (string) ( $job['original_prompt'] ?? ( $job['prompt'] ?? '' ) ),
+			'internal_prompt' => (string) ( $job['internal_prompt'] ?? '' ),
 		);
 	}
 
@@ -1399,6 +1458,7 @@ class Image_Jobs {
 			array(
 				'prompt'          => (string) ( $prompts['prompt'] ?? '' ),
 				'original_prompt' => (string) ( $prompts['original_prompt'] ?? ( $prompts['prompt'] ?? '' ) ),
+				'internal_prompt' => (string) ( $prompts['internal_prompt'] ?? '' ),
 			),
 			self::JOB_TTL
 		);
@@ -1417,12 +1477,14 @@ class Image_Jobs {
 			return array(
 				'prompt'          => '',
 				'original_prompt' => '',
+				'internal_prompt' => '',
 			);
 		}
 
 		return array(
 			'prompt'          => (string) ( $prompts['prompt'] ?? '' ),
 			'original_prompt' => (string) ( $prompts['original_prompt'] ?? ( $prompts['prompt'] ?? '' ) ),
+			'internal_prompt' => (string) ( $prompts['internal_prompt'] ?? '' ),
 		);
 	}
 

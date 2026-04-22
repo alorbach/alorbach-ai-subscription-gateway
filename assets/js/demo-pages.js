@@ -310,6 +310,55 @@
 		var activeJobId = null;
 		var streamSettled = false;
 
+		function isCodexImageModel(model) {
+			return String(model || '').indexOf('codex-image-') === 0;
+		}
+
+		function getAllowedQualityOptions(model, qualityConfig) {
+			var options = (qualityConfig && qualityConfig.options && qualityConfig.options.length)
+				? qualityConfig.options.slice()
+				: ['low', 'medium', 'high'];
+			if (isCodexImageModel(model)) {
+				options = options.filter(function (opt) { return opt !== 'low'; });
+			}
+			return options.length ? options : ['medium', 'high'];
+		}
+
+		function getDefaultQualityForModel(model, qualityConfig) {
+			var options = getAllowedQualityOptions(model, qualityConfig);
+			if (isCodexImageModel(model)) {
+				return options.indexOf('high') !== -1 ? 'high' : options[0];
+			}
+			var configuredDefault = (qualityConfig && qualityConfig.default) || 'medium';
+			return options.indexOf(configuredDefault) !== -1 ? configuredDefault : options[0];
+		}
+
+		function syncQualityOptions() {
+			if (!qualitySelect) return;
+			var q = imageConfig && imageConfig.quality ? imageConfig.quality : {};
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || '';
+			var options = getAllowedQualityOptions(model, q);
+			var desired = (qualitySelect.value || container.dataset.quality || '').toLowerCase();
+			var fallback = getDefaultQualityForModel(model, q);
+			if (options.indexOf(desired) === -1) desired = fallback;
+			qualitySelect.innerHTML = '';
+			options.forEach(function (opt) {
+				var o = document.createElement('option');
+				o.value = opt;
+				o.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+				if (opt === desired) o.selected = true;
+				qualitySelect.appendChild(o);
+			});
+			container.dataset.quality = desired;
+		}
+
+		function syncQualityVisibility() {
+			if (!qualityWrap) return;
+			var q = imageConfig && imageConfig.quality ? imageConfig.quality : {};
+			var canSelectQuality = !!q.allow_select;
+			qualityWrap.style.display = canSelectQuality ? '' : 'none';
+		}
+
 		getModels(container).then(function (models) {
 			var img = models.image || {};
 			imageConfig = img;
@@ -344,18 +393,9 @@
 			}
 			container.dataset.model = modelOpts.default || 'dall-e-3';
 
-			if (qualityWrap) qualityWrap.style.display = q.allow_select ? '' : 'none';
-			if (q.allow_select && q.options && q.options.length && qualitySelect) {
-				qualitySelect.innerHTML = '';
-				q.options.forEach(function (opt) {
-					var o = document.createElement('option');
-					o.value = opt;
-					o.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
-					if (opt === q.default) o.selected = true;
-					qualitySelect.appendChild(o);
-				});
-			}
-			container.dataset.quality = q.default || 'medium';
+			container.dataset.quality = getDefaultQualityForModel(container.dataset.model, q);
+			syncQualityOptions();
+			syncQualityVisibility();
 			refreshImageCost();
 		});
 
@@ -365,12 +405,21 @@
 			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'dall-e-3';
 			var n = (nInput && parseInt(nInput.value, 10)) || 1;
 			n = Math.min(10, Math.max(1, n));
-			updateCostEstimate(container, 'image', { type: 'image', size: size, quality: quality, model: model, n: n }, container.querySelector('.alorbach-demo-cost'));
+			var estimateParams = { type: 'image', size: size, model: model, n: n };
+			if (qualityWrap && qualityWrap.style.display !== 'none') estimateParams.quality = quality;
+			updateCostEstimate(container, 'image', estimateParams, container.querySelector('.alorbach-demo-cost'));
 		}
 
 		if (sizeSelect) sizeSelect.addEventListener('change', refreshImageCost);
-		if (modelSelect) modelSelect.addEventListener('change', refreshImageCost);
-		if (qualitySelect) qualitySelect.addEventListener('change', refreshImageCost);
+		if (modelSelect) modelSelect.addEventListener('change', function () {
+			syncQualityOptions();
+			syncQualityVisibility();
+			refreshImageCost();
+		});
+		if (qualitySelect) qualitySelect.addEventListener('change', function () {
+			container.dataset.quality = qualitySelect.value || container.dataset.quality || 'medium';
+			refreshImageCost();
+		});
 		if (nInput) nInput.addEventListener('change', refreshImageCost);
 		if (nInput) nInput.addEventListener('input', refreshImageCost);
 

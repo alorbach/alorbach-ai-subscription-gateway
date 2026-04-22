@@ -720,11 +720,58 @@ class Admin_Image_Queue {
 					'</section>';
 				}
 
+				function renderUsageCard(usage) {
+					if (!usage || typeof usage !== 'object') {
+						return '<p class="alorbach-image-queue__empty">No provider usage reported.</p>';
+					}
+
+					var entries = Object.keys(usage).filter(function (key) {
+						return usage[key] !== null && usage[key] !== '' && typeof usage[key] !== 'undefined';
+					});
+					if (!entries.length) {
+						return '<p class="alorbach-image-queue__empty">No provider usage reported.</p>';
+					}
+
+					return '<div class="alorbach-image-queue__meta">' + entries.map(function (key) {
+						return '<div><span>' + escapeHtml(key.replace(/_/g, ' ')) + '</span><strong>' + escapeHtml(String(usage[key])) + '</strong></div>';
+					}).join('') + '</div>';
+				}
+
+				function renderProviderDetails(details) {
+					if (!details || typeof details !== 'object') {
+						return '<p class="alorbach-image-queue__empty">No provider details recorded.</p>';
+					}
+
+					var entries = Object.keys(details).filter(function (key) {
+						var value = details[key];
+						return value !== null && value !== '' && typeof value !== 'undefined' && (!Array.isArray(value) || value.length);
+					});
+					if (!entries.length) {
+						return '<p class="alorbach-image-queue__empty">No provider details recorded.</p>';
+					}
+
+					return '<div class="alorbach-image-queue__meta">' + entries.map(function (key) {
+						var value = details[key];
+						if (Array.isArray(value)) {
+							value = value.join(' | ');
+						} else if (value && typeof value === 'object') {
+							value = Object.keys(value).map(function (nestedKey) {
+								return nestedKey.replace(/_/g, ' ') + ': ' + String(value[nestedKey]);
+							}).join(' | ');
+						}
+						return '<div><span>' + escapeHtml(key.replace(/_/g, ' ')) + '</span><strong>' + escapeHtml(String(value)) + '</strong></div>';
+					}).join('') + '</div>';
+				}
+
 				function renderDetails(job) {
 					hasRenderedDetails = true;
 					var loadImagesButton = job.images_included ? '' : '<p><button type="button" class="button button-secondary" data-role="load-images">Load Images</button></p>';
 					var originalPrompt = job.original_prompt || job.prompt || '';
 					var prompt = job.prompt || '';
+					var internalPrompt = job.internal_prompt || '';
+					var revisedPrompt = job.revised_prompt || '';
+					var imageMeta = job.provider_details && job.provider_details.image_metadata ? job.provider_details.image_metadata : null;
+					var actualSize = (imageMeta && imageMeta.width && imageMeta.height) ? (String(imageMeta.width) + 'x' + String(imageMeta.height)) : '';
 					var errorsHtml = (job.error ? '<p class="alorbach-image-queue__error"><strong>Error:</strong> ' + escapeHtml(job.error) + '</p>' : '') +
 						(job.images_error ? '<p class="alorbach-image-queue__error"><strong>Images:</strong> ' + escapeHtml(job.images_error) + '</p>' : '');
 					var hasErrors = !!(job.error || job.images_error);
@@ -748,6 +795,7 @@ class Admin_Image_Queue {
 								'<div><span>User</span><strong>' + escapeHtml(job.user_label) + '</strong></div>' +
 								'<div><span>Model</span><strong>' + escapeHtml(job.model) + '</strong></div>' +
 								'<div><span>Size</span><strong>' + escapeHtml(job.size) + '</strong></div>' +
+								'<div><span>Actual Size</span><strong>' + (actualSize ? escapeHtml(actualSize) : 'Unknown') + '</strong></div>' +
 								'<div><span>Quality</span><strong>' + escapeHtml(job.quality) + '</strong></div>' +
 								'<div><span>Images</span><strong>' + job.n + '</strong></div>' +
 								'<div><span>References</span><strong>' + (job.reference_count || 0) + '</strong></div>' +
@@ -757,10 +805,14 @@ class Admin_Image_Queue {
 								'<div><span>Runtime</span><strong>' + formatDuration(job.runtime_seconds) + '</strong></div>' +
 								'<div><span>Credits</span><strong>' + escapeHtml(job.cost_credits_label) + '</strong></div>' +
 							'</div>' +
+							'<h3 class="alorbach-image-queue__section-title">Provider Usage</h3>' + renderUsageCard(job.provider_usage || job.usage) +
+							'<h3 class="alorbach-image-queue__section-title">Provider Details</h3>' + renderProviderDetails(job.provider_details) +
 						'</section>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="prompts" hidden>' +
 							renderPromptCard('Original Prompt', originalPrompt, 'Copy Original') +
 							renderPromptCard('Prompt', prompt, 'Copy Prompt') +
+							renderPromptCard('Internal Prompt', internalPrompt, 'Copy Internal') +
+							renderPromptCard('Revised Prompt', revisedPrompt, 'Copy Revised') +
 						'</section>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="images" hidden>' +
 							loadImagesButton +

@@ -21,6 +21,7 @@ delete_option( 'alorbach_product_to_plan' );
 delete_option( 'alorbach_image_costs' );
 delete_option( 'alorbach_image_models' );
 delete_option( 'alorbach_image_model_costs' );
+delete_option( 'alorbach_image_model_entries' );
 delete_option( 'alorbach_image_default_model' );
 delete_option( 'alorbach_image_default_quality' );
 delete_option( 'alorbach_image_default_output_format' );

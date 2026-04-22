@@ -122,6 +122,10 @@ class API_Client {
 			return 'huggingface';
 		}
 
+		if ( strpos( $model, 'codex-image' ) === 0 && $helper::has_provider( 'codex_images' ) ) {
+			return 'codex_images';
+		}
+
 		// Codex models: route to the dedicated OAuth provider when available.
 		if ( strpos( $model, 'codex' ) !== false && $helper::has_provider( 'codex' ) ) {
 			return 'codex';
@@ -192,9 +196,18 @@ class API_Client {
 
 		$image_models = get_option( 'alorbach_image_models', array() );
 		$image_models = is_array( $image_models ) ? $image_models : array();
+		$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
+		$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
 		foreach ( $lookup_ids as $lookup_id ) {
 			if ( ! in_array( $lookup_id, $image_models, true ) ) {
 				continue;
+			}
+			$image_entry_id = isset( $image_model_entries[ $lookup_id ] ) ? (string) $image_model_entries[ $lookup_id ] : '';
+			if ( '' !== $image_entry_id ) {
+				$entry = API_Keys_Helper::get_entry_by_id( $image_entry_id );
+				if ( $entry && ! empty( $entry['enabled'] ) && ! empty( $entry['type'] ) ) {
+					return (string) $entry['type'];
+				}
 			}
 			if ( strpos( $lookup_id, 'hf-space:' ) === 0 && API_Keys_Helper::has_provider( 'huggingface_spaces' ) ) {
 				return 'huggingface_spaces';
@@ -254,6 +267,8 @@ class API_Client {
 		switch ( (string) $provider ) {
 			case 'openai':
 				return 'OpenAI';
+			case 'codex_images':
+				return 'Codex Images (Local Codex CLI)';
 			case 'azure':
 				return 'Azure';
 			case 'google':
@@ -292,6 +307,15 @@ class API_Client {
 				if ( '' !== $entry_id && 'legacy' !== $entry_id ) {
 					return $entry_id;
 				}
+			}
+		}
+
+		$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
+		$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
+		foreach ( $lookup_ids as $lookup_id ) {
+			$entry_id = isset( $image_model_entries[ $lookup_id ] ) ? (string) $image_model_entries[ $lookup_id ] : '';
+			if ( '' !== $entry_id ) {
+				return $entry_id;
 			}
 		}
 
@@ -357,7 +381,19 @@ class API_Client {
 	 * @return array|\WP_Error Response or error.
 	 */
 	private static function execute_chat_request( $prov, $body, $creds, $provider ) {
-		$request = $prov->build_chat_request( $body, $creds );
+		$model = isset( $body['model'] ) ? (string) $body['model'] : '';
+		$use_responses_api = (
+			$provider === 'azure' &&
+			strpos( strtolower( $model ), 'codex' ) !== false &&
+			method_exists( $prov, 'build_responses_request' )
+		);
+
+		if ( $use_responses_api ) {
+			$request = $prov->build_responses_request( $body, $creds );
+		} else {
+			$request = $prov->build_chat_request( $body, $creds );
+		}
+
 		if ( is_wp_error( $request ) ) {
 			return $request;
 		}
@@ -375,6 +411,9 @@ class API_Client {
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
 			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+		}
+		if ( $use_responses_api ) {
+			return self::normalize_codex_response( $body_response );
 		}
 		if ( $provider === 'codex' ) {
 			$body_response = self::parse_codex_sse( $raw_body );
@@ -618,7 +657,7 @@ class API_Client {
 		$quality = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
 
-		$provider = self::get_provider_for_model( $model );
+		$provider = self::resolve_image_provider_for_request( $model, $reference_images );
 		$prov     = Provider_Registry::get( $provider );
 		if ( ! $prov || ! $prov->supports_images() ) {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
@@ -626,9 +665,12 @@ class API_Client {
 		$entry_id = self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
+			$message = ( 'codex_images' === $provider )
+				? __( 'Codex Images (Local Codex CLI) is not configured.', 'alorbach-ai-gateway' )
+				: __( 'API key not configured.', 'alorbach-ai-gateway' );
+			return new \WP_Error( 'no_api_key', $message );
 		}
-		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
+		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces', 'codex_images' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
 			for ( $index = 0; $index < $n; $index++ ) {
 				$request = $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images );
@@ -653,12 +695,62 @@ class API_Client {
 	}
 
 	/**
+	 * Resolve the provider for one image request, with reference-image fallback handling.
+	 *
+	 * If the active model routes to Azure AI Foundry and the request includes reference
+	 * images, prefer a configured OpenAI provider because Azure Foundry image edits are
+	 * not exposed consistently on that endpoint shape.
+	 *
+	 * @param string $model            Model ID.
+	 * @param array  $reference_images Optional reference image payloads.
+	 * @return string
+	 */
+	private static function resolve_image_provider_for_request( $model, $reference_images = array() ) {
+		$provider = self::get_provider_for_model( $model );
+		if ( empty( $reference_images ) || 'azure' !== $provider ) {
+			return $provider;
+		}
+
+		$azure_creds = API_Keys_Helper::get_credentials_for_provider( 'azure' );
+		$endpoint    = is_array( $azure_creds ) ? (string) ( $azure_creds['endpoint'] ?? '' ) : '';
+		if ( ! self::is_foundry_azure_endpoint( $endpoint ) ) {
+			return $provider;
+		}
+
+		if ( API_Keys_Helper::has_provider( 'openai' ) ) {
+			return 'openai';
+		}
+
+		return $provider;
+	}
+
+	/**
+	 * Whether the configured Azure endpoint is an AI Foundry host.
+	 *
+	 * @param string $endpoint Endpoint URL.
+	 * @return bool
+	 */
+	private static function is_foundry_azure_endpoint( $endpoint ) {
+		$endpoint = strtolower( trim( (string) $endpoint ) );
+
+		return '' !== $endpoint && (
+			strpos( $endpoint, 'services.ai.azure.com' ) !== false ||
+			strpos( $endpoint, 'models.ai.azure.com' ) !== false ||
+			strpos( $endpoint, 'inference.ai.azure.com' ) !== false
+		);
+	}
+
+	/**
 	 * Execute one image-generation request and normalize the provider response.
 	 *
 	 * @param array $request Request array from the provider.
 	 * @return array|\WP_Error
 	 */
 	private static function execute_image_request( $request ) {
+		if ( isset( $request['transport'] ) && 'local_codex_cli' === $request['transport'] ) {
+			return Codex_Image_Bridge::generate( isset( $request['payload'] ) && is_array( $request['payload'] ) ? $request['payload'] : array() );
+		}
+
 		if ( isset( $request['transport'] ) && 'gradio_api' === $request['transport'] ) {
 			return self::execute_gradio_image_request( $request );
 		}
@@ -678,6 +770,9 @@ class API_Client {
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
 			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+		}
+		if ( ! empty( $request['response_format'] ) && 'responses_image_generation' === $request['response_format'] ) {
+			return self::normalize_responses_image_generation_response( $body_response, $raw_body );
 		}
 		if ( strpos( strtolower( $content_type ), 'image/' ) === 0 && $raw_body !== '' ) {
 			return array(
@@ -700,6 +795,49 @@ class API_Client {
 			$body_response = array( 'data' => $data );
 		}
 		return $body_response;
+	}
+
+	/**
+	 * Normalize a Responses API image-generation tool response.
+	 *
+	 * @param array|null $body_response Parsed response body.
+	 * @param string     $raw_body      Raw response body.
+	 * @return array
+	 */
+	private static function normalize_responses_image_generation_response( $body_response, $raw_body ) {
+		$images         = array();
+		$revised_prompt = '';
+
+		if ( is_array( $body_response ) && ! empty( $body_response['output'] ) && is_array( $body_response['output'] ) ) {
+			foreach ( $body_response['output'] as $item ) {
+				if ( ! is_array( $item ) || ( $item['type'] ?? '' ) !== 'image_generation_call' ) {
+					continue;
+				}
+				if ( '' === $revised_prompt && ! empty( $item['revised_prompt'] ) && is_string( $item['revised_prompt'] ) ) {
+					$revised_prompt = $item['revised_prompt'];
+				}
+				if ( ! empty( $item['result'] ) && is_string( $item['result'] ) ) {
+					$images[] = array( 'b64_json' => $item['result'] );
+				}
+			}
+		}
+
+		if ( empty( $images ) && is_string( $raw_body ) && '' !== trim( $raw_body ) ) {
+			$decoded = json_decode( $raw_body, true );
+			if ( is_array( $decoded ) ) {
+				$images = self::extract_image_items_from_payload( $decoded );
+			}
+		}
+
+		$response = array( 'data' => $images );
+		if ( '' !== $revised_prompt ) {
+			$response['revised_prompt'] = $revised_prompt;
+		}
+		if ( is_array( $body_response ) && isset( $body_response['usage'] ) && is_array( $body_response['usage'] ) ) {
+			$response['usage'] = $body_response['usage'];
+		}
+
+		return $response;
 	}
 
 	/**
@@ -934,7 +1072,10 @@ class API_Client {
 		$entry_id = self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
+			$message = ( 'codex_images' === $provider )
+				? __( 'Codex Images (Local Codex CLI) is not configured.', 'alorbach-ai-gateway' )
+				: __( 'API key not configured.', 'alorbach-ai-gateway' );
+			return new \WP_Error( 'no_api_key', $message );
 		}
 
 		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images );

@@ -38,12 +38,12 @@ class Admin_User_Balance {
 		if ( Admin_Helper::verify_post_nonce( 'alorbach_balance_nonce', 'alorbach_balance' ) ) {
 			$user_id     = isset( $_POST['user_id'] ) ? (int) sanitize_text_field( wp_unslash( $_POST['user_id'] ) ) : 0;
 			$amount      = isset( $_POST['amount'] ) ? (float) sanitize_text_field( wp_unslash( $_POST['amount'] ) ) : 0;
-			$amount_unit = isset( $_POST['amount_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['amount_unit'] ) ) : 'uc';
+			$amount_unit = isset( $_POST['amount_unit'] ) ? sanitize_text_field( wp_unslash( $_POST['amount_unit'] ) ) : 'usd';
 			$action      = isset( $_POST['amount_action'] ) ? sanitize_text_field( wp_unslash( $_POST['amount_action'] ) ) : 'add';
 
 			$allowed_units = array( 'uc', 'credits', 'usd' );
 			if ( ! in_array( $amount_unit, $allowed_units, true ) ) {
-				$amount_unit = 'uc';
+				$amount_unit = 'usd';
 			}
 
 			if ( $user_id && $amount > 0 ) {
@@ -148,7 +148,7 @@ class Admin_User_Balance {
 									<select name="amount_unit" style="width:90px;">
 										<option value="uc"><?php esc_html_e( 'UC', 'alorbach-ai-gateway' ); ?></option>
 										<option value="credits"><?php esc_html_e( 'Credits', 'alorbach-ai-gateway' ); ?></option>
-										<option value="usd"><?php esc_html_e( 'USD ($)', 'alorbach-ai-gateway' ); ?></option>
+										<option value="usd" selected="selected"><?php esc_html_e( 'USD ($)', 'alorbach-ai-gateway' ); ?></option>
 									</select>
 									<select name="amount_action">
 										<option value="add"><?php esc_html_e( 'Add', 'alorbach-ai-gateway' ); ?></option>

@@ -180,10 +180,14 @@ class Admin_Cost_Matrix {
 
 				$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
 				$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
+				$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
+				$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
 				unset( $image_model_costs[ $remove_image_model ] );
+				unset( $image_model_entries[ $remove_image_model ] );
 
 				update_option( 'alorbach_image_models', $image_models );
 				update_option( 'alorbach_image_model_costs', $image_model_costs );
+				update_option( 'alorbach_image_model_entries', $image_model_entries );
 				wp_safe_redirect( remove_query_arg( array( 'alorbach_remove_image_model', 'model', '_wpnonce' ) ) );
 				exit;
 			}
@@ -344,14 +348,14 @@ class Admin_Cost_Matrix {
 		$models_by_entry = array();
 		$models_array    = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
 		$entries         = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
-		$type_labels     = array( 'openai' => 'OpenAI', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
+		$type_labels     = array( 'openai' => 'OpenAI', 'codex_images' => 'Codex Images (Local Codex CLI)', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
 		$import_entry_choices = array();
 		foreach ( $entries as $entry ) {
 			if ( empty( $entry['enabled'] ) ) {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
-			if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+			if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( 'azure' === $type && empty( $entry['endpoint'] ) ) {
@@ -683,7 +687,7 @@ class Admin_Cost_Matrix {
 				<?php endif; ?>
 
 				<?php
-				$gpt_sizes = array( '1024x1024', '1024x1536', '1536x1024' );
+				$gpt_sizes = array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
 				$gpt_qualities = array( 'low', 'medium', 'high' );
 				if ( ! empty( $image_model_costs ) ) :
 					?>
@@ -834,37 +838,49 @@ class Admin_Cost_Matrix {
 				<p class="submit"><input type="submit" class="button button-primary" value="<?php esc_attr_e( 'Save', 'alorbach-ai-gateway' ); ?>" /></p>
 			</form>
 			<script>
-			document.getElementById('alorbach_add_model_btn').onclick = function() {
-				var input = document.getElementById('alorbach_new_model');
-				var sel = document.getElementById('alorbach_add_model_entry');
-				var model = (input.value || '').trim().replace(/[^a-z0-9\-_.]/gi, '-');
-				if (!model) return;
-				var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_model', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_model', '_wpnonce' ) ); ?>';
-				var url = base + '&model=' + encodeURIComponent(model);
-				if (sel && sel.value) url += '&entry_id=' + encodeURIComponent(sel.value);
-				window.location.href = url;
-			};
-			document.getElementById('alorbach_add_image_btn').onclick = function() {
-				var input = document.getElementById('alorbach_new_image');
-				var size = (input.value || '').trim().replace(/[^a-z0-9\-_x]/gi, '');
-				if (!size) return;
-				var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_image', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_image', '_wpnonce' ) ); ?>';
-				window.location.href = base + '&size=' + encodeURIComponent(size);
-			};
-			document.getElementById('alorbach_add_audio_btn').onclick = function() {
-				var input = document.getElementById('alorbach_new_audio');
-				var model = (input.value || '').trim().replace(/[^a-z0-9\-_.]/gi, '-');
-				if (!model) return;
-				var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_audio', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_audio', '_wpnonce' ) ); ?>';
-				window.location.href = base + '&model=' + encodeURIComponent(model);
-			};
-			document.getElementById('alorbach_add_video_btn').onclick = function() {
-				var input = document.getElementById('alorbach_new_video');
-				var model = (input.value || '').trim().replace(/[^a-z0-9\-_.]/gi, '-');
-				if (!model) return;
-				var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_video', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_video', '_wpnonce' ) ); ?>';
-				window.location.href = base + '&model=' + encodeURIComponent(model);
-			};
+			var addModelBtn = document.getElementById('alorbach_add_model_btn');
+			if (addModelBtn) {
+				addModelBtn.onclick = function() {
+					var input = document.getElementById('alorbach_new_model');
+					var sel = document.getElementById('alorbach_add_model_entry');
+					var model = ((input && input.value) || '').trim().replace(/[^a-z0-9\-_.]/gi, '-');
+					if (!model) return;
+					var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_model', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_model', '_wpnonce' ) ); ?>';
+					var url = base + '&model=' + encodeURIComponent(model);
+					if (sel && sel.value) url += '&entry_id=' + encodeURIComponent(sel.value);
+					window.location.href = url;
+				};
+			}
+			var addImageBtn = document.getElementById('alorbach_add_image_btn');
+			if (addImageBtn) {
+				addImageBtn.onclick = function() {
+					var input = document.getElementById('alorbach_new_image');
+					var size = ((input && input.value) || '').trim().replace(/[^a-z0-9\-_x]/gi, '');
+					if (!size) return;
+					var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_image', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_image', '_wpnonce' ) ); ?>';
+					window.location.href = base + '&size=' + encodeURIComponent(size);
+				};
+			}
+			var addAudioBtn = document.getElementById('alorbach_add_audio_btn');
+			if (addAudioBtn) {
+				addAudioBtn.onclick = function() {
+					var input = document.getElementById('alorbach_new_audio');
+					var model = ((input && input.value) || '').trim().replace(/[^a-z0-9\-_.]/gi, '-');
+					if (!model) return;
+					var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_audio', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_audio', '_wpnonce' ) ); ?>';
+					window.location.href = base + '&model=' + encodeURIComponent(model);
+				};
+			}
+			var addVideoBtn = document.getElementById('alorbach_add_video_btn');
+			if (addVideoBtn) {
+				addVideoBtn.onclick = function() {
+					var input = document.getElementById('alorbach_new_video');
+					var model = ((input && input.value) || '').trim().replace(/[^a-z0-9\-_.]/gi, '-');
+					if (!model) return;
+					var base = '<?php echo esc_js( wp_nonce_url( add_query_arg( 'alorbach_add_video', '1', admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_add_video', '_wpnonce' ) ); ?>';
+					window.location.href = base + '&model=' + encodeURIComponent(model);
+				};
+			}
 
 			(function() {
 				function formatUcAsUsd(uc) {

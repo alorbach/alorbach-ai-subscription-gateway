@@ -36,6 +36,7 @@ class Provider_Registry {
 		self::register( new Hugging_Face_Provider() );
 		self::register( new Hugging_Face_Spaces_Provider() );
 		self::register( new GitHub_Models_Provider() );
+		self::register( new Codex_Images_Provider() );
 
 		/**
 		 * Fires after built-in providers are registered, allowing third-party plugins

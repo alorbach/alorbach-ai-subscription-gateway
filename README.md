@@ -12,7 +12,7 @@ A precise credit-based AI API billing layer for WordPress. Bridges fixed-price s
 - **BPE tokenization** via [tiktoken](https://github.com/yethee/tiktoken-php) for pre-flight cost estimation
 - **Post-flight reconciliation** with actual token counts from the API response
 - **Immutable SQL ledger** - every credit and deduction is written as an append-only row
-- **Multi-provider support** - OpenAI, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
+- **Multi-provider support** - OpenAI, Codex Images (Local Codex CLI), Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
 - **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
 - **WooCommerce Subscriptions** - auto-credit on renewal, failed payment handling with retry scheduler
 - **Stripe webhook** support
@@ -59,7 +59,7 @@ All pages are under the **AI Gateway** top-level menu.
 
 | Page | Purpose |
 |---|---|
-| **API Keys** | Manage credentials for OpenAI, Azure, Google, Hugging Face, Hugging Face Spaces, GitHub Models, Codex |
+| **API Keys** | Manage credentials for OpenAI, Codex Images (Local Codex CLI), Azure, Google, Hugging Face, Hugging Face Spaces, GitHub Models, Codex |
 | **Settings** | Tabbed gateway-wide defaults, rate limits, quotas, billing/account URLs, provider import settings, advanced controls |
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Demo-only UI controls and sample page creation |
@@ -110,7 +110,7 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - Typical use cases: image generation, preview frames, downloadable final artwork
-- Main providers: OpenAI, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- Main providers: OpenAI, Codex Images (Local Codex CLI), Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - Hugging Face Spaces support is currently manual-entry based and image-only
 - Demo surface: `[alorbach_demo_image]`
 - Supports both:
@@ -146,6 +146,19 @@ Codex models are a specialized text-model path for coding and agent-style respon
 - Notes:
   - Codex is still a text model category from an integration point of view
   - it is documented separately because provider authentication and request handling differ from standard text models
+
+### Codex Images
+
+Codex image generation is a separate image workflow backed by the local Codex CLI runtime.
+
+- Typical use cases: prompt-driven image generation through the same local Codex runtime you use in Codex CLI
+- Provider path: `Codex Images (Local Codex CLI)`
+- Request behavior: WordPress invokes a local helper script, which in turn runs the installed Codex CLI and reads the generated image from the local Codex image output directory
+- Notes:
+  - this does not reuse the stored ChatGPT Codex OAuth token for image transport
+  - it requires WordPress and Codex CLI to run on the same machine and under a local account that has already run `codex login`
+  - in `wp-env` or Docker on Windows, run `node wordpress-plugin/bin/codex-image-bridge.js serve` on the Windows host so the Linux PHP container can call back into the host Codex install
+  - prompt-to-image is supported in v1; reference-image edits are not supported yet
 
 ### Capability Discovery
 
@@ -196,7 +209,7 @@ Base URL: `/wp-json/alorbach/v1`
 
 | Method | Endpoint | Purpose |
 |---|---|---|
-| `POST` | `/admin/verify-api-key` | Validate a provider API key |
+| `POST` | `/admin/verify-api-key` | Validate provider access |
 | `POST` | `/admin/verify-text` | Test text model configuration |
 | `POST` | `/admin/verify-image` | Test image generation |
 | `POST` | `/admin/verify-audio` | Test audio transcription |

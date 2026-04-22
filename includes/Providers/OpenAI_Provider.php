@@ -28,7 +28,7 @@ class OpenAI_Provider extends Provider_Base {
 	 *
 	 * @var array
 	 */
-	private static $image_sizes = array( '1024x1024', '1792x1024', '1024x1792' );
+	private static $image_sizes = array( '1024x1024', '1024x1536', '1536x1024', '1792x1024', '1024x1792', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
 
 	/**
 	 * Video models.
@@ -149,6 +149,7 @@ class OpenAI_Provider extends Provider_Base {
 
 			foreach ( $reference_images as $index => $item ) {
 				$b64 = isset( $item['b64_json'] ) && is_string( $item['b64_json'] ) ? trim( $item['b64_json'] ) : '';
+				$mime = isset( $item['mime_type'] ) && is_string( $item['mime_type'] ) ? trim( $item['mime_type'] ) : 'image/png';
 				if ( '' === $b64 ) {
 					return new \WP_Error( 'invalid_reference_image', __( 'Reference images must include base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 				}
@@ -158,9 +159,16 @@ class OpenAI_Provider extends Provider_Base {
 					return new \WP_Error( 'invalid_reference_image', __( 'Reference image data could not be decoded.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 				}
 
+				$extension = match ( strtolower( $mime ) ) {
+					'image/jpeg', 'image/jpg' => 'jpg',
+					'image/webp'              => 'webp',
+					default                   => 'png',
+				};
+				$content_type = in_array( strtolower( $mime ), array( 'image/jpeg', 'image/jpg', 'image/png', 'image/webp' ), true ) ? strtolower( $mime ) : 'image/png';
+
 				$body .= '--' . $boundary . "\r\n";
-				$body .= 'Content-Disposition: form-data; name="image[]"; filename="reference-' . ( $index + 1 ) . '.png"' . "\r\n";
-				$body .= 'Content-Type: image/png' . "\r\n\r\n";
+				$body .= 'Content-Disposition: form-data; name="image"; filename="reference-' . ( $index + 1 ) . '.' . $extension . '"' . "\r\n";
+				$body .= 'Content-Type: ' . $content_type . "\r\n\r\n";
 				$body .= $binary . "\r\n";
 			}
 

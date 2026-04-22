@@ -35,7 +35,10 @@ class API_Validator {
 			? API_Keys_Helper::get_credentials_for_entry( $entry_id )
 			: API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			return array( 'success' => false, 'message' => __( 'API key not configured for this provider.', 'alorbach-ai-gateway' ) );
+			$message = ( 'codex_images' === $provider )
+				? __( 'Codex Images (Local Codex CLI) is not configured or not enabled.', 'alorbach-ai-gateway' )
+				: __( 'API key not configured for this provider.', 'alorbach-ai-gateway' );
+			return array( 'success' => false, 'message' => $message );
 		}
 		return $prov->verify_key( $creds );
 	}
