@@ -25,6 +25,10 @@
 			: endpoint);
 	}
 
+	function isAllowSelectEnabled(flag) {
+		return flag === true || flag === 1 || flag === '1';
+	}
+
 	function apiFetch(endpoint, options) {
 		var url = buildApiUrl(endpoint);
 		var opts = Object.assign({
@@ -181,9 +185,10 @@
 
 		getModels(container).then(function (models) {
 			var text = models.text || {};
+			var canSelectTextModel = isAllowSelectEnabled(text.allow_select);
 			var wrap = container.querySelector('.alorbach-demo-model-wrap');
-			if (wrap) wrap.style.display = text.allow_select ? '' : 'none';
-			if (text.allow_select && text.options && text.options.length) {
+			if (wrap) wrap.style.display = canSelectTextModel ? '' : 'none';
+			if (canSelectTextModel && text.options && text.options.length) {
 				modelSelect.innerHTML = '';
 				text.options.forEach(function (opt) {
 					var o = document.createElement('option');
@@ -355,7 +360,7 @@
 		function syncQualityVisibility() {
 			if (!qualityWrap) return;
 			var q = imageConfig && imageConfig.quality ? imageConfig.quality : {};
-			var canSelectQuality = !!q.allow_select;
+			var canSelectQuality = isAllowSelectEnabled(q.allow_select);
 			qualityWrap.style.display = canSelectQuality ? '' : 'none';
 		}
 
@@ -366,8 +371,9 @@
 			var modelOpts = img.model || {};
 			var q = img.quality || {};
 
+			var canSelectSize = isAllowSelectEnabled(sizeOpts.allow_select);
 			var wrap = container.querySelector('.alorbach-demo-size-wrap');
-			if (wrap) wrap.style.display = (sizeOpts.options && sizeOpts.options.length) ? '' : 'none';
+			if (wrap) wrap.style.display = (canSelectSize && sizeOpts.options && sizeOpts.options.length) ? '' : 'none';
 			if (sizeOpts.options && sizeOpts.options.length && sizeSelect) {
 				sizeSelect.innerHTML = '';
 				sizeOpts.options.forEach(function (opt) {
@@ -380,8 +386,9 @@
 			}
 			container.dataset.size = sizeOpts.default || '1024x1024';
 
-			if (modelWrap) modelWrap.style.display = (modelOpts.allow_select && modelOpts.options && modelOpts.options.length) ? '' : 'none';
-			if (modelOpts.allow_select && modelOpts.options && modelOpts.options.length && modelSelect) {
+			var canSelectImageModel = isAllowSelectEnabled(modelOpts.allow_select);
+			if (modelWrap) modelWrap.style.display = (canSelectImageModel && modelOpts.options && modelOpts.options.length) ? '' : 'none';
+			if (canSelectImageModel && modelOpts.options && modelOpts.options.length && modelSelect) {
 				modelSelect.innerHTML = '';
 				modelOpts.options.forEach(function (opt) {
 					var o = document.createElement('option');
@@ -897,9 +904,10 @@
 
 		getModels(container).then(function (models) {
 			var audio = models.audio || {};
+			var canSelectAudioModel = isAllowSelectEnabled(audio.allow_select);
 			var wrap = container.querySelector('.alorbach-demo-model-wrap');
-			if (wrap) wrap.style.display = audio.allow_select ? '' : 'none';
-			if (audio.allow_select && audio.options && audio.options.length) {
+			if (wrap) wrap.style.display = canSelectAudioModel ? '' : 'none';
+			if (canSelectAudioModel && audio.options && audio.options.length) {
 				modelSelect.innerHTML = '';
 				audio.options.forEach(function (opt) {
 					var o = document.createElement('option');
@@ -1068,9 +1076,10 @@
 
 		getModels(container).then(function (models) {
 			var video = models.video || {};
+			var canSelectVideoModel = isAllowSelectEnabled(video.allow_select);
 			var wrap = container.querySelector('.alorbach-demo-model-wrap');
-			if (wrap) wrap.style.display = video.allow_select ? '' : 'none';
-			if (video.allow_select && video.options && video.options.length && modelSelect) {
+			if (wrap) wrap.style.display = canSelectVideoModel ? '' : 'none';
+			if (canSelectVideoModel && video.options && video.options.length && modelSelect) {
 				modelSelect.innerHTML = '';
 				video.options.forEach(function (opt) {
 					var o = document.createElement('option');

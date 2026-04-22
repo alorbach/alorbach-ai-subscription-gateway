@@ -58,7 +58,7 @@ The gateway resolves a user's active plan in this order:
 - active WooCommerce subscription product mapped to a plan
 - protected `basic` fallback plan
 
-The `basic` plan is always present in the effective catalog. By default it enables chat only.
+The `basic` plan is always present in the effective catalog. In the plugin's default plan seed it enables chat only.
 
 Important exception:
 
@@ -331,8 +331,8 @@ The response shape is an object with a top-level `plans` array:
 {
   "plans": [
     {
-      "plan_key": "basic",
-      "name": "Basic",
+      "slug": "basic",
+      "public_name": "Basic",
       "is_free": true
     }
   ]

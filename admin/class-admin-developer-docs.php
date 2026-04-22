@@ -36,6 +36,12 @@ class Admin_Developer_Docs {
 			.alorbach-developer-docs table {
 				max-width: 100%;
 			}
+			@media (max-width: 782px) {
+				.alorbach-developer-docs pre code {
+					white-space: pre-wrap;
+					word-break: break-word;
+				}
+			}
 			</style>
 			<h1><?php esc_html_e( 'Developer Documentation', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description"><?php esc_html_e( 'Stable downstream integration APIs, demo endpoints, hooks, and example usage for the Alorbach AI Subscription Gateway.', 'alorbach-ai-gateway' ); ?></p>
@@ -165,12 +171,13 @@ class Admin_Developer_Docs {
 		</table>
 
 		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// Public plan + config fetch
-const config = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/config' ) ); ?>').then(r => r.json());
-const plansResponse = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json());
+const baseUrl = '/wp-json/alorbach/v1';
+const config = await fetch(baseUrl + '/integration/config').then(r => r.json());
+const plansResponse = await fetch(baseUrl + '/integration/plans').then(r => r.json());
 const plans = plansResponse.plans || [];
 
 // Logged-in account fetch using your own localized nonce
-const account = await fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/account' ) ); ?>', {
+const account = await fetch(baseUrl + '/integration/account', {
   credentials: 'same-origin',
   headers: { 'X-WP-Nonce': window.myGatewayData.restNonce }
 }).then(r => r.json());</code></pre>
@@ -457,14 +464,15 @@ if ( is_user_logged_in() ) {
 	echo do_shortcode( '[alorbach_account_widget history_items="5"]' );
 }</code></pre>
 		<pre style="background:#f6f7f7;padding:1rem;border:1px solid #c3c4c7;border-radius:4px;overflow-x:auto;"><code>// Browser-rendered frontend bootstrapped by your plugin/theme.
+const baseUrl = '/wp-json/alorbach/v1';
 window.myGatewayData = {
-  restNonce: '<?php echo esc_js( wp_create_nonce( 'wp_rest' ) ); ?>'
+  restNonce: 'your-localized-rest-nonce'
 };
 
 const [config, plansResponse, account] = await Promise.all([
-  fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/config' ) ); ?>').then(r => r.json()),
-  fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/plans' ) ); ?>').then(r => r.json()),
-  fetch('<?php echo esc_url( rest_url( 'alorbach/v1/integration/account' ) ); ?>', {
+  fetch(baseUrl + '/integration/config').then(r => r.json()),
+  fetch(baseUrl + '/integration/plans').then(r => r.json()),
+  fetch(baseUrl + '/integration/account', {
     credentials: 'same-origin',
     headers: { 'X-WP-Nonce': window.myGatewayData.restNonce }
   }).then(r => r.json())
