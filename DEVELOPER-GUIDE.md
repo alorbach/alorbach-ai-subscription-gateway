@@ -398,7 +398,7 @@ Request fields:
 
 ### Model Import and Provider Admin Endpoints
 
-#### `GET /admin/fetch-importable-models`
+#### `GET|POST /admin/fetch-importable-models`
 
 Fetches models available for import from configured providers.
 
@@ -446,6 +446,14 @@ Typical response fields can include:
 - `cost_credits_label`
 - `user_label`
 - `error`
+
+#### `POST /admin/image-jobs/actions`
+
+Runs queue maintenance actions used by the Image Queue admin page.
+
+Request fields:
+
+- `action` required
 
 ---
 

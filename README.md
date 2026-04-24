@@ -196,7 +196,6 @@ Base URL: `/wp-json/alorbach/v1`
 | `GET` | `/images/jobs/<job_id>/stream` | Stream provider-backed image job updates |
 | `POST` | `/transcribe` | Transcribe audio (base64) |
 | `POST` | `/video` | Generate video |
-| `POST` | `/stripe-webhook` | Stripe payment events _(public)_ |
 
 ### Public Downstream Endpoints
 
@@ -204,6 +203,12 @@ Base URL: `/wp-json/alorbach/v1`
 |---|---|---|
 | `GET` | `/integration/config` | Canonical downstream config: backend defaults, capabilities, billing URLs, and logged-in active-plan filtering |
 | `GET` | `/integration/plans` | Canonical downstream plan catalog returned as `{ plans: [...] }` with capabilities and model allowlists |
+
+### Public Service Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/stripe-webhook` | Stripe payment events |
 
 ### Admin Endpoints _(requires `manage_options`)_
 
@@ -214,13 +219,14 @@ Base URL: `/wp-json/alorbach/v1`
 | `POST` | `/admin/verify-image` | Test image generation |
 | `POST` | `/admin/verify-audio` | Test audio transcription |
 | `POST` | `/admin/verify-video` | Test video generation |
-| `GET` | `/admin/fetch-importable-models` | Fetch importable models from providers |
+| `GET`/`POST` | `/admin/fetch-importable-models` | Fetch importable models from providers |
 | `POST` | `/admin/import-models` | Import models |
 | `POST` | `/admin/reset-models` | Reset models to defaults |
 | `POST` | `/admin/refresh-azure-prices` | Refresh Azure retail pricing |
 | `POST` | `/admin/save-google-whitelist` | Configure Google API whitelist |
 | `GET` | `/admin/image-jobs` | List recent image jobs for queue monitoring |
 | `GET` | `/admin/image-jobs/<job_id>` | Read one image job detail payload |
+| `POST` | `/admin/image-jobs/actions` | Run image queue maintenance actions |
 
 ### Image Job Notes
 
