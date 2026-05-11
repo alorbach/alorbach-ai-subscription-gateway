@@ -120,7 +120,11 @@ class Codex_Provider extends Provider_Base {
 	}
 
 	/**
-	 * Return the known ChatGPT Codex models available via subscription.
+	 * Fetch available Codex models dynamically from the ChatGPT backend API.
+	 *
+	 * Tries GET /backend-api/codex/models first (Codex-specific endpoint).
+	 * Falls back to a hardcoded list when the API is unreachable or returns no
+	 * usable models.
 	 *
 	 * {@inheritdoc}
 	 */
@@ -129,6 +133,70 @@ class Codex_Provider extends Provider_Base {
 			return new \WP_Error( 'not_connected', __( 'Codex OAuth not connected.', 'alorbach-ai-gateway' ) );
 		}
 
+		$token = Codex_OAuth::get_valid_access_token();
+		if ( is_wp_error( $token ) ) {
+			return self::fallback_models();
+		}
+
+		$account_id = Codex_OAuth::get_account_id();
+
+		// Try the Codex-specific models endpoint first.
+		$response = wp_remote_get(
+			self::BASE_URL . '/codex/models?client_version=1.0.0',
+			array(
+				'headers' => array(
+					'Authorization'      => 'Bearer ' . $token,
+					'chatgpt-account-id' => $account_id,
+					'originator'         => 'pi',
+					'OpenAI-Beta'        => 'responses=experimental',
+				),
+				'timeout' => 15,
+			)
+		);
+
+		if ( ! is_wp_error( $response ) ) {
+			$http_code = wp_remote_retrieve_response_code( $response );
+			if ( $http_code < 400 ) {
+				$body       = json_decode( wp_remote_retrieve_body( $response ), true );
+				$raw_models = array();
+				if ( isset( $body['models'] ) && is_array( $body['models'] ) ) {
+					$raw_models = $body['models'];
+				} elseif ( isset( $body['data'] ) && is_array( $body['data'] ) ) {
+					$raw_models = $body['data'];
+				} elseif ( is_array( $body ) && ! empty( $body ) ) {
+					$raw_models = $body;
+				}
+
+				$items = array();
+				foreach ( $raw_models as $m ) {
+					$slug = isset( $m['slug'] ) ? (string) $m['slug'] : ( isset( $m['id'] ) ? (string) $m['id'] : '' );
+					if ( ! $slug ) {
+						continue;
+					}
+					$items[] = array(
+						'id'           => $slug,
+						'provider'     => 'codex',
+						'type'         => 'text',
+						'capabilities' => array( 'reasoning' ),
+					);
+				}
+
+				if ( ! empty( $items ) ) {
+					return $items;
+				}
+			}
+		}
+
+		// Codex-specific endpoint unavailable – use hardcoded fallback.
+		return self::fallback_models();
+	}
+
+	/**
+	 * Hardcoded fallback model list used when the backend API is unreachable.
+	 *
+	 * @return array
+	 */
+	private static function fallback_models() {
 		$model_ids = array(
 			'gpt-5.4-mini',
 			'gpt-5.3-codex',
