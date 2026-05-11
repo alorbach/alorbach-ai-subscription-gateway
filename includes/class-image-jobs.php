@@ -49,7 +49,7 @@ class Image_Jobs {
 	 *
 	 * @var int
 	 */
-	const JOB_TTL = 3600;
+	const JOB_TTL = 7200;
 
 	/**
 	 * Maximum number of job ids to retain in the index.
@@ -63,7 +63,7 @@ class Image_Jobs {
 	 *
 	 * @var int
 	 */
-	const JOB_STALLED_SECONDS = 180;
+	const JOB_STALLED_SECONDS = 1800;
 
 	/**
 	 * Cron hook used to purge expired intermediate assets.
@@ -486,6 +486,7 @@ class Image_Jobs {
 			$job['progress_stage']   = 'failed';
 			$job['progress_percent'] = 0;
 			$job['error']            = $provider_reference_images->get_error_message();
+			self::apply_wp_error_context( $job, $provider_reference_images );
 			$job['updated_at']       = time();
 			self::save_full_job( $job );
 			if ( is_callable( $on_update ) ) {
@@ -563,6 +564,7 @@ class Image_Jobs {
 			$job['progress_stage']   = 'failed';
 			$job['progress_percent'] = 0;
 			$job['error']            = $response->get_error_message();
+			self::apply_wp_error_context( $job, $response );
 			$job['updated_at']       = time();
 			self::save_full_job( $job );
 			if ( is_callable( $on_update ) ) {
@@ -1086,6 +1088,33 @@ class Image_Jobs {
 	}
 
 	/**
+	 * Copy extra context from a WP_Error into the job array.
+	 *
+	 * Extracts HTTP status, API error code, and Retry-After value from the
+	 * WP_Error data bag and stores them in the job so they can be surfaced in
+	 * the admin UI.
+	 *
+	 * @param array     $job   Job data (passed by reference).
+	 * @param \WP_Error $error The WP_Error returned by the provider.
+	 * @return void
+	 */
+	private static function apply_wp_error_context( array &$job, \WP_Error $error ) {
+		$data = $error->get_error_data();
+		if ( ! is_array( $data ) ) {
+			return;
+		}
+		if ( ! empty( $data['status'] ) ) {
+			$job['error_http_status'] = (int) $data['status'];
+		}
+		if ( ! empty( $data['error_code'] ) ) {
+			$job['error_code'] = (string) $data['error_code'];
+		}
+		if ( ! empty( $data['retry_after'] ) ) {
+			$job['error_retry_after'] = (string) $data['retry_after'];
+		}
+	}
+
+	/**
 	 * Get public job payload.
 	 *
 	 * @param array $job              Job data.
@@ -1121,6 +1150,15 @@ class Image_Jobs {
 		}
 		if ( ! empty( $job['error'] ) ) {
 			$payload['error'] = $job['error'];
+		}
+		if ( ! empty( $job['error_http_status'] ) ) {
+			$payload['error_http_status'] = (int) $job['error_http_status'];
+		}
+		if ( ! empty( $job['error_code'] ) ) {
+			$payload['error_code'] = (string) $job['error_code'];
+		}
+		if ( ! empty( $job['error_retry_after'] ) ) {
+			$payload['error_retry_after'] = (string) $job['error_retry_after'];
 		}
 		if ( $include_internal ) {
 			$payload['user_id'] = (int) $job['user_id'];

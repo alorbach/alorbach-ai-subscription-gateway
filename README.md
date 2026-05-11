@@ -157,7 +157,27 @@ Codex image generation is a separate image workflow backed by the local Codex CL
 - Notes:
   - this does not reuse the stored ChatGPT Codex OAuth token for image transport
   - it requires WordPress and Codex CLI to run on the same machine and under a local account that has already run `codex login`
-  - in `wp-env` or Docker on Windows, run `node wordpress-plugin/bin/codex-image-bridge.js serve` on the Windows host so the Linux PHP container can call back into the host Codex install
+  - in `wp-env` or Docker on Windows, run the host bridge from PowerShell before testing or generating images:
+
+    ```powershell
+    cd D:\!cvsroot\alorbach\alorbach-ai-subscription-gateway
+
+    $env:ALORBACH_CODEX_BINARY='c:\Users\al\.vscode\extensions\openai.chatgpt-26.5422.21459-win32-x64\bin\windows-x86_64\codex.exe'
+
+    node wordpress-plugin/bin/codex-image-bridge.js serve
+    ```
+
+    Keep this PowerShell window open while `wp-env` is using Codex Images. To check the host setup before starting the server, run:
+
+    ```powershell
+    cd D:\!cvsroot\alorbach\alorbach-ai-subscription-gateway
+
+    $env:ALORBACH_CODEX_BINARY='c:\Users\al\.vscode\extensions\openai.chatgpt-26.5422.21459-win32-x64\bin\windows-x86_64\codex.exe'
+
+    node wordpress-plugin/bin/codex-image-bridge.js check
+    ```
+
+    The explicit `ALORBACH_CODEX_BINARY` avoids Windows resolving `codex` to the npm `.cmd` shim, which can fail in the bridge process.
   - prompt-to-image is supported in v1; reference-image edits are not supported yet
 
 ### Capability Discovery

@@ -390,6 +390,7 @@ class Admin_Image_Queue {
 			.alorbach-image-queue__thumbs img { width:88px; height:88px; object-fit:cover; border-radius:6px; border:1px solid #dcdcde; cursor:pointer; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
 			.alorbach-image-queue__thumbs img:hover, .alorbach-image-queue__thumbs img:focus { transform:translateY(-1px); box-shadow:0 10px 24px rgba(34,113,177,.18); border-color:#2271b1; outline:none; }
 			.alorbach-image-queue__error { color:#b32d2e; }
+			.alorbach-image-queue__error-meta { color:#6c3538; font-size:.9em; font-weight:normal; }
 			.alorbach-image-queue__lightbox { position:fixed; inset:0; z-index:100000; display:none; align-items:center; justify-content:center; padding:32px; background:rgba(15,23,42,.82); }
 			.alorbach-image-queue__lightbox.is-open { display:flex; }
 			.alorbach-image-queue__lightbox-backdrop { position:absolute; inset:0; }
@@ -772,7 +773,15 @@ class Admin_Image_Queue {
 					var revisedPrompt = job.revised_prompt || '';
 					var imageMeta = job.provider_details && job.provider_details.image_metadata ? job.provider_details.image_metadata : null;
 					var actualSize = (imageMeta && imageMeta.width && imageMeta.height) ? (String(imageMeta.width) + 'x' + String(imageMeta.height)) : '';
-					var errorsHtml = (job.error ? '<p class="alorbach-image-queue__error"><strong>Error:</strong> ' + escapeHtml(job.error) + '</p>' : '') +
+					var errorMeta = '';
+					if (job.error_http_status) {
+						errorMeta += 'HTTP ' + escapeHtml(String(job.error_http_status));
+						if (job.error_code) { errorMeta += ' · ' + escapeHtml(String(job.error_code)); }
+						if (job.error_retry_after) { errorMeta += ' · Retry-After: ' + escapeHtml(String(job.error_retry_after)) + 's'; }
+					} else if (job.error_code) {
+						errorMeta = escapeHtml(String(job.error_code));
+					}
+					var errorsHtml = (job.error ? '<p class="alorbach-image-queue__error"><strong>Error:</strong> ' + escapeHtml(job.error) + (errorMeta ? ' <span class="alorbach-image-queue__error-meta">(' + errorMeta + ')</span>' : '') + '</p>' : '') +
 						(job.images_error ? '<p class="alorbach-image-queue__error"><strong>Images:</strong> ' + escapeHtml(job.images_error) + '</p>' : '');
 					var hasErrors = !!(job.error || job.images_error);
 					$detailsEl.html(

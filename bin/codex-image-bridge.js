@@ -165,6 +165,17 @@ function detectMimeType(imagePath) {
 	return 'image/png';
 }
 
+function extensionForMimeType(mimeType) {
+	const normalized = String(mimeType || '').toLowerCase();
+	if (normalized.includes('jpeg') || normalized.includes('jpg')) {
+		return 'jpg';
+	}
+	if (normalized.includes('webp')) {
+		return 'webp';
+	}
+	return 'png';
+}
+
 function readPngDimensions(buffer) {
 	if (!Buffer.isBuffer(buffer) || buffer.length < 24) {
 		return null;
@@ -319,16 +330,42 @@ function buildPrompt(payload) {
 	const size = String(payload.size || '1024x1024').trim();
 	const quality = normalizeQuality(payload);
 	const format = String(payload.output_format || 'png').trim();
+	const referenceImages = Array.isArray(payload.reference_images) ? payload.reference_images : [];
 
 	return [
 		'Generate exactly one image using your built-in image generation tool.',
 		'If your image tool supports model selection, prefer gpt-image-2 or a better current image model for this request.',
+		referenceImages.length > 0 ? 'Use the attached reference image(s) as visual guidance. Preserve requested layout, position, scale, and subject identity from the reference when the user prompt asks for a matching or reverse-side image.' : '',
 		`User prompt: ${prompt}`,
 		`Requested size: ${size}`,
 		`Preferred quality: ${quality}.`,
 		`Preferred output format: ${format}`,
 		'After the image has been generated, reply with a short plain-text confirmation only.',
-	].join('\n');
+	].filter(Boolean).join('\n');
+}
+
+function writeReferenceImages(tempDir, referenceImages) {
+	const files = [];
+	for (let index = 0; index < referenceImages.length; index += 1) {
+		const item = referenceImages[index] || {};
+		const b64 = String(item.b64_json || '').trim();
+		if (!b64) {
+			continue;
+		}
+		const extension = extensionForMimeType(item.mime_type);
+		const filePath = path.join(tempDir, `reference-${index + 1}.${extension}`);
+		try {
+			fs.writeFileSync(filePath, Buffer.from(b64, 'base64'));
+			files.push(filePath);
+		} catch (error) {
+			return {
+				success: false,
+				message: 'Could not write a reference image for Codex CLI.',
+				details: { error: error && error.message ? error.message : String(error) },
+			};
+		}
+	}
+	return { success: true, files };
 }
 
 function handleGenerate(payload) {
@@ -342,14 +379,15 @@ function handleGenerate(payload) {
 	if (!prompt) {
 		return { success: false, message: 'No image prompt was provided to the Codex image bridge.' };
 	}
-	if (referenceImages.length > 0) {
-		return { success: false, message: 'Reference-image edits are not supported by the local Codex CLI bridge yet.' };
-	}
 
 	fs.mkdirSync(generatedImagesDir, { recursive: true });
 	const before = listGeneratedImages(generatedImagesDir);
 
 	const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alorbach-codex-image-'));
+	const references = writeReferenceImages(tempDir, referenceImages);
+	if (!references.success) {
+		return references;
+	}
 	const outputFile = path.join(tempDir, 'last-message.txt');
 	const promptText = buildPrompt(payload);
 	const args = [
@@ -361,8 +399,14 @@ function handleGenerate(payload) {
 		tempDir,
 		'--output-last-message',
 		outputFile,
-		promptText,
 	];
+	for (const imagePath of references.files) {
+		args.push('--image', imagePath);
+	}
+	if (references.files.length > 0) {
+		args.push('--');
+	}
+	args.push(promptText);
 
 	const run = runCodex(args, { cwd: tempDir });
 	const after = listGeneratedImages(generatedImagesDir);
@@ -508,6 +552,9 @@ function startServer() {
 	server.listen(port, '0.0.0.0', () => {
 		process.stdout.write(`Codex image bridge server listening on port ${port}\n`);
 	});
+
+	server.requestTimeout = Number(process.env.ALORBACH_CODEX_BRIDGE_REQUEST_TIMEOUT_MS || 0);
+	server.headersTimeout = Number(process.env.ALORBACH_CODEX_BRIDGE_HEADERS_TIMEOUT_MS || 0);
 }
 
 async function main() {

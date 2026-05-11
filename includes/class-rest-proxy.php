@@ -637,7 +637,8 @@ class REST_Proxy {
 
 		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model ) ) );
 		$multi_step_lock   = 'alorbach_chat_inflight_' . $request_signature;
-		if ( Ledger::signature_exists( $request_signature ) || ( $multi_step && get_transient( $multi_step_lock ) ) ) {
+		$bypass_duplicate = (bool) apply_filters( 'alorbach_bypass_duplicate_request', false, 'chat', $user_id, $request_signature, $model );
+		if ( ! $bypass_duplicate && ( Ledger::signature_exists( $request_signature ) || ( $multi_step && get_transient( $multi_step_lock ) ) ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 

@@ -444,6 +444,7 @@ class API_Client {
 	 */
 	private static function parse_codex_sse( $raw ) {
 		$completed = null;
+		$streamed_text = '';
 		$lines = explode( "\n", $raw );
 		foreach ( $lines as $line ) {
 			$line = trim( $line );
@@ -458,6 +459,11 @@ class API_Client {
 			if ( ! is_array( $event ) ) {
 				continue;
 			}
+			if ( isset( $event['type'] ) && $event['type'] === 'response.output_text.done' && isset( $event['text'] ) && is_string( $event['text'] ) ) {
+				$streamed_text = (string) $event['text'];
+			} elseif ( isset( $event['type'] ) && $event['type'] === 'response.output_text.delta' && isset( $event['delta'] ) && is_string( $event['delta'] ) && '' === $streamed_text ) {
+				$streamed_text .= (string) $event['delta'];
+			}
 			// The response.completed event carries the full response object.
 			if ( isset( $event['type'] ) && $event['type'] === 'response.completed' && isset( $event['response'] ) ) {
 				$completed = $event['response'];
@@ -465,6 +471,19 @@ class API_Client {
 		}
 		if ( $completed === null ) {
 			return new \WP_Error( 'codex_sse_error', __( 'No completed response in Codex SSE stream.', 'alorbach-ai-gateway' ) );
+		}
+		if ( '' !== $streamed_text ) {
+			$completed['output'] = array(
+				array(
+					'type'    => 'message',
+					'content' => array(
+						array(
+							'type' => 'output_text',
+							'text' => $streamed_text,
+						),
+					),
+				),
+			);
 		}
 		return $completed;
 	}
@@ -769,7 +788,16 @@ class API_Client {
 		$body_response = json_decode( $raw_body, true );
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
-			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+			$err_data = array( 'status' => $code );
+			$retry_after = wp_remote_retrieve_header( $response, 'retry-after' );
+			if ( '' !== (string) $retry_after ) {
+				$err_data['retry_after'] = (string) $retry_after;
+			}
+			$api_error_code = is_array( $body_response ) && ! empty( $body_response['error']['code'] ) ? (string) $body_response['error']['code'] : '';
+			if ( '' !== $api_error_code ) {
+				$err_data['error_code'] = $api_error_code;
+			}
+			return new \WP_Error( 'api_error', $msg, $err_data );
 		}
 		if ( ! empty( $request['response_format'] ) && 'responses_image_generation' === $request['response_format'] ) {
 			return self::normalize_responses_image_generation_response( $body_response, $raw_body );
@@ -1100,6 +1128,8 @@ class API_Client {
 		);
 		$buffer = '';
 
+		$response_headers = array();
+
 		$ch = curl_init( $request['url'] );
 		curl_setopt( $ch, CURLOPT_POST, true );
 		curl_setopt( $ch, CURLOPT_HTTPHEADER, self::curl_headers( $request['headers'] ) );
@@ -1108,6 +1138,17 @@ class API_Client {
 		curl_setopt( $ch, CURLOPT_HEADER, false );
 		curl_setopt( $ch, CURLOPT_TIMEOUT, 180 );
 		curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
+		curl_setopt(
+			$ch,
+			CURLOPT_HEADERFUNCTION,
+			function ( $curl, $header ) use ( &$response_headers ) {
+				$parts = explode( ':', $header, 2 );
+				if ( 2 === count( $parts ) ) {
+					$response_headers[ strtolower( trim( $parts[0] ) ) ] = trim( $parts[1] );
+				}
+				return strlen( $header );
+			}
+		);
 		curl_setopt(
 			$ch,
 			CURLOPT_WRITEFUNCTION,
@@ -1140,7 +1181,16 @@ class API_Client {
 		if ( $code >= 400 ) {
 			$body_response = json_decode( $state['raw'], true );
 			$msg = self::extract_api_error_message( $body_response, $state['raw'], $code );
-			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+			$err_data = array( 'status' => $code );
+			$retry_after = $response_headers['retry-after'] ?? '';
+			if ( '' !== $retry_after ) {
+				$err_data['retry_after'] = $retry_after;
+			}
+			$api_error_code = is_array( $body_response ) && ! empty( $body_response['error']['code'] ) ? (string) $body_response['error']['code'] : '';
+			if ( '' !== $api_error_code ) {
+				$err_data['error_code'] = $api_error_code;
+			}
+			return new \WP_Error( 'api_error', $msg, $err_data );
 		}
 
 		if ( empty( $state['final_images'] ) ) {

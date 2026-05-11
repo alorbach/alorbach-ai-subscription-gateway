@@ -151,6 +151,13 @@ class Codex_Image_Bridge {
 			return new \WP_Error( 'codex_image_bridge_missing', __( 'Codex image bridge helper script is missing from the plugin.', 'alorbach-ai-gateway' ) );
 		}
 
+		if ( self::looks_like_container_environment() ) {
+			$remote = self::run_remote_bridge( $mode, $payload );
+			if ( ! is_wp_error( $remote ) ) {
+				return $remote;
+			}
+		}
+
 		if ( ! function_exists( 'proc_open' ) ) {
 			return new \WP_Error( 'codex_image_bridge_proc_open', __( 'The local Codex image bridge requires proc_open, but it is disabled in this PHP environment.', 'alorbach-ai-gateway' ) );
 		}
@@ -257,7 +264,7 @@ class Codex_Image_Bridge {
 						'payload' => is_array( $payload ) ? $payload : array(),
 					)
 				),
-				'timeout' => (int) apply_filters( 'alorbach_codex_bridge_remote_timeout', 600, $mode, $payload ),
+				'timeout' => (int) apply_filters( 'alorbach_codex_bridge_remote_timeout', 'generate' === (string) $mode ? 3600 : 600, $mode, $payload ),
 			)
 		);
 

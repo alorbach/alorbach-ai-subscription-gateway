@@ -119,9 +119,6 @@ class Codex_Images_Provider extends Provider_Base {
 	 */
 	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
 		$reference_images = is_array( $reference_images ) ? array_values( array_filter( $reference_images, 'is_array' ) ) : array();
-		if ( ! empty( $reference_images ) ) {
-			return new \WP_Error( 'codex_image_bridge_reference_unsupported', __( 'Reference-image edits are not supported by the local Codex CLI bridge yet.', 'alorbach-ai-gateway' ) );
-		}
 
 		return array(
 			'transport' => 'local_codex_cli',
