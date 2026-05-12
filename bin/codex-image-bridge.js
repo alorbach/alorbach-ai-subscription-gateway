@@ -30,6 +30,11 @@ function resolveCodexBinary() {
 		return codexBinary;
 	}
 
+	const extensionBinary = findWindowsCodexExtensionBinary();
+	if (extensionBinary) {
+		return extensionBinary;
+	}
+
 	const lookup = spawnSync('where.exe', [codexBinary], {
 		encoding: 'utf8',
 		shell: false,
@@ -50,6 +55,48 @@ function resolveCodexBinary() {
 	return codexBinary;
 }
 
+function findWindowsCodexExtensionBinary() {
+	const home = os.homedir();
+	const roots = [
+		path.join(home, '.vscode', 'extensions'),
+		path.join(home, '.cursor', 'extensions'),
+		path.join(process.env.LOCALAPPDATA || '', 'Programs'),
+	].filter(Boolean);
+	const matches = [];
+	for (const root of roots) {
+		collectCodexExe(root, matches);
+	}
+	matches.sort((a, b) => b.localeCompare(a));
+	return matches[0] || '';
+}
+
+function collectCodexExe(root, matches, depth = 0) {
+	if (!root || depth > 6 || !fs.existsSync(root)) {
+		return;
+	}
+	let entries = [];
+	try {
+		entries = fs.readdirSync(root, { withFileTypes: true });
+	} catch (error) {
+		return;
+	}
+	for (const entry of entries) {
+		const fullPath = path.join(root, entry.name);
+		if (entry.isFile() && entry.name.toLowerCase() === 'codex.exe') {
+			matches.push(fullPath);
+			continue;
+		}
+		if (!entry.isDirectory()) {
+			continue;
+		}
+		const name = entry.name.toLowerCase();
+		if (depth === 0 && name.indexOf('openai.chatgpt-') !== 0 && root.toLowerCase().indexOf('programs') === -1) {
+			continue;
+		}
+		collectCodexExe(fullPath, matches, depth + 1);
+	}
+}
+
 function emitAndExit(payload, code = 0) {
 	process.stdout.write(JSON.stringify(payload));
 	process.exit(code);
@@ -59,6 +106,10 @@ function runCodex(args, options = {}) {
 	return spawnSync(resolveCodexBinary(), args, {
 		encoding: 'utf8',
 		shell: false,
+		env: {
+			...process.env,
+			CODEX_HOME: codexHome,
+		},
 		...options,
 	});
 }

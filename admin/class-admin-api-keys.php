@@ -292,8 +292,13 @@ class Admin_API_Keys {
 							headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
 							body: JSON.stringify(body)
 						}).then(function(r) { return r.json(); }).then(function(data) {
-							resultEl.textContent = data.success ? okText : (data.message || errText);
-							resultEl.style.color = data.success ? 'green' : 'red';
+							if (data.success) {
+								resultEl.textContent = okText;
+								resultEl.style.color = 'green';
+							} else {
+								resultEl.innerHTML = data.message || errText;
+								resultEl.style.color = 'red';
+							}
 						}).catch(function(err) {
 							resultEl.textContent = err.message || errText;
 							resultEl.style.color = 'red';
@@ -452,14 +457,21 @@ class Admin_API_Keys {
 						__( 'Click "Submit & Connect", then save if needed.', 'alorbach-ai-gateway' ),
 					)
 				); ?>
-				<?php self::render_setup_guide_card(
+				<?php
+				$_bridge_rel  = ltrim( str_replace( ABSPATH, '', plugin_dir_path( dirname( __FILE__ ) ) ), '/' ) . 'bin/codex-image-bridge.js';
+				$_bridge_step = sprintf(
+					/* translators: %s: shell command */
+					__( 'If WordPress runs in wp-env or Docker on Windows, start <strong><code>%s</code></strong> on the Windows host.', 'alorbach-ai-gateway' ),
+					esc_html( 'node ' . $_bridge_rel . ' serve' )
+				);
+				self::render_setup_guide_card(
 					__( 'Codex Images - Local Codex CLI Bridge', 'alorbach-ai-gateway' ),
 					__( 'Use this when image generation should run through your local Codex CLI session on the same machine as WordPress.', 'alorbach-ai-gateway' ),
 					array(
 						__( 'Install Codex CLI on the same machine that runs this WordPress site.', 'alorbach-ai-gateway' ),
 						__( 'In that same local user account, run `codex login` in a terminal.', 'alorbach-ai-gateway' ),
 						__( 'Add a row with type "Codex Images (Local Codex CLI)". Leave API Key empty.', 'alorbach-ai-gateway' ),
-						__( 'If WordPress runs in wp-env or Docker on Windows, start `node wordpress-plugin/bin/codex-image-bridge.js serve` on the Windows host.', 'alorbach-ai-gateway' ),
+						$_bridge_step,
 						__( 'Save API Keys, then click "Test local bridge".', 'alorbach-ai-gateway' ),
 					)
 				); ?>
@@ -483,7 +495,7 @@ class Admin_API_Keys {
 			<p class="description"><?php echo esc_html( $description ); ?></p>
 			<ol>
 				<?php foreach ( (array) $steps as $step ) : ?>
-					<li><?php echo esc_html( $step ); ?></li>
+					<li><?php echo wp_kses_post( $step ); ?></li>
 				<?php endforeach; ?>
 			</ol>
 		</div>
@@ -530,7 +542,17 @@ class Admin_API_Keys {
 				<?php if ( $is_codex_images ) : ?>
 				<input type="hidden" name="entries[<?php echo esc_attr( $index ); ?>][api_key]" value="" />
 				<div class="codex-image-inline-ui">
-					<p class="description"><?php esc_html_e( 'Uses the local Codex CLI session on this machine. Leave API Key empty. If WordPress runs in wp-env or Docker on Windows, start `node wordpress-plugin/bin/codex-image-bridge.js serve` on the Windows host first.', 'alorbach-ai-gateway' ); ?></p>
+					<p class="description"><?php
+				$_br = ltrim( str_replace( ABSPATH, '', plugin_dir_path( dirname( __FILE__ ) ) ), '/' ) . 'bin/codex-image-bridge.js';
+				echo wp_kses(
+					sprintf(
+						/* translators: %s: shell command */
+						__( 'Uses the local Codex CLI session on this machine. Leave API Key empty. If WordPress runs in wp-env or Docker on Windows, start <strong><code>%s</code></strong> on the Windows host first.', 'alorbach-ai-gateway' ),
+						esc_html( 'node ' . $_br . ' serve' )
+					),
+					array( 'strong' => array(), 'code' => array() )
+				);
+				?></p>
 					<div class="codex-image-inline-actions">
 						<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test local bridge', 'alorbach-ai-gateway' ); ?></button>
 					</div>

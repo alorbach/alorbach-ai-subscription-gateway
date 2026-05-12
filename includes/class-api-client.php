@@ -734,7 +734,32 @@ class API_Client {
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
+		$request['timeout'] = self::get_image_request_timeout_seconds( $provider, $model, $size, $n, $reference_images );
 		return self::execute_image_request( $request );
+	}
+
+	/**
+	 * Get the HTTP timeout for image generation requests.
+	 *
+	 * @param string $provider         Provider key.
+	 * @param string $model            Model ID.
+	 * @param string $size             Requested image size.
+	 * @param int    $n                Number of generated images.
+	 * @param array  $reference_images Optional reference images.
+	 * @return int
+	 */
+	private static function get_image_request_timeout_seconds( $provider = '', $model = '', $size = '', $n = 1, $reference_images = array() ) {
+		$timeout = (int) apply_filters(
+			'alorbach_image_request_timeout',
+			300,
+			$provider,
+			$model,
+			$size,
+			(int) $n,
+			$reference_images
+		);
+
+		return min( 1800, max( 30, $timeout ) );
 	}
 
 	/**
@@ -801,7 +826,7 @@ class API_Client {
 		$response = wp_remote_post( $request['url'], array(
 			'headers' => $request['headers'],
 			'body'    => $request['body'],
-			'timeout' => 120,
+			'timeout' => isset( $request['timeout'] ) ? (int) $request['timeout'] : self::get_image_request_timeout_seconds(),
 		) );
 		if ( is_wp_error( $response ) ) {
 			return $response;
@@ -1147,6 +1172,7 @@ class API_Client {
 		$body['partial_images'] = 3;
 		$request['body']        = wp_json_encode( $body );
 		$request['headers']['Accept'] = 'text/event-stream';
+		$timeout = self::get_image_request_timeout_seconds( $provider, $model, $size, $n, $reference_images );
 
 		$state = array(
 			'preview_images' => array(),
@@ -1164,7 +1190,7 @@ class API_Client {
 		curl_setopt( $ch, CURLOPT_POSTFIELDS, $request['body'] );
 		curl_setopt( $ch, CURLOPT_RETURNTRANSFER, false );
 		curl_setopt( $ch, CURLOPT_HEADER, false );
-		curl_setopt( $ch, CURLOPT_TIMEOUT, 180 );
+		curl_setopt( $ch, CURLOPT_TIMEOUT, $timeout );
 		curl_setopt( $ch, CURLOPT_FOLLOWLOCATION, true );
 		curl_setopt(
 			$ch,

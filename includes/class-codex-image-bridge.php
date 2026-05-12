@@ -326,16 +326,22 @@ class Codex_Image_Bridge {
 	 * @return string
 	 */
 	private static function build_container_hint_message( $reason = '' ) {
-		$message = __( 'WordPress cannot reach a local Codex runtime from this PHP environment.', 'alorbach-ai-gateway' );
+		$bridge_rel = ltrim( str_replace( ABSPATH, '', plugin_dir_path( dirname( __FILE__ ) ) ), '/' ) . 'bin/codex-image-bridge.js';
+		$bridge_cmd = esc_html( 'node ' . $bridge_rel . ' serve' );
+		$message    = __( 'WordPress cannot reach a local Codex runtime from this PHP environment.', 'alorbach-ai-gateway' );
 		if ( self::looks_like_container_environment() ) {
 			$message .= ' ' . __( 'This usually happens in wp-env or Docker on Windows, where PHP runs in Linux but Codex CLI is installed on the Windows host.', 'alorbach-ai-gateway' );
-			$message .= ' ' . __( 'Start the host bridge on Windows with `node wordpress-plugin/bin/codex-image-bridge.js serve`, then test again.', 'alorbach-ai-gateway' );
+			$message .= ' ' . sprintf(
+				/* translators: %s: shell command */
+				__( 'Start the host bridge on Windows with <strong><code>%s</code></strong>, then test again.', 'alorbach-ai-gateway' ),
+				$bridge_cmd
+			);
 		}
 		if ( '' !== trim( $reason ) ) {
 			$message .= ' ' . sprintf(
 				/* translators: %s: underlying execution failure */
 				__( 'Underlying error: %s', 'alorbach-ai-gateway' ),
-				$reason
+				esc_html( $reason )
 			);
 		}
 		return $message;
