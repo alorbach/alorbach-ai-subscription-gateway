@@ -63,7 +63,10 @@ class API_Client {
 	 * @return array{async_jobs: bool, provider_progress: bool, preview_images: bool}
 	 */
 	public static function get_image_job_capabilities( $model, $provider = null ) {
-		$model    = (string) $model;
+		$model  = (string) $model;
+		// Strip compound key so provider-specific model-name checks work correctly.
+		$parsed = Cost_Matrix::parse_model_key( $model );
+		$model  = $parsed['model'];
 		$provider = $provider ?: self::get_provider_for_model( $model );
 		$prov     = Provider_Registry::get( $provider );
 
@@ -89,10 +92,27 @@ class API_Client {
 	 * Get the provider to use for a model based on configured API keys.
 	 * GPT models work with OpenAI, Azure, or GitHub Models; uses whichever is configured (priority: openai > azure > github_models).
 	 *
-	 * @param string $model Model ID.
+	 * @param string $model    Model ID (plain name or compound "entry_id::model_id" key).
+	 * @param string $entry_id Optional API key entry ID. When supplied, the associated
+	 *                         provider type is returned immediately without name-based resolution.
 	 * @return string Provider: openai, azure, google, or github_models.
 	 */
-	public static function get_provider_for_model( $model ) {
+	public static function get_provider_for_model( $model, $entry_id = '' ) {
+		// Strip compound key prefix if present and entry_id not already provided.
+		if ( '' === $entry_id ) {
+			$parsed   = Cost_Matrix::parse_model_key( $model );
+			$entry_id = $parsed['entry_id'];
+			$model    = $parsed['model'];
+		}
+
+		// When an explicit entry_id is given, resolve provider directly from the stored entry.
+		if ( '' !== $entry_id ) {
+			$entry = API_Keys_Helper::get_entry_by_id( $entry_id );
+			if ( $entry && ! empty( $entry['type'] ) ) {
+				return (string) $entry['type'];
+			}
+		}
+
 		$helper = API_Keys_Helper::class;
 
 		if ( strpos( (string) $model, 'hf-space:' ) === 0 && $helper::has_provider( 'huggingface_spaces' ) ) {
@@ -673,6 +693,10 @@ class API_Client {
 	public static function images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $reference_images = array() ) {
 		$n      = min( 10, max( 1, (int) $n ) );
 		$model  = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		// Strip compound key (entry_id::model) — never forward the entry_id prefix to the upstream API.
+		$model_parsed   = Cost_Matrix::parse_model_key( $model );
+		$compound_entry = $model_parsed['entry_id'];
+		$model          = $model_parsed['model'];
 		$quality = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
 
@@ -681,7 +705,7 @@ class API_Client {
 		if ( ! $prov || ! $prov->supports_images() ) {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
 		}
-		$entry_id = self::get_entry_id_for_imported_model( $model );
+		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			$message = ( 'codex_images' === $provider )
@@ -1084,6 +1108,10 @@ class API_Client {
 	public static function stream_images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $on_event = null, $reference_images = array() ) {
 		$n             = min( 10, max( 1, (int) $n ) );
 		$model         = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
+		// Strip compound key (entry_id::model) — never forward the entry_id prefix to the upstream API.
+		$model_parsed   = Cost_Matrix::parse_model_key( $model );
+		$compound_entry = $model_parsed['entry_id'];
+		$model          = $model_parsed['model'];
 		$quality       = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
 		$provider      = self::get_provider_for_model( $model );
@@ -1097,7 +1125,7 @@ class API_Client {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
 		}
 
-		$entry_id = self::get_entry_id_for_imported_model( $model );
+		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			$message = ( 'codex_images' === $provider )
@@ -1210,6 +1238,7 @@ class API_Client {
 			'data'           => $state['final_images'],
 			'preview_images' => $state['preview_images'],
 			'usage'          => $state['usage'],
+			'raw_preview'    => substr( $state['raw'], 0, 400 ),
 		);
 	}
 
@@ -1271,8 +1300,12 @@ class API_Client {
 		}
 
 		$data_lines = array();
+		$event_type = '';
 		foreach ( preg_split( "/\r?\n/", $block ) as $line ) {
 			$line = trim( $line );
+			if ( strncmp( $line, 'event:', 6 ) === 0 ) {
+				$event_type = trim( substr( $line, 6 ) );
+			}
 			if ( strncmp( $line, 'data:', 5 ) === 0 ) {
 				$data_lines[] = trim( substr( $line, 5 ) );
 			}
@@ -1294,7 +1327,9 @@ class API_Client {
 
 		$images = self::extract_image_items_from_payload( $payload );
 		if ( ! empty( $images ) ) {
-			$is_preview = self::payload_looks_like_partial_image( $payload );
+			$is_preview = '' !== $event_type
+				? ( strpos( $event_type, 'partial' ) !== false )
+				: self::payload_looks_like_partial_image( $payload );
 			$target_key = $is_preview ? 'preview_images' : 'final_images';
 			$existing   = self::image_item_hashes( $state[ $target_key ] );
 			$new_images = array();
@@ -1358,6 +1393,9 @@ class API_Client {
 			}
 			if ( isset( $payload['image_base64'] ) && is_string( $payload['image_base64'] ) && $payload['image_base64'] !== '' ) {
 				$items[] = array( 'b64_json' => $payload['image_base64'] );
+			}
+			if ( isset( $payload['partial_image_b64'] ) && is_string( $payload['partial_image_b64'] ) && $payload['partial_image_b64'] !== '' ) {
+				$items[] = array( 'b64_json' => $payload['partial_image_b64'] );
 			}
 			foreach ( $payload as $value ) {
 				if ( is_array( $value ) ) {

@@ -584,8 +584,11 @@ class Model_Importer {
 				$image_to_add = array_merge( $image_to_add, $ids );
 				foreach ( $ids as $image_id ) {
 					$image_id = is_string( $image_id ) ? $image_id : (string) $image_id;
-					if ( '' !== $image_id && ! isset( $selected_image_entries[ $image_id ] ) ) {
-						$selected_image_entries[ $image_id ] = (string) $entry_id;
+					if ( '' !== $image_id ) {
+						if ( ! isset( $selected_image_entries[ $image_id ] ) ) {
+							$selected_image_entries[ $image_id ] = array();
+						}
+						$selected_image_entries[ $image_id ][] = (string) $entry_id;
 					}
 				}
 			}
@@ -606,15 +609,24 @@ class Model_Importer {
 				: ( strpos( $item, 'gpt-image' ) === 0 || strpos( $item, 'dall-e' ) === 0 || strpos( strtolower( $item ), 'flux' ) === 0 || strpos( $item, 'imagen-' ) === 0 || ( strpos( $item, 'gemini-' ) === 0 && ( strpos( $item, '-image' ) !== false || strpos( $item, 'image-' ) !== false ) ) );
 			$is_size  = (bool) preg_match( '/^\d+x\d+$/', $item ) || 'auto' === $item;
 			if ( $is_model ) {
-				if ( ! $overwrite && in_array( $item, $image_models, true ) ) {
-					$result['skipped']['image'][] = $item;
-					continue;
+				// Expand to per-entry compound keys when entry tracking is available.
+				$entry_ids_for_model = isset( $selected_image_entries[ $item ] ) && is_array( $selected_image_entries[ $item ] )
+					? $selected_image_entries[ $item ]
+					: array( '' );
+				foreach ( $entry_ids_for_model as $img_entry_id ) {
+					$img_entry_id = (string) $img_entry_id;
+					$compound     = $img_entry_id ? $img_entry_id . '::' . $item : $item;
+					if ( ! $overwrite && in_array( $compound, $image_models, true ) ) {
+						$result['skipped']['image'][] = $compound;
+						continue;
+					}
+					$image_models[] = $compound;
+					$result['added']['image'][] = $compound;
+					if ( $img_entry_id ) {
+						$image_model_entries[ $item ] = $img_entry_id; // last one wins; kept for backward compat
+					}
 				}
-				$image_models[] = $item;
-				$result['added']['image'][] = $item;
-				if ( ! empty( $selected_image_entries[ $item ] ) ) {
-					$image_model_entries[ $item ] = $selected_image_entries[ $item ];
-				}
+				// Costs are keyed by plain model name and shared across all entries.
 				if ( strpos( $item, 'gpt-image' ) === 0 && ! isset( $image_model_costs[ $item ] ) ) {
 					$image_model_costs[ $item ] = $gpt_image_default_costs;
 				}

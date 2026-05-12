@@ -302,15 +302,15 @@ class Integration_Service {
 		$config = array(
 			'defaults'          => array(
 				'chat_model'    => $settings_admin::get_default_chat_model( $text_models ),
-				'image_model'   => get_option( 'alorbach_image_default_model', $image_models[0] ?? 'dall-e-3' ),
+				'image_model'   => get_option( 'alorbach_image_default_model', array_key_first( $image_models ) ?? 'dall-e-3' ),
 				'image_size'    => $settings_admin::get_default_image_size( $image_sizes ),
 				'image_quality' => get_option( 'alorbach_image_default_quality', 'medium' ),
 				'audio_model'   => $settings_admin::get_default_audio_model( $audio_models ),
 				'video_model'   => $settings_admin::get_default_video_model( $video_models ),
 			),
 			'capabilities'      => array(
-				'chat_models'     => array_values( $text_models ),
-				'image_models'    => array_values( $image_models ),
+				'chat_models'     => array_keys( $text_models ),
+				'image_models'    => array_keys( $image_models ),
 				'image_sizes'     => array_values( $image_sizes ),
 				'image_qualities' => $qualities,
 				'audio_models'    => array_values( $audio_models ),
@@ -728,7 +728,25 @@ class Integration_Service {
 			return $available_models;
 		}
 
-		return array_values( array_intersect( $available_models, $allowed ) );
+		// Exact matches (compound keys stored after the gateway-scoped rollout).
+		$result = array_values( array_intersect( $available_models, $allowed ) );
+
+		// Backward compat: also include available compound keys whose plain-model portion
+		// matches a legacy plain-name entry in $allowed.
+		foreach ( $available_models as $available_key ) {
+			if ( in_array( $available_key, $result, true ) ) {
+				continue; // already matched exactly
+			}
+			if ( strpos( (string) $available_key, '::' ) === false ) {
+				continue; // plain key — would have been caught by intersect
+			}
+			$parsed = Cost_Matrix::parse_model_key( $available_key );
+			if ( in_array( $parsed['model'], $allowed, true ) ) {
+				$result[] = $available_key;
+			}
+		}
+
+		return array_values( $result );
 	}
 
 	/**
@@ -866,12 +884,26 @@ class Integration_Service {
 		foreach ( self::PLAN_CAPABILITIES as $capability ) {
 			$rows = isset( $allowed_models[ $capability ] ) ? $allowed_models[ $capability ] : array();
 			$rows = is_array( $rows ) ? $rows : array();
+			$catalog_for_cap = $model_catalog[ $capability ] ?? array();
 			$rows = array_values(
 				array_unique(
 					array_filter(
 						array_map( 'sanitize_text_field', $rows ),
-						function ( $model ) use ( $model_catalog, $capability ) {
-							return in_array( $model, $model_catalog[ $capability ] ?? array(), true );
+						function ( $model ) use ( $catalog_for_cap ) {
+							// Exact match (compound key or same plain name stored in catalog).
+							if ( in_array( $model, $catalog_for_cap, true ) ) {
+								return true;
+							}
+							// Backward compat: plain model name stored before compound-key rollout.
+							if ( strpos( $model, '::' ) === false ) {
+								foreach ( $catalog_for_cap as $catalog_key ) {
+									$parsed = Cost_Matrix::parse_model_key( $catalog_key );
+									if ( $parsed['model'] === $model ) {
+										return true;
+									}
+								}
+							}
+							return false;
 						}
 					)
 				)
@@ -891,8 +923,8 @@ class Integration_Service {
 		$admin = \Alorbach\AIGateway\Admin\Admin_Demo_Defaults::class;
 
 		return array(
-			'chat'  => array_values( $admin::get_text_models() ),
-			'image' => array_values( $admin::get_image_models() ),
+			'chat'  => array_keys( $admin::get_text_models() ),
+			'image' => array_keys( $admin::get_image_models() ),
 			'audio' => array_values( $admin::get_audio_models() ),
 			'video' => array_values( $admin::get_video_models() ),
 		);
@@ -974,7 +1006,22 @@ class Integration_Service {
 			return '';
 		}
 
-		return in_array( $current, $options, true ) ? $current : (string) $options[0];
+		if ( in_array( $current, $options, true ) ) {
+			return $current;
+		}
+
+		// Backward compat: $current is a legacy plain model name — find first compound key whose
+		// model portion matches (upgrade the stored default to the new compound key on-the-fly).
+		if ( '' !== $current && strpos( $current, '::' ) === false ) {
+			foreach ( $options as $option ) {
+				$parsed = Cost_Matrix::parse_model_key( $option );
+				if ( $parsed['model'] === $current ) {
+					return (string) $option;
+				}
+			}
+		}
+
+		return (string) $options[0];
 	}
 
 	/**
@@ -996,7 +1043,24 @@ class Integration_Service {
 			return true;
 		}
 
-		return in_array( $model, $allowed_models, true );
+		// Exact match (compound key or same plain name stored in plan).
+		if ( in_array( $model, $allowed_models, true ) ) {
+			return true;
+		}
+
+		// Backward compat: $model is a compound key and the plan stores the plain name,
+		// or vice-versa (plan stores compound, request sends plain name).
+		$model_name = Cost_Matrix::parse_model_key( $model )['model'];
+		foreach ( $allowed_models as $allowed ) {
+			if ( $allowed === $model_name ) {
+				return true;
+			}
+			if ( Cost_Matrix::parse_model_key( $allowed )['model'] === $model_name ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

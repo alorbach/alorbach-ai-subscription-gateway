@@ -272,10 +272,11 @@ class Admin_Plans {
 	/**
 	 * Render one allowed-models field.
 	 *
-	 * @param string $base_name Base form name.
+	 * @param string $base_name  Base form name.
 	 * @param string $capability Capability key.
-	 * @param array  $options Model options.
-	 * @param array  $selected Selected model ids.
+	 * @param array  $options    Model options — flat array of IDs, or keyed array
+	 *                           [ compound_key => display_label ] for gateway-scoped models.
+	 * @param array  $selected   Selected model ids (compound keys or legacy plain names).
 	 * @return void
 	 */
 	private static function render_allowed_models_field( $base_name, $capability, $options, $selected ) {
@@ -283,8 +284,22 @@ class Admin_Plans {
 		<div class="alorbach-plan-field">
 			<label><?php echo esc_html( ucfirst( $capability ) . ' ' . __( 'models', 'alorbach-ai-gateway' ) ); ?></label>
 			<select multiple name="<?php echo esc_attr( $base_name ); ?>[allowed_models][<?php echo esc_attr( $capability ); ?>][]">
-				<?php foreach ( $options as $option ) : ?>
-					<option value="<?php echo esc_attr( $option ); ?>" <?php selected( in_array( $option, $selected, true ) ); ?>><?php echo esc_html( $option ); ?></option>
+				<?php
+				$is_keyed = ! empty( $options ) && ! is_int( key( $options ) );
+				foreach ( $options as $opt_key => $opt_label ) :
+					if ( ! $is_keyed ) {
+						// Flat array: key is an integer, label is the model ID — use it as both value and text.
+						$opt_key   = $opt_label;
+					}
+					// Check if this option is selected: exact match (compound key) or backward-compat
+					// plain-name match for values stored before the gateway-scoped key was introduced.
+					$is_selected = in_array( $opt_key, $selected, true );
+					if ( ! $is_selected && strpos( (string) $opt_key, '::' ) !== false ) {
+						$parts       = explode( '::', (string) $opt_key, 2 );
+						$is_selected = in_array( $parts[1], $selected, true );
+					}
+				?>
+					<option value="<?php echo esc_attr( $opt_key ); ?>" <?php selected( $is_selected ); ?>><?php echo esc_html( $opt_label ); ?></option>
 				<?php endforeach; ?>
 			</select>
 			<p class="description"><?php esc_html_e( 'Leave empty to allow all configured models for this capability.', 'alorbach-ai-gateway' ); ?></p>

@@ -19,9 +19,27 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Cost_Matrix {
 
 	/**
+	 * Parse a model key that may be a compound "entry_id::model_id" key.
+	 *
+	 * @param string $key Model key (plain ID or "entry_id::model_id").
+	 * @return array{entry_id: string, model: string}
+	 */
+	public static function parse_model_key( $key ) {
+		$key = (string) $key;
+		$pos = strpos( $key, '::' );
+		if ( false !== $pos ) {
+			return array(
+				'entry_id' => substr( $key, 0, $pos ),
+				'model'    => substr( $key, $pos + 2 ),
+			);
+		}
+		return array( 'entry_id' => '', 'model' => $key );
+	}
+
+	/**
 	 * Get input cost per token (UC).
 	 *
-	 * @param string $model Model name.
+	 * @param string $model Model name or compound "entry_id::model_id" key.
 	 * @return int UC per token.
 	 */
 	public static function get_input_cost_per_token( $model ) {
@@ -59,6 +77,10 @@ class Cost_Matrix {
 	 * @return int Max tokens (4096 if unknown).
 	 */
 	public static function get_max_tokens( $model ) {
+		// Strip compound key prefix ("entry_id::model_id") — only the plain model name is used for token limits.
+		$parsed = self::parse_model_key( $model );
+		$model  = $parsed['model'];
+
 		// 1. Check values fetched live from provider APIs at import time.
 		$stored = get_option( 'alorbach_model_max_tokens', array() );
 		if ( is_array( $stored ) ) {
@@ -275,23 +297,40 @@ class Cost_Matrix {
 	/**
 	 * Get costs for model (from options or defaults).
 	 *
-	 * @param string $model Model name.
+	 * Accepts a plain model name or a compound "entry_id::model_id" key.
+	 * When entry_id is present, the row matching both entry_id and model is
+	 * preferred; falls back to the first row matching the model name alone.
+	 *
+	 * @param string $model Model name or compound "entry_id::model_id" key.
 	 * @return array
 	 */
 	private static function get_costs_for_model( $model ) {
-		$all     = self::get_cost_matrix();
-		$default = isset( $all['default'] ) ? $all['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
-		$models  = isset( $all['models'] ) && is_array( $all['models'] ) ? $all['models'] : array();
+		$parsed   = self::parse_model_key( $model );
+		$model_id = $parsed['model'];
+		$entry_id = $parsed['entry_id'];
+
+		$all             = self::get_cost_matrix();
+		$default         = isset( $all['default'] ) ? $all['default'] : array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
+		$models          = isset( $all['models'] ) && is_array( $all['models'] ) ? $all['models'] : array();
+		$first_name_match = null;
 		foreach ( $models as $row ) {
-			if ( isset( $row['model'] ) && $row['model'] === $model ) {
-				return array(
-					'input'  => isset( $row['input'] ) ? (int) $row['input'] : 400000,
-					'output' => isset( $row['output'] ) ? (int) $row['output'] : 1600000,
-					'cached' => isset( $row['cached'] ) ? (int) $row['cached'] : 40000,
-				);
+			if ( ! isset( $row['model'] ) || $row['model'] !== $model_id ) {
+				continue;
+			}
+			$row_costs = array(
+				'input'  => isset( $row['input'] ) ? (int) $row['input'] : 400000,
+				'output' => isset( $row['output'] ) ? (int) $row['output'] : 1600000,
+				'cached' => isset( $row['cached'] ) ? (int) $row['cached'] : 40000,
+			);
+			// Prefer the row that exactly matches the requested entry_id.
+			if ( $entry_id && isset( $row['entry_id'] ) && $row['entry_id'] === $entry_id ) {
+				return $row_costs;
+			}
+			if ( null === $first_name_match ) {
+				$first_name_match = $row_costs;
 			}
 		}
-		return $default;
+		return null !== $first_name_match ? $first_name_match : $default;
 	}
 
 	/**

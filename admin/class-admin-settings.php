@@ -101,12 +101,13 @@ class Admin_Settings {
 	/**
 	 * Get the canonical default chat model.
 	 *
-	 * @param array $text_models Available models.
+	 * @param array $text_models Available models (compound key => label, or plain flat array).
 	 * @return string
 	 */
 	public static function get_default_chat_model( $text_models ) {
 		self::maybe_migrate_general_defaults();
-		return (string) get_option( 'alorbach_default_chat_model', $text_models[0] ?? 'gpt-4.1-mini' );
+		$fallback = is_array( $text_models ) ? ( array_key_first( $text_models ) ?? 'gpt-4.1-mini' ) : 'gpt-4.1-mini';
+		return (string) get_option( 'alorbach_default_chat_model', $fallback );
 	}
 
 	/**
@@ -186,7 +187,7 @@ class Admin_Settings {
 		$max_tokens_options    = self::get_max_tokens_options();
 		$default_chat_model    = self::get_default_chat_model( $text_models );
 		$default_max_tokens    = self::get_default_max_tokens();
-		$default_image_model   = (string) get_option( 'alorbach_image_default_model', $image_models[0] ?? 'dall-e-3' );
+		$default_image_model   = (string) get_option( 'alorbach_image_default_model', array_key_first( $image_models ) ?? 'dall-e-3' );
 		$default_image_quality = (string) get_option( 'alorbach_image_default_quality', 'medium' );
 		$default_image_format  = (string) get_option( 'alorbach_image_default_output_format', 'png' );
 		$default_image_size    = self::get_default_image_size( $image_sizes );
@@ -300,8 +301,8 @@ class Admin_Settings {
 								<th scope="row"><label for="alorbach_default_chat_model"><?php esc_html_e( 'Default chat model', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<select name="alorbach_default_chat_model" id="alorbach_default_chat_model">
-										<?php foreach ( $text_models as $model ) : ?>
-											<option value="<?php echo esc_attr( $model ); ?>" <?php selected( $default_chat_model, $model ); ?>><?php echo esc_html( $model ); ?></option>
+									<?php foreach ( $text_models as $model_value => $model_label ) : ?>
+										<option value="<?php echo esc_attr( $model_value ); ?>" <?php selected( $default_chat_model, $model_value ); ?>><?php echo esc_html( $model_label ); ?></option>
 										<?php endforeach; ?>
 									</select>
 								</td>
@@ -327,8 +328,8 @@ class Admin_Settings {
 								<th scope="row"><label for="alorbach_image_default_model"><?php esc_html_e( 'Default image model', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<select name="alorbach_image_default_model" id="alorbach_image_default_model">
-										<?php foreach ( $image_models as $model ) : ?>
-											<option value="<?php echo esc_attr( $model ); ?>" <?php selected( $default_image_model, $model ); ?>><?php echo esc_html( $model ); ?></option>
+								<?php foreach ( $image_models as $model_value => $model_label ) : ?>
+									<option value="<?php echo esc_attr( $model_value ); ?>" <?php selected( $default_image_model, $model_value ); ?>><?php echo esc_html( $model_label ); ?></option>
 										<?php endforeach; ?>
 									</select>
 								</td>

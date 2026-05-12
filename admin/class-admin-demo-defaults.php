@@ -26,18 +26,44 @@ class Admin_Demo_Defaults {
 	}
 
 	/**
-	 * Get available text models from cost matrix.
+	 * Get available text models from cost matrix as a keyed array.
 	 *
-	 * @return array Model IDs (unique, sorted).
+	 * Returns an associative array of compound model keys to display labels:
+	 *   [ 'entry_id::model_id' => 'model_id (ProviderType / Entry Name)', ... ]
+	 * When a row has no entry_id the plain model ID is used as both key and label.
+	 * Duplicate compound keys are silently skipped (each entry+model combination is unique).
+	 *
+	 * @return array<string,string> Compound key => display label, sorted by label.
 	 */
 	public static function get_text_models() {
-		$cost_data = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
+		$cost_data    = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
 		$models_array = isset( $cost_data['models'] ) && is_array( $cost_data['models'] ) ? $cost_data['models'] : array();
-		$models = array_unique( array_filter( array_map( function ( $row ) {
-			return isset( $row['model'] ) ? $row['model'] : null;
-		}, $models_array ) ) );
-		sort( $models );
-		return ! empty( $models ) ? $models : array( 'gpt-4.1-mini' );
+		$models       = array();
+		foreach ( $models_array as $row ) {
+			if ( empty( $row['model'] ) ) {
+				continue;
+			}
+			$entry_id     = isset( $row['entry_id'] ) ? (string) $row['entry_id'] : '';
+			$compound_key = $entry_id ? $entry_id . '::' . $row['model'] : $row['model'];
+			if ( isset( $models[ $compound_key ] ) ) {
+				continue; // deduplicate by compound key
+			}
+			$label = $row['model'];
+			if ( $entry_id ) {
+				$entry = \Alorbach\AIGateway\API_Keys_Helper::get_entry_by_id( $entry_id );
+				if ( $entry ) {
+					$entry_type = ucfirst( $entry['type'] ?? '' );
+					$entry_name = $entry['name'] ?? $entry_id;
+					$label      = $row['model'] . ' (' . $entry_type . ' / ' . $entry_name . ')';
+				}
+			}
+			$models[ $compound_key ] = $label;
+		}
+		if ( empty( $models ) ) {
+			return array( 'gpt-4.1-mini' => 'gpt-4.1-mini' );
+		}
+		asort( $models );
+		return $models;
 	}
 
 	/**
@@ -68,16 +94,51 @@ class Admin_Demo_Defaults {
 	}
 
 	/**
-	 * Get available image models (gpt-image-*, dall-e-*).
+	 * Get available image models as a keyed array.
 	 *
-	 * @return array Model IDs.
+	 * Returns [ 'entry_id::model_id' => 'model_id (ProviderType / Entry Name)', ... ].
+	 * Models without an entry_id mapping use the plain model ID as both key and label.
+	 *
+	 * @return array<string,string> Compound key => display label, sorted by label.
 	 */
 	public static function get_image_models() {
-		$models = get_option( 'alorbach_image_models', array() );
-		$models = is_array( $models ) ? $models : array();
-		$models = self::filter_models_by_capability( array_values( array_filter( $models, 'is_string' ) ), 'images' );
-		sort( $models );
-		return ! empty( $models ) ? $models : array( 'dall-e-3', 'gpt-image-1.5' );
+		$model_ids = get_option( 'alorbach_image_models', array() );
+		$model_ids = is_array( $model_ids ) ? array_values( array_filter( $model_ids, 'is_string' ) ) : array();
+		$entry_map = get_option( 'alorbach_image_model_entries', array() );
+		$entry_map = is_array( $entry_map ) ? $entry_map : array();
+		$model_ids = self::filter_models_by_capability( $model_ids, 'images' );
+		$models    = array();
+		foreach ( $model_ids as $model_id ) {
+			// Handle compound keys already stored in the list (new storage format).
+			if ( strpos( $model_id, '::' ) !== false ) {
+				$parts        = explode( '::', $model_id, 2 );
+				$entry_id     = $parts[0];
+				$plain_name   = $parts[1];
+				$compound_key = $model_id;
+			} else {
+				$plain_name   = $model_id;
+				$entry_id     = isset( $entry_map[ $model_id ] ) ? (string) $entry_map[ $model_id ] : '';
+				$compound_key = $entry_id ? $entry_id . '::' . $model_id : $model_id;
+			}
+			if ( isset( $models[ $compound_key ] ) ) {
+				continue;
+			}
+			$label = $plain_name;
+			if ( $entry_id ) {
+				$entry = \Alorbach\AIGateway\API_Keys_Helper::get_entry_by_id( $entry_id );
+				if ( $entry ) {
+					$entry_type = ucfirst( $entry['type'] ?? '' );
+					$entry_name = $entry['name'] ?? $entry_id;
+					$label      = $plain_name . ' (' . $entry_type . ' / ' . $entry_name . ')';
+				}
+			}
+			$models[ $compound_key ] = $label;
+		}
+		if ( empty( $models ) ) {
+			return array( 'dall-e-3' => 'dall-e-3', 'gpt-image-1.5' => 'gpt-image-1.5' );
+		}
+		asort( $models );
+		return $models;
 	}
 
 	/**

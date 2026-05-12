@@ -178,12 +178,30 @@ class Admin_Cost_Matrix {
 					return (string) $model !== $remove_image_model;
 				} ) );
 
+				// Derive the plain model name from the (possibly compound) key.
+				$remove_plain_name = strpos( $remove_image_model, '::' ) !== false
+					? explode( '::', $remove_image_model, 2 )[1]
+					: $remove_image_model;
+
 				$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
 				$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
 				$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
 				$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
-				unset( $image_model_costs[ $remove_image_model ] );
-				unset( $image_model_entries[ $remove_image_model ] );
+				// Only remove shared costs when no other compound key for this plain model remains.
+				$plain_still_has_entry = false;
+				foreach ( $image_models as $remaining ) {
+					$remaining_plain = strpos( (string) $remaining, '::' ) !== false
+						? explode( '::', (string) $remaining, 2 )[1]
+						: (string) $remaining;
+					if ( $remaining_plain === $remove_plain_name ) {
+						$plain_still_has_entry = true;
+						break;
+					}
+				}
+				if ( ! $plain_still_has_entry ) {
+					unset( $image_model_costs[ $remove_plain_name ] );
+					unset( $image_model_entries[ $remove_plain_name ] );
+				}
 
 				update_option( 'alorbach_image_models', $image_models );
 				update_option( 'alorbach_image_model_costs', $image_model_costs );
@@ -245,7 +263,8 @@ class Admin_Cost_Matrix {
 		$has_openai_style_image_provider = \Alorbach\AIGateway\API_Keys_Helper::has_provider( 'openai' ) || \Alorbach\AIGateway\API_Keys_Helper::has_provider( 'azure' );
 		$has_dalle_family_models = false;
 		foreach ( $image_models as $img_model_id ) {
-			if ( strpos( (string) $img_model_id, 'dall-e' ) === 0 || strpos( (string) $img_model_id, 'gpt-image' ) === 0 ) {
+			$img_plain = strpos( (string) $img_model_id, '::' ) !== false ? explode( '::', (string) $img_model_id, 2 )[1] : (string) $img_model_id;
+			if ( strpos( $img_plain, 'dall-e' ) === 0 || strpos( $img_plain, 'gpt-image' ) === 0 ) {
 				$has_dalle_family_models = true;
 				break;
 			}
@@ -689,14 +708,30 @@ class Admin_Cost_Matrix {
 				<?php
 				$gpt_sizes = array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
 				$gpt_qualities = array( 'low', 'medium', 'high' );
+				// Build a map of plain model name => list of compound keys stored in $image_models.
+				$img_model_entries_map = array();
+				foreach ( $image_models as $ck ) {
+					$ck = (string) $ck;
+					if ( preg_match( '/^\d+x\d+$/', $ck ) || 'auto' === $ck ) {
+						continue; // skip size entries
+					}
+					$plain = strpos( $ck, '::' ) !== false ? explode( '::', $ck, 2 )[1] : $ck;
+					if ( ! isset( $img_model_entries_map[ $plain ] ) ) {
+						$img_model_entries_map[ $plain ] = array();
+					}
+					$img_model_entries_map[ $plain ][] = $ck;
+				}
 				if ( ! empty( $image_model_costs ) ) :
 					?>
 				<h3><?php esc_html_e( 'Image models: Cost per image by quality and size', 'alorbach-ai-gateway' ); ?></h3>
-				<p class="description"><?php esc_html_e( 'Cost varies by quality (low/medium/high) and resolution. Values in UC; USD shown next to each field.', 'alorbach-ai-gateway' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Cost varies by quality (low/medium/high) and resolution. Values in UC; USD shown next to each field. Costs are shared per model; each entry below has its own Remove/Test button.', 'alorbach-ai-gateway' ); ?></p>
 				<?php foreach ( $image_model_costs as $img_model => $qualities ) :
 					$is_gpt = ( strpos( $img_model, 'gpt-image' ) === 0 );
 					$sizes_for_model = $is_gpt ? $gpt_sizes : array( '1024x1024' );
-					$remove_image_model_url = wp_nonce_url( add_query_arg( array( 'alorbach_remove_image_model' => '1', 'model' => $img_model ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_image_model', '_wpnonce' );
+					// All compound keys (or the plain name if none) that map to this cost entry.
+					$compounds_for_model = isset( $img_model_entries_map[ $img_model ] ) && ! empty( $img_model_entries_map[ $img_model ] )
+						? $img_model_entries_map[ $img_model ]
+						: array( $img_model );
 					?>
 				<div class="alorbach-cost-grid-wrapper" style="margin-bottom: 1.5rem;">
 					<h4><?php echo esc_html( $img_model ); ?></h4>
@@ -730,11 +765,21 @@ class Admin_Cost_Matrix {
 							<?php endforeach; ?>
 						</tbody>
 					</table>
+					<?php foreach ( $compounds_for_model as $ck ) :
+						$ck_entry_id = strpos( $ck, '::' ) !== false ? explode( '::', $ck, 2 )[0] : '';
+						$ck_entry    = $ck_entry_id ? \Alorbach\AIGateway\API_Keys_Helper::get_entry_by_id( $ck_entry_id ) : null;
+						$ck_label    = $ck_entry
+							? ucfirst( $ck_entry['type'] ?? '' ) . ' / ' . ( $ck_entry['name'] ?? $ck_entry_id )
+							: $img_model;
+						$remove_image_model_url = wp_nonce_url( add_query_arg( array( 'alorbach_remove_image_model' => '1', 'model' => $ck ), admin_url( 'admin.php?page=alorbach-cost-matrix' ) ), 'alorbach_remove_image_model', '_wpnonce' );
+						?>
 					<p class="description" style="margin-top: 8px;">
+						<strong><?php echo esc_html( $ck_label ); ?></strong>
 						<a href="<?php echo esc_url( $remove_image_model_url ); ?>" class="button button-small"><?php esc_html_e( 'Remove', 'alorbach-ai-gateway' ); ?></a>
-						<button type="button" class="button button-small alorbach-test-image-model" data-model="<?php echo esc_attr( $img_model ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?> <?php echo esc_html( $img_model ); ?></button>
-						<span class="alorbach-test-result" data-type="image-model" data-model="<?php echo esc_attr( $img_model ); ?>"></span>
+						<button type="button" class="button button-small alorbach-test-image-model" data-model="<?php echo esc_attr( $ck ); ?>"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+						<span class="alorbach-test-result" data-type="image-model" data-model="<?php echo esc_attr( $ck ); ?>"></span>
 					</p>
+					<?php endforeach; ?>
 				</div>
 				<?php endforeach; ?>
 				<?php endif; ?>

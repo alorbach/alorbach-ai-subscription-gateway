@@ -115,6 +115,20 @@ class Image_Jobs {
 	const PREVIEW_RETENTION_SECONDS = DAY_IN_SECONDS;
 
 	/**
+	 * Log transient prefix.
+	 *
+	 * @var string
+	 */
+	const JOB_LOG_TRANSIENT_PREFIX = 'alorbach_image_job_log_';
+
+	/**
+	 * Maximum number of log entries stored per job.
+	 *
+	 * @var int
+	 */
+	const JOB_LOG_MAX_ENTRIES = 50;
+
+	/**
 	 * Normalize requested image quality for a specific model.
 	 *
 	 * @param string $quality Raw requested quality.
@@ -461,6 +475,15 @@ class Image_Jobs {
 			return self::public_job_payload( $job );
 		}
 
+		// Acquire a short-lived dispatch lock to prevent two concurrent PHP processes from both
+		// processing the same queued job (race condition when the job-runner fires twice before
+		// either worker saves the in_progress status).
+		$lock_key = 'alorbach_job_lock_' . $job_id;
+		if ( get_transient( $lock_key ) ) {
+			return self::public_job_payload( $job );
+		}
+		set_transient( $lock_key, 1, 300 );
+
 		$image_capabilities       = empty( $job['reference_images'] ) ? API_Client::get_image_job_capabilities( (string) $job['model'] ) : array(
 			'async_jobs'        => false,
 			'provider_progress' => false,
@@ -473,6 +496,10 @@ class Image_Jobs {
 		$job['provider_progress'] = ! empty( $image_capabilities['provider_progress'] );
 		$job['progress_mode']     = ! empty( $job['provider_progress'] ) ? 'provider' : 'estimated';
 		$job['updated_at']        = time();
+		self::append_job_log( $job_id, array(
+			'event' => 'job_started',
+			'msg'   => sprintf( 'Processing started. model=%s size=%s n=%d supports_previews=%s', $job['model'], $job['size'], (int) $job['n'], $job['supports_previews'] ? 'yes' : 'no' ),
+		) );
 		self::save_full_job( $job );
 		if ( is_callable( $on_update ) ) {
 			call_user_func( $on_update, self::public_job_payload( $job ) );
@@ -492,10 +519,12 @@ class Image_Jobs {
 			if ( is_callable( $on_update ) ) {
 				call_user_func( $on_update, self::public_job_payload( $job ) );
 			}
+			delete_transient( $lock_key );
 			return $provider_reference_images;
 		}
 
 		if ( ! empty( $job['supports_previews'] ) ) {
+			self::append_job_log( $job_id, array( 'event' => 'api_call', 'msg' => 'Calling stream_images (SSE streaming mode).' ) );
 			$response = API_Client::stream_images(
 				$job['prompt'],
 				$job['size'],
@@ -521,6 +550,7 @@ class Image_Jobs {
 						$job['progress_stage']   = $preview_count >= 3 ? 'finalizing' : ( $preview_count === 2 ? 'refining' : 'drafting' );
 						$job['progress_percent'] = $preview_count >= 3 ? 90 : ( $preview_count === 2 ? 75 : 55 );
 						$job['updated_at']       = time();
+						self::append_job_log( (string) $job['job_id'], array( 'event' => 'preview_frame', 'msg' => sprintf( 'Preview frame received. total_previews=%d', $preview_count ) ) );
 						self::save_full_job( $job );
 						if ( is_callable( $on_update ) ) {
 							call_user_func( $on_update, self::public_job_payload( $job ) );
@@ -539,6 +569,7 @@ class Image_Jobs {
 						$job['progress_stage']   = 'finalizing';
 						$job['progress_percent'] = 95;
 						$job['updated_at']       = time();
+						self::append_job_log( (string) $job['job_id'], array( 'event' => 'stream_final', 'msg' => sprintf( 'Final image received via stream. total_finals=%d', count( $job['final_images'] ) ) ) );
 						self::save_full_job( $job );
 						if ( is_callable( $on_update ) ) {
 							call_user_func( $on_update, self::public_job_payload( $job ) );
@@ -548,6 +579,7 @@ class Image_Jobs {
 				$provider_reference_images
 			);
 		} else {
+			self::append_job_log( $job_id, array( 'event' => 'api_call', 'msg' => 'Calling images() (non-streaming mode).' ) );
 			$response = API_Client::images(
 				$job['prompt'],
 				$job['size'],
@@ -566,10 +598,12 @@ class Image_Jobs {
 			$job['error']            = $response->get_error_message();
 			self::apply_wp_error_context( $job, $response );
 			$job['updated_at']       = time();
+			self::append_job_log( $job_id, array( 'event' => 'api_error', 'msg' => sprintf( 'API returned WP_Error: %s (code=%s http=%s)', $job['error'], $response->get_error_code(), (string) ( $response->get_error_data()['status'] ?? '' ) ) ) );
 			self::save_full_job( $job );
 			if ( is_callable( $on_update ) ) {
 				call_user_func( $on_update, self::public_job_payload( $job ) );
 			}
+			delete_transient( $lock_key );
 			return $response;
 		}
 
@@ -580,8 +614,23 @@ class Image_Jobs {
 		$job['internal_prompt'] = isset( $response['internal_prompt'] ) && is_string( $response['internal_prompt'] ) ? $response['internal_prompt'] : (string) ( $job['internal_prompt'] ?? '' );
 		$job['provider_usage'] = isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : ( isset( $job['provider_usage'] ) && is_array( $job['provider_usage'] ) ? $job['provider_usage'] : array() );
 		$job['provider_details'] = isset( $response['provider_details'] ) && is_array( $response['provider_details'] ) ? $response['provider_details'] : ( isset( $job['provider_details'] ) && is_array( $job['provider_details'] ) ? $job['provider_details'] : array() );
+		$response_data_count = count( isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array() );
+		self::append_job_log( $job_id, array(
+			'event' => 'api_response',
+			'msg'   => sprintf(
+				'API call succeeded. response[data]=%d stream_final=%d stream_preview=%d raw=%.300s',
+				$response_data_count,
+				count( $job['final_images'] ),
+				count( $job['preview_images'] ),
+				substr( isset( $response['raw_preview'] ) ? (string) $response['raw_preview'] : '', 0, 300 )
+			),
+		) );
+		// For streaming paths the on_event callback may have already created attachment refs and stored them
+		// in $job['final_images'].  Use those as the base so dedup prevents re-creating the same attachments
+		// when $response['data'] contains the identical raw b64 payload.  For non-streaming paths
+		// $job['final_images'] is always empty at this point, so the behaviour is unchanged.
 		$job['final_images']   = self::append_asset_items(
-			array(),
+			! empty( $job['supports_previews'] ) ? $job['final_images'] : array(),
 			isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array(),
 			(string) $job['job_id'],
 			(int) $job['user_id'],
@@ -603,10 +652,12 @@ class Image_Jobs {
 			$job['progress_stage']   = 'failed';
 			$job['progress_percent'] = 0;
 			$job['error']            = __( 'Image generation returned no images.', 'alorbach-ai-gateway' );
+			self::append_job_log( $job_id, array( 'event' => 'no_images', 'msg' => 'final_images empty after append_asset_items — marking failed.' ) );
 			self::save_full_job( $job );
 			if ( is_callable( $on_update ) ) {
 				call_user_func( $on_update, self::public_job_payload( $job ) );
 			}
+			delete_transient( $lock_key );
 			return new \WP_Error( 'empty_image_result', $job['error'], array( 'status' => 502 ) );
 		}
 
@@ -630,6 +681,8 @@ class Image_Jobs {
 		if ( is_callable( $on_update ) ) {
 			call_user_func( $on_update, self::public_job_payload( $job ) );
 		}
+		self::append_job_log( $job_id, array( 'event' => 'job_completed', 'msg' => sprintf( 'Job completed. final_count=%d preview_count=%d', count( $job['final_images'] ), count( $job['preview_images'] ) ) ) );
+		delete_transient( $lock_key );
 		return self::public_job_payload( $job );
 	}
 
@@ -1032,7 +1085,11 @@ class Image_Jobs {
 			'is_expired'          => self::is_job_expired_for_cleanup( (string) ( $job['job_id'] ?? '' ), $job ),
 			'job_state'           => $job_status,
 			'error'               => (string) ( $job['error'] ?? '' ),
+			'error_http_status'   => ! empty( $job['error_http_status'] ) ? (int) $job['error_http_status'] : 0,
+			'error_code'          => (string) ( $job['error_code'] ?? '' ),
+			'error_retry_after'   => (string) ( $job['error_retry_after'] ?? '' ),
 			'deduction_applied'   => ! empty( $job['deduction_applied'] ),
+			'logs'                => isset( $job['logs'] ) && is_array( $job['logs'] ) ? $job['logs'] : array(),
 		);
 	}
 
@@ -1083,6 +1140,10 @@ class Image_Jobs {
 			'is_stalled'         => self::is_job_stalled_for_cleanup( $job ),
 			'is_expired'         => self::is_job_expired_for_cleanup( (string) ( $job['job_id'] ?? '' ), $job ),
 			'job_state'          => $job_status,
+			'error'              => (string) ( $job['error'] ?? '' ),
+			'error_http_status'  => ! empty( $job['error_http_status'] ) ? (int) $job['error_http_status'] : 0,
+			'error_code'         => (string) ( $job['error_code'] ?? '' ),
+			'error_retry_after'  => (string) ( $job['error_retry_after'] ?? '' ),
 			'deduction_applied'  => ! empty( $job['deduction_applied'] ),
 		);
 	}
@@ -1316,6 +1377,7 @@ class Image_Jobs {
 		$job['reference_images'] = array();
 		$job['images_included']  = false;
 		$job['images_error']     = '';
+		$job['logs']             = self::get_job_log( (string) $job['job_id'] );
 
 		if ( $include_images ) {
 			$job = array_merge( $job, self::get_job_assets_for_payload( (string) $job['job_id'] ) );
@@ -1527,6 +1589,50 @@ class Image_Jobs {
 	}
 
 	/**
+	 * Append a log entry to a job's diagnostic log.
+	 *
+	 * Each entry is a small associative array with at minimum a 'msg' key.
+	 * Entries are trimmed to JOB_LOG_MAX_ENTRIES to avoid unbounded growth.
+	 *
+	 * @param string $job_id Job ID.
+	 * @param array  $entry  Log entry data.
+	 * @return void
+	 */
+	public static function append_job_log( $job_id, $entry ) {
+		$job_id = (string) $job_id;
+		if ( '' === $job_id ) {
+			return;
+		}
+
+		self::invalidate_transient_option_caches( self::JOB_LOG_TRANSIENT_PREFIX . $job_id );
+		$log = get_transient( self::JOB_LOG_TRANSIENT_PREFIX . $job_id );
+		if ( ! is_array( $log ) ) {
+			$log = array();
+		}
+
+		$entry['ts'] = time();
+		$log[]       = $entry;
+
+		if ( count( $log ) > self::JOB_LOG_MAX_ENTRIES ) {
+			$log = array_slice( $log, -self::JOB_LOG_MAX_ENTRIES );
+		}
+
+		set_transient( self::JOB_LOG_TRANSIENT_PREFIX . $job_id, $log, self::JOB_TTL );
+	}
+
+	/**
+	 * Retrieve stored log entries for a job.
+	 *
+	 * @param string $job_id Job ID.
+	 * @return array
+	 */
+	private static function get_job_log( $job_id ) {
+		self::invalidate_transient_option_caches( self::JOB_LOG_TRANSIENT_PREFIX . $job_id );
+		$log = get_transient( self::JOB_LOG_TRANSIENT_PREFIX . $job_id );
+		return is_array( $log ) ? $log : array();
+	}
+
+	/**
 	 * Normalize reference images before saving them in transient storage.
 	 *
 	 * @param array $reference_images Raw reference images.
@@ -1614,10 +1720,37 @@ class Image_Jobs {
 	 * @return array
 	 */
 	private static function prepare_asset_collection_for_storage( $job_id, $user_id, $items, $role ) {
-		$prepared = array();
-		$seen     = array();
+		$prepared  = array();
+		$seen      = array();
+		$raw_items = array();
 
+		// First pass: sanitize existing refs to populate the $seen dedup set without any DB writes.
 		foreach ( $items as $item ) {
+			if ( self::is_asset_ref( $item ) ) {
+				$ref = self::sanitize_asset_ref( $job_id, $item, $role );
+				if ( empty( $ref ) || empty( $ref['attachment_id'] ) ) {
+					continue;
+				}
+				$dedupe_key = ! empty( $ref['source_hash'] ) ? (string) $ref['source_hash'] : 'attachment:' . (int) $ref['attachment_id'];
+				if ( isset( $seen[ $dedupe_key ] ) ) {
+					continue;
+				}
+				$seen[ $dedupe_key ] = true;
+				$prepared[]          = $ref;
+			} else {
+				$raw_items[] = $item;
+			}
+		}
+
+		// Second pass: process raw image items, skipping those already covered by an existing ref.
+		// The source-hash pre-check prevents creating a duplicate WP attachment before we even know
+		// the dedup key — avoiding orphaned media entries when streaming callbacks already saved refs.
+		foreach ( $raw_items as $item ) {
+			$hash = self::image_item_source_hash( $item );
+			if ( '' !== $hash && isset( $seen[ $hash ] ) ) {
+				continue; // Already have this image from an existing ref; skip attachment creation.
+			}
+
 			$ref = self::normalize_asset_ref_or_create_attachment( $job_id, $user_id, $item, $role );
 			if ( empty( $ref ) || empty( $ref['attachment_id'] ) ) {
 				continue;

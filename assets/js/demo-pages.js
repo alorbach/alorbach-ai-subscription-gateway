@@ -190,10 +190,11 @@
 			if (wrap) wrap.style.display = canSelectTextModel ? '' : 'none';
 			if (canSelectTextModel && text.options && text.options.length) {
 				modelSelect.innerHTML = '';
+				var textLabels = text.labels || {};
 				text.options.forEach(function (opt) {
 					var o = document.createElement('option');
 					o.value = opt;
-					o.textContent = opt;
+					o.textContent = textLabels[opt] || opt;
 					if (opt === text.default) o.selected = true;
 					modelSelect.appendChild(o);
 				});
@@ -390,10 +391,11 @@
 			if (modelWrap) modelWrap.style.display = (canSelectImageModel && modelOpts.options && modelOpts.options.length) ? '' : 'none';
 			if (canSelectImageModel && modelOpts.options && modelOpts.options.length && modelSelect) {
 				modelSelect.innerHTML = '';
+				var modelLabels = modelOpts.labels || {};
 				modelOpts.options.forEach(function (opt) {
 					var o = document.createElement('option');
 					o.value = opt;
-					o.textContent = opt;
+					o.textContent = modelLabels[opt] || opt;
 					if (opt === modelOpts.default) o.selected = true;
 					modelSelect.appendChild(o);
 				});

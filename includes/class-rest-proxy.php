@@ -602,6 +602,10 @@ class REST_Proxy {
 		$messages         = $request->get_param( 'messages' );
 		$config           = Integration_Service::get_integration_config( $user_id );
 		$model            = $request->get_param( 'model' ) ?: ( $config['defaults']['chat_model'] ?? 'gpt-4.1-mini' );
+		// Parse compound key ("entry_id::model_id") into components; falls back gracefully for plain names.
+		$model_parsed = Cost_Matrix::parse_model_key( $model );
+		$model_name   = $model_parsed['model'];   // plain model ID forwarded to upstream API
+		$entry_id     = $model_parsed['entry_id']; // entry-specific provider resolution
 		$max_tokens       = $request->get_param( 'max_tokens' );
 		$multi_step       = (bool) $request->get_param( 'multi_step' );
 		$max_steps        = min( 20, max( 1, (int) $request->get_param( 'max_steps' ) ) );
@@ -642,12 +646,12 @@ class REST_Proxy {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 
-		$provider = API_Client::get_provider_for_model( $model );
+		$provider = API_Client::get_provider_for_model( $model_name, $entry_id );
 		$creds    = API_Keys_Helper::get_credentials_for_provider( $provider );
 		$free_pass_through = ! empty( $creds['free_pass_through'] );
 
 		if ( ! $free_pass_through ) {
-			$input_tokens   = Tokenizer::count_messages_tokens( $messages, $model );
+			$input_tokens   = Tokenizer::count_messages_tokens( $messages, $model_name );
 			$output_estimate = $max_tokens;
 			$input_cost     = (int) ( ( $input_tokens * Cost_Matrix::get_input_cost_per_token( $model ) ) / 1000000 );
 			$output_cost    = (int) ( ( $output_estimate * Cost_Matrix::get_output_cost_per_token( $model ) ) / 1000000 );
@@ -668,7 +672,7 @@ class REST_Proxy {
 		}
 
 		$body = array(
-			'model'      => $model,
+			'model'      => $model_name,
 			'messages'   => $messages,
 			'max_tokens' => $max_tokens,
 		);
@@ -712,7 +716,7 @@ class REST_Proxy {
 			return rest_ensure_response( $response );
 		}
 
-		$prompt_tokens    = isset( $response['usage']['prompt_tokens'] ) ? (int) $response['usage']['prompt_tokens'] : Tokenizer::count_messages_tokens( $messages, $model );
+		$prompt_tokens    = isset( $response['usage']['prompt_tokens'] ) ? (int) $response['usage']['prompt_tokens'] : Tokenizer::count_messages_tokens( $messages, $model_name );
 		$completion_tokens = isset( $response['usage']['completion_tokens'] ) ? (int) $response['usage']['completion_tokens'] : 0;
 		$cached_tokens   = isset( $response['usage']['prompt_tokens_details']['cached_tokens'] ) ? (int) $response['usage']['prompt_tokens_details']['cached_tokens'] : 0;
 
@@ -722,7 +726,7 @@ class REST_Proxy {
 		Ledger::insert_transaction(
 			$user_id,
 			'chat_deduction',
-			$model,
+			$model_name,
 			- $uc_cost,
 			$prompt_tokens,
 			$cached_tokens,
@@ -794,12 +798,26 @@ class REST_Proxy {
 		$default_image_model = isset( $config['defaults']['image_model'] ) ? $config['defaults']['image_model'] : '';
 		$default_image_capabilities = API_Client::get_image_job_capabilities( $default_image_model );
 
+		// Build friendly label maps so the JS can display names instead of raw compound keys.
+		$text_model_catalog  = $admin::get_text_models();
+		$text_model_labels   = array();
+		foreach ( $config['capabilities']['chat_models'] ?? array() as $key ) {
+			$text_model_labels[ $key ] = isset( $text_model_catalog[ $key ] ) ? $text_model_catalog[ $key ] : $key;
+		}
+
+		$image_model_catalog = $admin::get_image_models();
+		$image_model_labels  = array();
+		foreach ( $image_models as $key ) {
+			$image_model_labels[ $key ] = isset( $image_model_catalog[ $key ] ) ? $image_model_catalog[ $key ] : $key;
+		}
+
 		return rest_ensure_response( array(
 			'text'  => array(
 				'enabled'      => ! empty( $config['plan_capabilities']['chat'] ),
 				'default'      => $config['defaults']['chat_model'],
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_chat_model_select', false ),
 				'options'      => $config['capabilities']['chat_models'],
+				'labels'       => $text_model_labels,
 				'max_tokens'   => array(
 					'default' => $default_max_tokens,
 					'options' => $max_tokens_options,
@@ -816,6 +834,7 @@ class REST_Proxy {
 					'default'      => $config['defaults']['image_model'],
 					'allow_select' => (bool) get_option( 'alorbach_demo_allow_image_model_select', false ),
 					'options'      => $config['capabilities']['image_models'],
+					'labels'       => $image_model_labels,
 				),
 				'quality' => array(
  					'default'      => $config['defaults']['image_quality'],
@@ -1070,8 +1089,11 @@ class REST_Proxy {
 		$reference_images = $request->get_param( 'reference_images' );
 		$reference_images = is_array( $reference_images ) ? $reference_images : array();
 		$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
-		$quality = self::normalize_image_quality( $quality, $model );
-		$billable_quality = self::get_billable_image_quality( $quality, $model );
+		// Separate compound key (for entry-aware cost lookups) from plain model name.
+		$model_parsed_img = Cost_Matrix::parse_model_key( $model );
+		$model_name_img   = $model_parsed_img['model'];
+		$quality = self::normalize_image_quality( $quality, $model_name_img );
+		$billable_quality = self::get_billable_image_quality( $quality, $model_name_img );
 
 		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
 		if ( $plan_error ) {
@@ -1107,7 +1129,7 @@ class REST_Proxy {
 			return $response;
 		}
 
-		Ledger::insert_transaction( $user_id, 'image_deduction', $model, -$cost, null, null, null, $request_signature, $api_cost );
+		Ledger::insert_transaction( $user_id, 'image_deduction', $model_name_img, -$cost, null, null, null, $request_signature, $api_cost );
 		do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
@@ -1836,6 +1858,10 @@ class REST_Proxy {
 		$base_signature,
 		$lock_key
 	) {
+		// Separate the compound key (for entry-aware cost lookups) from the plain model
+		// name (for tokenization and ledger display).
+		$model_parsed = Cost_Matrix::parse_model_key( $model );
+		$model_name   = $model_parsed['model'];
 		// Long-running jobs may exceed the default PHP execution time limit.
 		// Use a configurable hard cap to prevent unbounded blocking requests (DoS).
 		$timeout  = max( 30, (int) get_option( 'alorbach_multi_step_timeout', 120 ) );
@@ -1867,7 +1893,7 @@ class REST_Proxy {
 			// are insufficient for this step before making the (costly) API call.
 			if ( ! $free_pass_through ) {
 				$balance            = Ledger::get_balance( $user_id );
-				$step_input_tokens  = Tokenizer::count_messages_tokens( $current_messages, $model );
+				$step_input_tokens  = Tokenizer::count_messages_tokens( $current_messages, $model_name );
 				$step_output_est    = $body['max_tokens'];
 				$step_cost_estimate = Cost_Matrix::apply_user_cost(
 					Cost_Matrix::calculate_chat_cost( $model, $step_input_tokens, $step_output_est, 0 ),
@@ -1917,7 +1943,7 @@ class REST_Proxy {
 				Ledger::insert_transaction(
 					$user_id,
 					'chat_deduction',
-					$model,
+					$model_name,
 					- $step_uc_cost,
 					$step_prompt_tokens,
 					$step_cached_tokens,
@@ -1977,7 +2003,7 @@ class REST_Proxy {
 
 		$last_response['steps_count'] = count( $steps );
 		$last_response['steps']       = $steps;
-		Ledger::insert_transaction( $user_id, 'chat_deduction', $model, 0, null, null, null, $base_signature );
+		Ledger::insert_transaction( $user_id, 'chat_deduction', $model_name, 0, null, null, null, $base_signature );
 		delete_transient( $lock_key );
 
 		return rest_ensure_response( $last_response );

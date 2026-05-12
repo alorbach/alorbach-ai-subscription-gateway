@@ -385,6 +385,12 @@ class Admin_Image_Queue {
 			.alorbach-image-queue__copy-feedback { color:#2271b1; font-size:12px; min-height:16px; }
 			.alorbach-image-queue__prompt { white-space:pre-wrap; background:#f6f7f7; border-radius:6px; padding:10px; margin:12px; word-break:break-word; }
 			.alorbach-image-queue__empty { margin:0; padding:12px; color:#50575e; background:#f6f7f7; border-radius:6px; }
+			.alorbach-image-queue__log-table { width:100%; border-collapse:collapse; font-size:.85em; margin-top:8px; }
+			.alorbach-image-queue__log-table th, .alorbach-image-queue__log-table td { padding:5px 8px; text-align:left; border-bottom:1px solid #dcdcde; vertical-align:top; }
+			.alorbach-image-queue__log-table thead th { background:#f6f7f7; font-weight:600; }
+			.alorbach-image-queue__log-ts { white-space:nowrap; color:#50575e; width:80px; }
+			.alorbach-image-queue__log-event { white-space:nowrap; color:#2271b1; font-family:monospace; width:140px; }
+			.alorbach-image-queue__log-msg { word-break:break-word; }
 			.alorbach-image-queue__section-title { margin:16px 0 8px; }
 			.alorbach-image-queue__thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 			.alorbach-image-queue__thumbs img { width:88px; height:88px; object-fit:cover; border-radius:6px; border:1px solid #dcdcde; cursor:pointer; transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
@@ -683,7 +689,7 @@ class Admin_Image_Queue {
 						return '<tr class="alorbach-image-queue__row' + selected + '">' +
 							'<td data-label="Job"><button type="button" class="alorbach-image-queue__job-button" data-job-id="' + escapeHtml(job.job_id) + '" title="' + escapeHtml(job.job_id) + '">' + escapeHtml(shortJobId) + '</button></td>' +
 							'<td data-label="User">' + escapeHtml(job.user_label) + '</td>' +
-							'<td data-label="Model">' + escapeHtml(job.model) + '</td>' +
+							'<td data-label="Model">' + escapeHtml(stripModelKey(job.model)) + '</td>' +
 							'<td data-label="Status">' + escapeHtml(job.status_label) + '</td>' +
 							'<td data-label="Progress">' + job.progress_percent + '%</td>' +
 							'<td data-label="Updated">' + escapeHtml(job.updated_at_label) + '</td>' +
@@ -696,6 +702,28 @@ class Admin_Image_Queue {
 							loadDetails(selectedJobId, false, false);
 						});
 					});
+				}
+
+				function stripModelKey(model) {
+					var idx = (model || '').indexOf('::');
+					return idx !== -1 ? model.slice(idx + 2) : (model || '');
+				}
+
+				function renderLogs(logs) {
+					if (!logs || !logs.length) {
+						return '<p class="alorbach-image-queue__empty">No log entries for this job.</p>';
+					}
+					var rows = logs.map(function (entry) {
+						var ts = entry.ts ? new Date(entry.ts * 1000).toLocaleTimeString() : '';
+						var event = escapeHtml(entry.event || '');
+						var msg = escapeHtml(entry.msg || '');
+						return '<tr><td class="alorbach-image-queue__log-ts">' + escapeHtml(ts) + '</td>' +
+							'<td class="alorbach-image-queue__log-event">' + event + '</td>' +
+							'<td class="alorbach-image-queue__log-msg">' + msg + '</td></tr>';
+					}).join('');
+					return '<table class="alorbach-image-queue__log-table"><thead><tr>' +
+						'<th>Time</th><th>Event</th><th>Message</th>' +
+						'</tr></thead><tbody>' + rows + '</tbody></table>';
 				}
 
 				function renderThumbs(items) {
@@ -795,14 +823,13 @@ class Admin_Image_Queue {
 							'<button type="button" class="alorbach-image-queue__tab" data-tab="overview" role="tab" aria-selected="false">Overview</button>' +
 							'<button type="button" class="alorbach-image-queue__tab" data-tab="prompts" role="tab" aria-selected="false">Prompts</button>' +
 							'<button type="button" class="alorbach-image-queue__tab" data-tab="images" role="tab" aria-selected="false">Images</button>' +
-							'<button type="button" class="alorbach-image-queue__tab" data-tab="errors" role="tab" aria-selected="false">Errors</button>' +
-						'</div>' +
+							'<button type="button" class="alorbach-image-queue__tab" data-tab="errors" role="tab" aria-selected="false">Errors</button>' +						'<button type="button" class="alorbach-image-queue__tab" data-tab="logs" role="tab" aria-selected="false">Logs</button>' +						'</div>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="overview">' +
 							'<div class="alorbach-image-queue__meta">' +
 								'<div><span>Status</span><strong>' + escapeHtml(job.status_label) + '</strong></div>' +
 								'<div><span>Progress</span><strong>' + job.progress_percent + '%</strong></div>' +
 								'<div><span>User</span><strong>' + escapeHtml(job.user_label) + '</strong></div>' +
-								'<div><span>Model</span><strong>' + escapeHtml(job.model) + '</strong></div>' +
+								'<div><span>Model</span><strong>' + escapeHtml(stripModelKey(job.model)) + '</strong></div>' +
 								'<div><span>Size</span><strong>' + escapeHtml(job.size) + '</strong></div>' +
 								'<div><span>Actual Size</span><strong>' + (actualSize ? escapeHtml(actualSize) : 'Unknown') + '</strong></div>' +
 								'<div><span>Quality</span><strong>' + escapeHtml(job.quality) + '</strong></div>' +
@@ -831,6 +858,9 @@ class Admin_Image_Queue {
 						'</section>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="errors" hidden>' +
 							(hasErrors ? errorsHtml : '<p class="alorbach-image-queue__empty">No errors reported for this job.</p>') +
+						'</section>' +
+						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="logs" hidden>' +
+							renderLogs(job.logs) +
 						'</section>'
 					);
 					bindThumbClicks($detailsEl[0]);
