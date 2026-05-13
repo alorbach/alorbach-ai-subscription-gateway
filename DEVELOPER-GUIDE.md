@@ -362,7 +362,7 @@ Used by the plugin admin and developer tooling.
 
 #### `POST /admin/verify-api-key`
 
-Validates provider access. For API-key providers this checks the stored key. For `Codex Images (Local Codex CLI)` it checks the local Codex bridge prerequisites instead.
+Validates provider access for server-side providers. User-owned Local Codex runs through browser-mediated local jobs instead of this endpoint.
 
 Request fields:
 
@@ -488,7 +488,7 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - typical use cases: image generation, preview frames, downloadable final artwork
-- main providers: OpenAI, Codex Images (Local Codex CLI), Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- main providers: OpenAI, Local Codex tray bridge, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - supports both synchronous and async job flows
 - imported Hugging Face and Hugging Face Spaces image models may appear in `/me/models` when configured
 
@@ -515,16 +515,29 @@ Codex models are a specialized text-model path for coding and agent-style respon
 
 Do not treat Codex as an image, audio, or video category. From an integration perspective it belongs under text-generation workflows.
 
-### Codex Images
+### Local Codex Tray Bridge
 
-Codex image generation is a separate image path in this plugin.
+Local Codex lets a logged-in user run supported Gateway requests through their own Codex CLI session.
 
-- provider path: `Codex Images (Local Codex CLI)`
-- authentication: local Codex CLI login on the same machine, not Codex OAuth and not an OpenAI API key
-- request behavior: WordPress invokes a local helper script, which runs the installed Codex CLI and reads the generated image from the local Codex image output directory
-- containerized development note: in `wp-env` or Docker on Windows, run `node wordpress-plugin/bin/codex-image-bridge.js serve` on the Windows host so the Linux PHP container can call the host bridge through `host.docker.internal`
+- provider path: `Local Codex`
+- authentication: Codex CLI login in the user's local Windows account, plus a per-origin tray pairing token
+- text model IDs: `codex-local:<model-id>`, with `codex-local:auto` as the default local model
+- image model ID: `codex-local:image`
+- request behavior: WordPress creates a signed local job, browser calls the paired tray app on localhost, and browser completes or fails the WordPress job with the bridge result
+- cost behavior: upstream provider cost is recorded as `0`; optional site fees can be configured in UC
 
-This path exists to mirror Codex CLI behavior without reverse-engineering undocumented ChatGPT backend image endpoints. Do not describe it as Codex OAuth image output. The stored Codex OAuth token remains text-only in this plugin.
+Local Codex does not use the stored Codex OAuth token and does not require a WordPress-stored API key. The tray app is distributed as a Windows installer and portable ZIP from tag-based GitHub Releases.
+
+The tray app source lives in `apps/codex-local-bridge` in this public plugin repository. Tag releases build and upload the Windows installer and portable ZIP as GitHub Release assets.
+
+### Local Codex REST Flow
+
+1. Read `GET /local-codex/config`.
+2. Detect the tray app with `GET http://127.0.0.1:8765/v1/status`.
+3. Pair with `POST /v1/pair` using the code displayed in the tray menu.
+4. Create a WordPress job with `POST /local-codex/jobs`.
+5. Send the returned `payload`, `job_token`, `request_hash`, and `request_id` to `/v1/chat` or `/v1/images` on the tray app.
+6. Complete the WordPress job with `POST /local-codex/jobs/<job_id>/complete`, or record failure with `POST /local-codex/jobs/<job_id>/fail`.
 
 ---
 

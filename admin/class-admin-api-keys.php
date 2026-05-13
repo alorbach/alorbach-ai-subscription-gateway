@@ -35,7 +35,6 @@ class Admin_API_Keys {
 	 */
 	private static $type_options = array(
 		'openai'        => 'OpenAI',
-		'codex_images'  => 'Codex Images (Local Codex CLI)',
 		'azure'         => 'Azure OpenAI / Foundry',
 		'google'        => 'Google (Gemini)',
 		'huggingface'   => 'Hugging Face',
@@ -64,7 +63,7 @@ class Admin_API_Keys {
 			$raw     = isset( $_POST['entries'] ) && is_array( $_POST['entries'] ) ? $_POST['entries'] : array();
 			foreach ( $raw as $e ) {
 				$type = isset( $e['type'] ) ? sanitize_text_field( $e['type'] ) : '';
-				if ( ! in_array( $type, array( 'openai', 'codex_images', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
+				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
 					continue;
 				}
 				$entry = array(
@@ -98,11 +97,6 @@ class Admin_API_Keys {
 					// Auth is via OAuth; no API key stored in the entry.
 					$entry['api_key']           = '';
 					$entry['free_pass_through'] = ! empty( $e['free_pass_through'] );
-				}
-				if ( $type === 'codex_images' ) {
-					// Uses the local Codex CLI bridge; no API key stored in the entry.
-					$entry['api_key']           = '';
-					$entry['free_pass_through'] = false;
 				}
 				$entries[] = $entry;
 			}
@@ -185,10 +179,7 @@ class Admin_API_Keys {
 			.alorbach-api-keys tr[data-type="huggingface_spaces"] .entry-endpoint { visibility: visible; }
 			.alorbach-api-keys tr[data-type="github_models"] .entry-org, .alorbach-api-keys tr[data-type="github_models"] .entry-free { visibility: visible; }
 			.alorbach-api-keys tr[data-type="codex"] .entry-endpoint,
-			.alorbach-api-keys tr[data-type="codex"] .entry-org,
-			.alorbach-api-keys tr[data-type="codex_images"] .entry-endpoint,
-			.alorbach-api-keys tr[data-type="codex_images"] .entry-org { display: none; }
-			.alorbach-api-keys tr[data-type="codex_images"] .entry-free { visibility: hidden; }
+			.alorbach-api-keys tr[data-type="codex"] .entry-org { display: none; }
 			.alorbach-api-keys .spaces-extra-fields { display: none; margin-top: 6px; }
 			.alorbach-api-keys tr[data-type="huggingface_spaces"] .spaces-extra-fields { display: grid; gap: 6px; }
 			.alorbach-api-keys .spaces-extra-fields select,
@@ -196,9 +187,7 @@ class Admin_API_Keys {
 			.alorbach-api-keys tr[data-type="codex"] .input-with-actions { display: none; }
 			.alorbach-api-keys .codex-inline-ui { display: none; }
 			.alorbach-api-keys tr[data-type="codex"] .codex-inline-ui { display: block; }
-			.alorbach-api-keys tr[data-type="codex_images"] .entry-key .input-with-actions { display: none; }
 			.alorbach-api-keys .codex-image-inline-ui { display: none; font-size: 12px; max-width: 540px; }
-			.alorbach-api-keys tr[data-type="codex_images"] .codex-image-inline-ui { display: block; }
 			.alorbach-api-keys .codex-inline-ui { font-size: 12px; max-width: 540px; }
 			.alorbach-api-keys .codex-inline-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 			.alorbach-api-keys .codex-image-inline-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
@@ -256,7 +245,7 @@ class Admin_API_Keys {
 				if (typeSel) {
 					typeSel.addEventListener('change', function() {
 						row.setAttribute('data-type', this.value);
-						if (this.value === 'codex' || this.value === 'codex_images') {
+						if (this.value === 'codex') {
 							row.querySelectorAll('input[name*="[api_key]"]').forEach(function(input) {
 								input.value = '';
 							});
@@ -457,24 +446,6 @@ class Admin_API_Keys {
 						__( 'Click "Submit & Connect", then save if needed.', 'alorbach-ai-gateway' ),
 					)
 				); ?>
-				<?php
-				$_bridge_rel  = ltrim( str_replace( ABSPATH, '', plugin_dir_path( dirname( __FILE__ ) ) ), '/' ) . 'bin/codex-image-bridge.js';
-				$_bridge_step = sprintf(
-					/* translators: %s: shell command */
-					__( 'If WordPress runs in wp-env or Docker on Windows, start <strong><code>%s</code></strong> on the Windows host.', 'alorbach-ai-gateway' ),
-					esc_html( 'node ' . $_bridge_rel . ' serve' )
-				);
-				self::render_setup_guide_card(
-					__( 'Codex Images - Local Codex CLI Bridge', 'alorbach-ai-gateway' ),
-					__( 'Use this when image generation should run through your local Codex CLI session on the same machine as WordPress.', 'alorbach-ai-gateway' ),
-					array(
-						__( 'Install Codex CLI on the same machine that runs this WordPress site.', 'alorbach-ai-gateway' ),
-						__( 'In that same local user account, run `codex login` in a terminal.', 'alorbach-ai-gateway' ),
-						__( 'Add a row with type "Codex Images (Local Codex CLI)". Leave API Key empty.', 'alorbach-ai-gateway' ),
-						$_bridge_step,
-						__( 'Save API Keys, then click "Test local bridge".', 'alorbach-ai-gateway' ),
-					)
-				); ?>
 			</div>
 		</div>
 		<?php
@@ -524,7 +495,6 @@ class Admin_API_Keys {
 		$org      = $entry['org'] ?? '';
 		$free     = ! empty( $entry['free_pass_through'] );
 		$key_id   = 'key-' . ( is_numeric( $index ) ? $index : str_replace( '{{INDEX}}', 'tpl', $index ) );
-		$is_codex_images = ( $type === 'codex_images' );
 		?>
 		<tr data-type="<?php echo esc_attr( $type ); ?>" data-entry-id="<?php echo esc_attr( $id ); ?>">
 			<td class="entry-type">
@@ -539,31 +509,11 @@ class Admin_API_Keys {
 				<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][name]" value="<?php echo esc_attr( $name ); ?>" placeholder="<?php esc_attr_e( 'Optional', 'alorbach-ai-gateway' ); ?>" class="regular-text" />
 			</td>
 			<td class="entry-key"<?php if ( $type === 'codex' ) echo ' colspan="3"'; ?>>
-				<?php if ( $is_codex_images ) : ?>
-				<input type="hidden" name="entries[<?php echo esc_attr( $index ); ?>][api_key]" value="" />
-				<div class="codex-image-inline-ui">
-					<p class="description"><?php
-				$_br = ltrim( str_replace( ABSPATH, '', plugin_dir_path( dirname( __FILE__ ) ) ), '/' ) . 'bin/codex-image-bridge.js';
-				echo wp_kses(
-					sprintf(
-						/* translators: %s: shell command */
-						__( 'Uses the local Codex CLI session on this machine. Leave API Key empty. If WordPress runs in wp-env or Docker on Windows, start <strong><code>%s</code></strong> on the Windows host first.', 'alorbach-ai-gateway' ),
-						esc_html( 'node ' . $_br . ' serve' )
-					),
-					array( 'strong' => array(), 'code' => array() )
-				);
-				?></p>
-					<div class="codex-image-inline-actions">
-						<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test local bridge', 'alorbach-ai-gateway' ); ?></button>
-					</div>
-				</div>
-				<?php else : ?>
 				<div class="input-with-actions">
 					<input type="password" id="<?php echo esc_attr( $key_id ); ?>" name="entries[<?php echo esc_attr( $index ); ?>][api_key]" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text" autocomplete="off" />
 					<button type="button" class="button alorbach-toggle-pw" data-target="<?php echo esc_attr( $key_id ); ?>"><?php esc_html_e( 'Show', 'alorbach-ai-gateway' ); ?></button>
 					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
 				</div>
-				<?php endif; ?>
 				<?php if ( $type === 'codex' ) : ?>
 				<?php
 				$codex_connected     = Codex_OAuth::is_connected();

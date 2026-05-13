@@ -10,7 +10,56 @@ permissions:
   contents: write
 
 jobs:
+  build-tray-bridge:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version (strip optional v-prefix)
+        id: vars
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref_name }}"
+          $version = $ref -replace '^v', ''
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install tray bridge dependencies
+        shell: pwsh
+        run: npm ci
+        working-directory: apps/codex-local-bridge
+
+      - name: Set tray bridge package version
+        shell: pwsh
+        run: npm version "${{ steps.vars.outputs.version }}" --no-git-tag-version
+        working-directory: apps/codex-local-bridge
+
+      - name: Test tray bridge modules
+        shell: pwsh
+        run: npm test
+        working-directory: apps/codex-local-bridge
+
+      - name: Build Windows tray app
+        shell: pwsh
+        run: npm run dist:win
+        working-directory: apps/codex-local-bridge
+
+      - name: Upload tray bridge artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-codex-tray-bridge
+          path: |
+            apps/codex-local-bridge/dist/*.exe
+            apps/codex-local-bridge/dist/*.zip
+          if-no-files-found: error
+
   deploy:
+    needs: build-tray-bridge
     runs-on: ubuntu-latest
     env:
       PLUGIN_SLUG: alorbach-ai-subscription-gateway
@@ -19,6 +68,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download tray bridge artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: local-codex-tray-bridge
+          path: build/tray-bridge
 
       - name: Compute version (strip optional v-prefix)
         id: vars
@@ -42,6 +97,7 @@ jobs:
             --exclude "$BUILD_DIR" \
             --exclude ".wordpress-org" \
             --exclude ".*" \
+            --exclude "apps/" \
             --exclude "bin/" \
             --exclude "node_modules/" \
             --exclude "*.log" \
@@ -74,7 +130,7 @@ jobs:
         env:
           AI_MODEL_KEY: ${{ secrets.AI_MODEL_KEY }}
         run: |
-          INSTALL_STEPS="### Installation\n1. Download \`alorbach-ai-subscription-gateway-${{ steps.vars.outputs.version }}.zip\` from Assets below\n2. In WordPress Admin go to **Plugins → Add New → Upload Plugin**\n3. Upload the ZIP and activate\n4. Go to **AI Gateway → API Keys** to configure your provider credentials"
+          INSTALL_STEPS="### Installation\n1. Download \`alorbach-ai-subscription-gateway-${{ steps.vars.outputs.version }}.zip\` from Assets below\n2. In WordPress Admin go to **Plugins → Add New → Upload Plugin**\n3. Upload the ZIP and activate\n4. Go to **AI Gateway → API Keys** to configure your provider credentials\n\n### Local Codex Bridge\n- Download the Windows tray installer or portable ZIP from this release if users should run Gateway chat/image features through their own local Codex account.\n- Enable **AI Gateway → Settings → Providers / Import → User-owned local Codex** after activation."
           if [ -z "${AI_MODEL_KEY}" ]; then
             {
               echo "body<<EOF"
@@ -123,7 +179,9 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
-          files: ${{ steps.package.outputs.zip_path }}
+          files: |
+            ${{ steps.package.outputs.zip_path }}
+            build/tray-bridge/*
           generate_release_notes: false
           body: ${{ steps.ai_body.outputs.body }}
 

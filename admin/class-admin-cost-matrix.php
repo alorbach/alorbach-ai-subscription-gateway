@@ -367,14 +367,14 @@ class Admin_Cost_Matrix {
 		$models_by_entry = array();
 		$models_array    = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
 		$entries         = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
-		$type_labels     = array( 'openai' => 'OpenAI', 'codex_images' => 'Codex Images (Local Codex CLI)', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
+		$type_labels     = array( 'openai' => 'OpenAI', 'codex_local' => 'Local Codex', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
 		$import_entry_choices = array();
 		foreach ( $entries as $entry ) {
 			if ( empty( $entry['enabled'] ) ) {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
-			if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+			if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( 'azure' === $type && empty( $entry['endpoint'] ) ) {

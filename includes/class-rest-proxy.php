@@ -30,7 +30,7 @@ class REST_Proxy {
 		$quality = strtolower( trim( (string) $quality ) );
 		$model   = (string) $model;
 
-		if ( strpos( $model, 'codex-image-' ) === 0 ) {
+		if ( strpos( $model, 'codex-image-' ) === 0 || 'codex-local:image' === $model ) {
 			if ( in_array( $quality, array( 'medium', 'high' ), true ) ) {
 				return $quality;
 			}
@@ -205,6 +205,8 @@ class REST_Proxy {
 	 * Register REST routes.
 	 */
 	public static function register_routes() {
+		Local_Codex_Bridge::register_routes();
+
 		register_rest_route( 'alorbach/v1', '/chat', array(
 			'methods'             => 'POST',
 			'callback'            => array( __CLASS__, 'chat_handler' ),
@@ -440,7 +442,7 @@ class REST_Proxy {
 				'provider'  => array(
 					'required'          => true,
 					'type'              => 'string',
-					'enum'              => array( 'openai', 'codex_images', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ),
+					'enum'              => array( 'openai', 'codex_local', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ),
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 				'entry_id'  => array(
@@ -818,6 +820,7 @@ class REST_Proxy {
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_chat_model_select', false ),
 				'options'      => $config['capabilities']['chat_models'],
 				'labels'       => $text_model_labels,
+				'local_codex'  => $config['local_codex'] ?? array(),
 				'max_tokens'   => array(
 					'default' => $default_max_tokens,
 					'options' => $max_tokens_options,
@@ -848,6 +851,7 @@ class REST_Proxy {
 				'job_endpoint'            => rest_url( 'alorbach/v1/images/jobs' ),
 				'provider_progress_models' => $provider_progress_models,
 				'preview_models'          => $preview_image_models,
+				'local_codex'             => $config['local_codex'] ?? array(),
  			),
 			'audio' => array(
 				'enabled'      => ! empty( $config['plan_capabilities']['audio'] ),
@@ -950,8 +954,12 @@ class REST_Proxy {
 			$n       = max( 1, min( 10, (int) $request->get_param( 'n' ) ) );
 			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 			$quality = self::normalize_image_quality( $request->get_param( 'quality' ) ?: '', $model );
-			$api_cost = Cost_Matrix::get_image_cost( $size, $model, self::get_billable_image_quality( $quality, $model ) ) * $n;
-			$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
+			if ( 'codex-local:image' === $model ) {
+				$cost_uc = max( 0, (int) get_option( 'alorbach_local_codex_image_fee_uc', 0 ) );
+			} else {
+				$api_cost = Cost_Matrix::get_image_cost( $size, $model, self::get_billable_image_quality( $quality, $model ) ) * $n;
+				$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
+			}
 		} elseif ( $type === 'video' ) {
 			$model    = $request->get_param( 'model' ) ?: \Alorbach\AIGateway\Admin\Admin_Settings::get_default_video_model( array( 'sora-2' ) );
 			$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
@@ -1589,7 +1597,7 @@ class REST_Proxy {
 	public static function admin_verify_api_key( $request ) {
 		$provider = self::get_json_or_query_param( $request, 'provider' );
 		$entry_id = self::get_json_or_query_param( $request, 'entry_id' );
-		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'codex_images', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
+		if ( empty( $provider ) || ! in_array( $provider, array( 'openai', 'codex_local', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
 			return rest_ensure_response( array( 'success' => false, 'message' => __( 'Invalid or missing provider.', 'alorbach-ai-gateway' ) ) );
 		}
 		$result = API_Validator::verify_key( $provider, $entry_id );

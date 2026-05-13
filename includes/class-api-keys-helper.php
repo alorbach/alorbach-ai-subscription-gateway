@@ -109,8 +109,8 @@ class API_Keys_Helper {
 		$result  = array();
 		foreach ( $entries as $entry ) {
 			if ( ( $entry['type'] ?? '' ) === $type && ! empty( $entry['enabled'] ) ) {
-				// Codex uses OAuth, local Codex images use the local CLI, and Hugging Face Spaces can be public.
-				if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces can be public.
+				if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$result[] = $entry;
@@ -141,8 +141,8 @@ class API_Keys_Helper {
 		if ( ! $entry ) {
 			return null;
 		}
-		// Codex uses OAuth, local Codex images use the local CLI, and Hugging Face Spaces may be public.
-		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+		// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces may be public.
+		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		return self::entry_to_credentials( $entry );
@@ -155,8 +155,8 @@ class API_Keys_Helper {
 	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool}|null
 	 */
 	private static function entry_to_credentials( $entry ) {
-		// Codex uses OAuth, local Codex images use the local CLI, and Hugging Face Spaces may be public.
-		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+		// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces may be public.
+		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		$creds = array( 'api_key' => $entry['api_key'] ?? '' );

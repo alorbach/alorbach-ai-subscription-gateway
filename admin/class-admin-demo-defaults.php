@@ -60,8 +60,9 @@ class Admin_Demo_Defaults {
 			$models[ $compound_key ] = $label;
 		}
 		if ( empty( $models ) ) {
-			return array( 'gpt-4.1-mini' => 'gpt-4.1-mini' );
+			$models = array( 'gpt-4.1-mini' => 'gpt-4.1-mini' );
 		}
+		$models = array_merge( $models, \Alorbach\AIGateway\Local_Codex_Bridge::get_text_models() );
 		asort( $models );
 		return $models;
 	}
@@ -135,8 +136,9 @@ class Admin_Demo_Defaults {
 			$models[ $compound_key ] = $label;
 		}
 		if ( empty( $models ) ) {
-			return array( 'dall-e-3' => 'dall-e-3', 'gpt-image-1.5' => 'gpt-image-1.5' );
+			$models = array( 'dall-e-3' => 'dall-e-3', 'gpt-image-1.5' => 'gpt-image-1.5' );
 		}
+		$models = array_merge( $models, \Alorbach\AIGateway\Local_Codex_Bridge::get_image_models() );
 		asort( $models );
 		return $models;
 	}

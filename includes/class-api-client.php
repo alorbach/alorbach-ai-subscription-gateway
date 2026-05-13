@@ -142,8 +142,8 @@ class API_Client {
 			return 'huggingface';
 		}
 
-		if ( strpos( $model, 'codex-image' ) === 0 && $helper::has_provider( 'codex_images' ) ) {
-			return 'codex_images';
+		if ( strpos( $model, 'codex-local:' ) === 0 ) {
+			return 'codex_local';
 		}
 
 		// Codex models: route to the dedicated OAuth provider when available.
@@ -287,8 +287,8 @@ class API_Client {
 		switch ( (string) $provider ) {
 			case 'openai':
 				return 'OpenAI';
-			case 'codex_images':
-				return 'Codex Images (Local Codex CLI)';
+			case 'codex_local':
+				return 'Local Codex';
 			case 'azure':
 				return 'Azure';
 			case 'google':
@@ -708,12 +708,12 @@ class API_Client {
 		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			$message = ( 'codex_images' === $provider )
-				? __( 'Codex Images (Local Codex CLI) is not configured.', 'alorbach-ai-gateway' )
+			$message = ( 'codex_local' === $provider )
+				? __( 'Local Codex requests must be executed through the browser tray bridge.', 'alorbach-ai-gateway' )
 				: __( 'API key not configured.', 'alorbach-ai-gateway' );
 			return new \WP_Error( 'no_api_key', $message );
 		}
-		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces', 'codex_images' ), true ) && $n > 1 ) {
+		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
 			for ( $index = 0; $index < $n; $index++ ) {
 				$request = $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images );
@@ -815,10 +815,6 @@ class API_Client {
 	 * @return array|\WP_Error
 	 */
 	private static function execute_image_request( $request ) {
-		if ( isset( $request['transport'] ) && 'local_codex_cli' === $request['transport'] ) {
-			return Codex_Image_Bridge::generate( isset( $request['payload'] ) && is_array( $request['payload'] ) ? $request['payload'] : array() );
-		}
-
 		if ( isset( $request['transport'] ) && 'gradio_api' === $request['transport'] ) {
 			return self::execute_gradio_image_request( $request );
 		}
@@ -1153,8 +1149,8 @@ class API_Client {
 		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			$message = ( 'codex_images' === $provider )
-				? __( 'Codex Images (Local Codex CLI) is not configured.', 'alorbach-ai-gateway' )
+			$message = ( 'codex_local' === $provider )
+				? __( 'Local Codex requests must be executed through the browser tray bridge.', 'alorbach-ai-gateway' )
 				: __( 'API key not configured.', 'alorbach-ai-gateway' );
 			return new \WP_Error( 'no_api_key', $message );
 		}

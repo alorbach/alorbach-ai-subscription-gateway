@@ -44,6 +44,136 @@
 		return fetch(url, opts);
 	}
 
+	function isLocalCodexModel(model) {
+		return String(model || '').indexOf('codex-local:') === 0;
+	}
+
+	function getLocalCodexStorageKey(origin) {
+		return 'alorbachLocalCodexToken:' + String(origin || window.location.origin);
+	}
+
+	function localCodexFetch(url, options) {
+		var opts = Object.assign({
+			mode: 'cors',
+			cache: 'no-store',
+			headers: {
+				'Content-Type': 'application/json'
+			}
+		}, options || {});
+		if (opts.body && typeof opts.body === 'object') {
+			opts.body = JSON.stringify(opts.body);
+		}
+		return fetch(url, opts);
+	}
+
+	function getLocalCodexConfig() {
+		return apiFetch('/local-codex/config').then(function (r) {
+			if (!r.ok) return r.json().then(function (d) { throw d; });
+			return r.json();
+		});
+	}
+
+	function ensureLocalCodexPairing(localConfig) {
+		var bridgeUrl = String(localConfig.bridge_url || 'http://127.0.0.1:8765').replace(/\/$/, '');
+		var origin = localConfig.origin || window.location.origin;
+		var storageKey = getLocalCodexStorageKey(origin);
+		var token = window.localStorage ? window.localStorage.getItem(storageKey) : '';
+
+		return localCodexFetch(bridgeUrl + '/v1/status', { method: 'GET' }).then(function (statusResponse) {
+			if (!statusResponse.ok) {
+				return statusResponse.json().then(function (d) { throw { message: d.message || 'Local Codex tray app is not ready.' }; });
+			}
+			if (token) {
+				return { bridgeUrl: bridgeUrl, origin: origin, token: token };
+			}
+			var pairingCode = window.prompt('Enter the pairing code shown in the Alorbach Codex Bridge tray app.');
+			if (!pairingCode) {
+				throw { message: 'Local Codex pairing was cancelled.' };
+			}
+			return localCodexFetch(bridgeUrl + '/v1/pair', {
+				method: 'POST',
+				body: { origin: origin, pairing_code: pairingCode }
+			}).then(function (pairResponse) {
+				if (!pairResponse.ok) return pairResponse.json().then(function (d) { throw d; });
+				return pairResponse.json();
+			}).then(function (pairData) {
+				if (!pairData.token) {
+					throw { message: 'Local Codex bridge did not return a pairing token.' };
+				}
+				if (window.localStorage) {
+					window.localStorage.setItem(storageKey, pairData.token);
+				}
+				return { bridgeUrl: bridgeUrl, origin: origin, token: pairData.token };
+			});
+		});
+	}
+
+	function localCodexExecute(type, payload) {
+		var localConfig;
+		var job;
+		return getLocalCodexConfig().then(function (cfg) {
+			localConfig = cfg;
+			return ensureLocalCodexPairing(localConfig);
+		}).then(function (bridge) {
+			return apiFetch('/local-codex/jobs', {
+				method: 'POST',
+				body: { type: type, payload: payload }
+			}).then(function (r) {
+				if (!r.ok) return r.json().then(function (d) { throw d; });
+				return r.json();
+			}).then(function (createdJob) {
+				job = createdJob;
+				var endpoint = type === 'chat' ? '/v1/chat' : '/v1/images';
+				return localCodexFetch(bridge.bridgeUrl + endpoint, {
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'X-Alorbach-Bridge-Token': bridge.token,
+						'X-Alorbach-Request-Id': job.request_id
+					},
+					body: {
+						job_token: job.job_token,
+						request_hash: job.request_hash,
+						request_id: job.request_id,
+						payload: job.payload
+					}
+				});
+			}).then(function (bridgeResponse) {
+				if (!bridgeResponse.ok) {
+					return bridgeResponse.json().then(function (d) { throw d; });
+				}
+				return bridgeResponse.json();
+			}).then(function (bridgeResult) {
+				if (!bridgeResult.success) {
+					throw bridgeResult;
+				}
+				return apiFetch('/local-codex/jobs/' + encodeURIComponent(job.job_id) + '/complete', {
+					method: 'POST',
+					body: {
+						job_token: job.job_token,
+						request_hash: job.request_hash,
+						result: bridgeResult
+					}
+				}).then(function (r) {
+					if (!r.ok) return r.json().then(function (d) { throw d; });
+					return r.json();
+				});
+			}).catch(function (err) {
+				if (job && job.job_id) {
+					apiFetch('/local-codex/jobs/' + encodeURIComponent(job.job_id) + '/fail', {
+						method: 'POST',
+						body: {
+							job_token: job.job_token,
+							request_hash: job.request_hash,
+							message: err.message || 'Local Codex bridge failed.'
+						}
+					}).catch(function () {});
+				}
+				throw err;
+			});
+		});
+	}
+
 	function getBalance(container) {
 		apiFetch('/me/balance').then(function (r) { return r.json(); }).then(function (data) {
 			if (data.balance_credits !== undefined) {
@@ -250,13 +380,17 @@
 			container.classList.add('alorbach-demo-loading');
 			if (sendBtn) sendBtn.disabled = true;
 
-			apiFetch('/chat', {
-				method: 'POST',
-				body: { messages: messages, model: model, max_tokens: maxTokens },
-			}).then(function (r) {
-				if (!r.ok) return r.json().then(function (d) { throw d; });
-				return r.json();
-			}).then(function (data) {
+			var request = isLocalCodexModel(model)
+				? localCodexExecute('chat', { messages: messages, model: model, max_tokens: maxTokens })
+				: apiFetch('/chat', {
+					method: 'POST',
+					body: { messages: messages, model: model, max_tokens: maxTokens },
+				}).then(function (r) {
+					if (!r.ok) return r.json().then(function (d) { throw d; });
+					return r.json();
+				});
+
+			request.then(function (data) {
 				var content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '';
 				var usageParts = [];
 				if (data.usage) {
@@ -317,7 +451,7 @@
 		var streamSettled = false;
 
 		function isCodexImageModel(model) {
-			return String(model || '').indexOf('codex-image-') === 0;
+			return String(model || '').indexOf('codex-image-') === 0 || model === 'codex-local:image';
 		}
 
 		function getAllowedQualityOptions(model, qualityConfig) {
@@ -809,6 +943,23 @@
 			var body = { prompt: prompt, size: size, n: n };
 			if (modelWrap && modelWrap.style.display !== 'none') body.model = model;
 			if (qualityWrap && qualityWrap.style.display !== 'none') body.quality = quality;
+
+			if (model === 'codex-local:image') {
+				body.model = model;
+				body.n = 1;
+				beginEstimatedProgress();
+				localCodexExecute('image', body).then(function (data) {
+					setProgress(100, 'completed', 'estimated', true);
+					renderFinalImages(data.data || [], prompt);
+					renderUsage(data);
+					getBalance(container);
+				}).catch(function (err) {
+					handleError(err, container);
+				}).finally(function () {
+					finishGenerate();
+				});
+				return;
+			}
 
 			var supportsJobs = !imageConfig || imageConfig.supports_progress !== false;
 			var jobsEndpoint = '/images/jobs';

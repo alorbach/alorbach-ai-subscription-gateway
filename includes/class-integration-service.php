@@ -320,6 +320,13 @@ class Integration_Service {
 			),
 			'plan_capabilities' => self::get_default_capabilities( true ),
 			'billing_urls'      => self::get_billing_urls(),
+			'local_codex'       => array(
+				'enabled'    => Local_Codex_Bridge::is_enabled(),
+				'bridge_url' => (string) get_option( 'alorbach_local_codex_bridge_url', 'http://127.0.0.1:8765' ),
+				'origin'     => self::site_origin(),
+				'text_prefix' => Local_Codex_Bridge::MODEL_TEXT_PREFIX,
+				'image_model' => Local_Codex_Bridge::MODEL_IMAGE,
+			),
 		);
 
 		$user_id = null !== $user_id ? (int) $user_id : ( is_user_logged_in() ? (int) get_current_user_id() : 0 );
@@ -330,6 +337,23 @@ class Integration_Service {
 		}
 
 		return apply_filters( 'alorbach_integration_config', $config );
+	}
+
+	/**
+	 * Get the current site origin for browser-local integrations.
+	 *
+	 * @return string
+	 */
+	private static function site_origin() {
+		$parts = wp_parse_url( home_url( '/' ) );
+		if ( empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+			return home_url();
+		}
+		$origin = $parts['scheme'] . '://' . $parts['host'];
+		if ( ! empty( $parts['port'] ) ) {
+			$origin .= ':' . (int) $parts['port'];
+		}
+		return $origin;
 	}
 
 	/**

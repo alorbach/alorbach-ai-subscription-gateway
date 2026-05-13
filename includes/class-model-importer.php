@@ -166,7 +166,7 @@ class Model_Importer {
 		$entry_filter = self::normalize_entry_id_filter( $entry_ids );
 		$type_labels = array(
 			'openai'        => 'OpenAI',
-			'codex_images'  => 'Codex Images (Local Codex CLI)',
+			'codex_local'   => 'Local Codex',
 			'azure'         => 'Azure OpenAI / Foundry',
 			'google'        => 'Google (Gemini)',
 			'huggingface'   => 'Hugging Face',
@@ -184,8 +184,8 @@ class Model_Importer {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
-			// Codex authenticates via OAuth, local Codex images use the local CLI, and Hugging Face Spaces can be public.
-			if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+			// Codex authenticates via OAuth, browser-local Codex has no API key, and Hugging Face Spaces can be public.
+			if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
@@ -198,7 +198,7 @@ class Model_Importer {
 			if ( ! $prov ) {
 				continue;
 			}
-			$creds = in_array( $type, array( 'codex', 'codex_images' ), true )
+			$creds = in_array( $type, array( 'codex', 'codex_local' ), true )
 				? array()
 				: array( 'api_key' => $entry['api_key'] );
 			if ( ! empty( $entry['endpoint'] ) ) {
@@ -456,7 +456,7 @@ class Model_Importer {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
-				if ( ! in_array( $type, array( 'codex', 'codex_images', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$entry_id = $entry['id'] ?? '';
@@ -508,7 +508,7 @@ class Model_Importer {
 				if ( ! $prov ) {
 					continue;
 				}
-				$creds = in_array( $type, array( 'codex', 'codex_images' ), true )
+				$creds = in_array( $type, array( 'codex', 'codex_local' ), true )
 					? array()
 					: array( 'api_key' => $entry['api_key'] );
 				if ( ! empty( $entry['endpoint'] ) ) {

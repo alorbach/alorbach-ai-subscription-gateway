@@ -405,6 +405,13 @@ class Azure_Provider extends Provider_Base {
 			: '2024-02-01';
 		$boundary = wp_generate_password( 24, false );
 		$body     = '';
+		$response_format = ( strpos( $model, 'gpt-4o' ) !== false && strpos( $model, 'transcribe' ) !== false ) ? 'json' : 'verbose_json';
+		$body .= '--' . $boundary . "\r\n";
+		$body .= 'Content-Disposition: form-data; name="response_format"' . "\r\n\r\n" . $response_format . "\r\n";
+		foreach ( array( 'word', 'segment' ) as $granularity ) {
+			$body .= '--' . $boundary . "\r\n";
+			$body .= 'Content-Disposition: form-data; name="timestamp_granularities[]"' . "\r\n\r\n" . $granularity . "\r\n";
+		}
 		if ( $prompt !== '' ) {
 			$body .= '--' . $boundary . "\r\n";
 			$body .= 'Content-Disposition: form-data; name="prompt"' . "\r\n\r\n" . $prompt . "\r\n";

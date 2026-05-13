@@ -1,0 +1,43 @@
+{
+  "name": "alorbach-codex-local-bridge",
+  "version": "1.0.0",
+  "description": "Local Codex tray bridge for Alorbach AI Gateway",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node src/server.js",
+    "test": "node test/security.test.js",
+    "smoke": "node src/server.js --check",
+    "dist:win": "electron-builder --win nsis zip --x64"
+  },
+  "author": "Andre Lorbach",
+  "license": "GPL-2.0-or-later",
+  "devDependencies": {
+    "electron": "^42.0.1",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.alorbach.codexlocalbridge",
+    "productName": "Alorbach Codex Bridge",
+    "artifactName": "Alorbach-Codex-Bridge-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

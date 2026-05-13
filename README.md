@@ -12,7 +12,7 @@ A precise credit-based AI API billing layer for WordPress. Bridges fixed-price s
 - **BPE tokenization** via [tiktoken](https://github.com/yethee/tiktoken-php) for pre-flight cost estimation
 - **Post-flight reconciliation** with actual token counts from the API response
 - **Immutable SQL ledger** - every credit and deduction is written as an append-only row
-- **Multi-provider support** - OpenAI, Codex Images (Local Codex CLI), Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
+- **Multi-provider support** - OpenAI, Local Codex tray bridge, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
 - **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
 - **WooCommerce Subscriptions** - auto-credit on renewal, failed payment handling with retry scheduler
 - **Stripe webhook** support
@@ -59,7 +59,7 @@ All pages are under the **AI Gateway** top-level menu.
 
 | Page | Purpose |
 |---|---|
-| **API Keys** | Manage credentials for OpenAI, Codex Images (Local Codex CLI), Azure, Google, Hugging Face, Hugging Face Spaces, GitHub Models, Codex |
+| **API Keys** | Manage credentials for OpenAI, Azure, Google, Hugging Face, Hugging Face Spaces, GitHub Models, Codex |
 | **Settings** | Tabbed gateway-wide defaults, rate limits, quotas, billing/account URLs, provider import settings, advanced controls |
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Demo-only UI controls and sample page creation |
@@ -110,7 +110,7 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - Typical use cases: image generation, preview frames, downloadable final artwork
-- Main providers: OpenAI, Codex Images (Local Codex CLI), Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- Main providers: OpenAI, Local Codex tray bridge, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - Hugging Face Spaces support is currently manual-entry based and image-only
 - Demo surface: `[alorbach_demo_image]`
 - Supports both:
@@ -147,38 +147,36 @@ Codex models are a specialized text-model path for coding and agent-style respon
   - Codex is still a text model category from an integration point of view
   - it is documented separately because provider authentication and request handling differ from standard text models
 
-### Codex Images
+### Local Codex Tray Bridge
 
-Codex image generation is a separate image workflow backed by the local Codex CLI runtime.
+Local Codex is a browser-mediated workflow for users who want site AI features to spend their own local Codex/ChatGPT allowance.
 
-- Typical use cases: prompt-driven image generation through the same local Codex runtime you use in Codex CLI
-- Provider path: `Codex Images (Local Codex CLI)`
-- Request behavior: WordPress invokes a local helper script, which in turn runs the installed Codex CLI and reads the generated image from the local Codex image output directory
+- Typical use cases: user-owned chat and image generation through the Codex CLI installed on the visitor's Windows account
+- Provider path: `Local Codex`
+- Model IDs: `codex-local:auto` for chat and `codex-local:image` for image generation
+- Request behavior: WordPress creates a signed one-time job, the browser sends it to the paired tray app at `http://127.0.0.1:8765`, then the browser posts the normalized result back to WordPress
 - Notes:
-  - this does not reuse the stored ChatGPT Codex OAuth token for image transport
-  - it requires WordPress and Codex CLI to run on the same machine and under a local account that has already run `codex login`
-  - in `wp-env` or Docker on Windows, run the host bridge from PowerShell before testing or generating images:
+  - enable it in **AI Gateway -> Settings -> Providers / Import**
+  - install the Windows tray app from the GitHub Release assets
+  - run `codex login` in the same Windows user account before pairing
+  - WordPress still enforces user login, plan access, quotas, rate limits, and optional Gateway fees
+  - the tray app binds to localhost only and pairs per WordPress origin
 
-    ```powershell
-    cd D:\!cvsroot\alorbach\alorbach-ai-subscription-gateway
+For local bridge development from this public plugin repository:
 
-    $env:ALORBACH_CODEX_BINARY='c:\Users\al\.vscode\extensions\openai.chatgpt-26.5422.21459-win32-x64\bin\windows-x86_64\codex.exe'
+```powershell
+cd apps/codex-local-bridge
+npm ci
+npm run serve
+```
 
-    node wordpress-plugin/bin/codex-image-bridge.js serve
-    ```
+For a local Windows installer build:
 
-    Keep this PowerShell window open while `wp-env` is using Codex Images. To check the host setup before starting the server, run:
-
-    ```powershell
-    cd D:\!cvsroot\alorbach\alorbach-ai-subscription-gateway
-
-    $env:ALORBACH_CODEX_BINARY='c:\Users\al\.vscode\extensions\openai.chatgpt-26.5422.21459-win32-x64\bin\windows-x86_64\codex.exe'
-
-    node wordpress-plugin/bin/codex-image-bridge.js check
-    ```
-
-    The explicit `ALORBACH_CODEX_BINARY` avoids Windows resolving `codex` to the npm `.cmd` shim, which can fail in the bridge process.
-  - prompt-to-image is supported in v1; reference-image edits are not supported yet
+```powershell
+cd apps/codex-local-bridge
+npm ci
+npm run dist:win
+```
 
 ### Capability Discovery
 
@@ -409,6 +407,7 @@ git push origin v1.0.1
 ```
 
 The CI workflow builds a clean plugin ZIP and publishes a GitHub Release with auto-generated changelog notes.
+Release assets also include the Windows Local Codex tray installer and a portable Windows ZIP.
 
 ---
 
