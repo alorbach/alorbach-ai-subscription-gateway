@@ -6,4 +6,3 @@ wp-config.php
 .env
 .env.local
 *.zip
-apps/codex-local-bridge/dist/

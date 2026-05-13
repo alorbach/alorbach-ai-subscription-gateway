@@ -509,6 +509,15 @@ class Admin_Settings {
 										<?php esc_html_e( 'Allow logged-in users to use their own local Codex tray bridge', 'alorbach-ai-gateway' ); ?>
 									</label>
 									<p class="description"><?php esc_html_e( 'The browser talks to the user-owned tray app on localhost. WordPress still controls plans, quotas, and audit records.', 'alorbach-ai-gateway' ); ?></p>
+									<p class="description">
+										<?php
+										printf(
+											/* translators: %s: Local Codex Bridge releases URL. */
+											wp_kses_post( __( 'Users install the Windows companion app from <a href="%s" target="_blank" rel="noopener noreferrer">Local Codex Bridge releases</a>.', 'alorbach-ai-gateway' ) ),
+											esc_url( 'https://github.com/alorbach/codex-local-bridge/releases' )
+										);
+										?>
+									</p>
 								</td>
 							</tr>
 							<tr>

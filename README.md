@@ -157,26 +157,12 @@ Local Codex is a browser-mediated workflow for users who want site AI features t
 - Request behavior: WordPress creates a signed one-time job, the browser sends it to the paired tray app at `http://127.0.0.1:8765`, then the browser posts the normalized result back to WordPress
 - Notes:
   - enable it in **AI Gateway -> Settings -> Providers / Import**
-  - install the Windows tray app from the GitHub Release assets
+  - install the Windows tray companion from <https://github.com/alorbach/codex-local-bridge/releases>
   - run `codex login` in the same Windows user account before pairing
   - WordPress still enforces user login, plan access, quotas, rate limits, and optional Gateway fees
   - the tray app binds to localhost only and pairs per WordPress origin
 
-For local bridge development from this public plugin repository:
-
-```powershell
-cd apps/codex-local-bridge
-npm ci
-npm run serve
-```
-
-For a local Windows installer build:
-
-```powershell
-cd apps/codex-local-bridge
-npm ci
-npm run dist:win
-```
+The tray companion is developed and released separately at <https://github.com/alorbach/codex-local-bridge>. This plugin only owns the WordPress-side signed job flow, model metadata, quotas, and audit records.
 
 ### Capability Discovery
 
@@ -407,7 +393,7 @@ git push origin v1.0.1
 ```
 
 The CI workflow builds a clean plugin ZIP and publishes a GitHub Release with auto-generated changelog notes.
-Release assets also include the Windows Local Codex tray installer and a portable Windows ZIP.
+Local Codex desktop bridge releases are published separately at <https://github.com/alorbach/codex-local-bridge/releases>.
 
 ---
 

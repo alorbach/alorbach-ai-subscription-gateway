@@ -526,9 +526,9 @@ Local Codex lets a logged-in user run supported Gateway requests through their o
 - request behavior: WordPress creates a signed local job, browser calls the paired tray app on localhost, and browser completes or fails the WordPress job with the bridge result
 - cost behavior: upstream provider cost is recorded as `0`; optional site fees can be configured in UC
 
-Local Codex does not use the stored Codex OAuth token and does not require a WordPress-stored API key. The tray app is distributed as a Windows installer and portable ZIP from tag-based GitHub Releases.
+Local Codex does not use the stored Codex OAuth token and does not require a WordPress-stored API key. The tray app is distributed as a Windows installer and portable ZIP from the standalone Local Codex Bridge releases.
 
-The tray app source lives in `apps/codex-local-bridge` in this public plugin repository. Tag releases build and upload the Windows installer and portable ZIP as GitHub Release assets.
+The tray app source, issue tracking, and Windows release assets live at <https://github.com/alorbach/codex-local-bridge>. This plugin repository owns only the WordPress-side signed local job flow and integration metadata.
 
 ### Local Codex REST Flow
 
