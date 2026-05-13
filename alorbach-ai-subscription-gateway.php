@@ -3,7 +3,7 @@
  * Plugin Name: Alorbach AI Subscription Gateway
  * Plugin URI: https://github.com/alorbach/alorbach-ai-subscription-gateway
  * Description: Precise credit-based AI API billing layer for WordPress. Unified Credit system, BPE tokenization, immutable ledger.
- * Version: 1.0.0
+ * Version: 1.0.7
  * Author: Andre Lorbach
  * Author URI: https://alorbach.com
  * License: GPL v2 or later
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'ALORBACH_VERSION', '1.0.0' );
+define( 'ALORBACH_VERSION', '1.0.7' );
 define( 'ALORBACH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'ALORBACH_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'ALORBACH_UC_TO_CREDIT', 1000 );

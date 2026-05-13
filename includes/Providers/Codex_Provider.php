@@ -142,7 +142,7 @@ class Codex_Provider extends Provider_Base {
 
 		// Try the Codex-specific models endpoint first.
 		$response = wp_remote_get(
-			self::BASE_URL . '/codex/models?client_version=1.0.0',
+			self::BASE_URL . '/codex/models?client_version=' . rawurlencode( defined( 'ALORBACH_VERSION' ) ? ALORBACH_VERSION : '1.0.7' ),
 			array(
 				'headers' => array(
 					'Authorization'      => 'Bearer ' . $token,

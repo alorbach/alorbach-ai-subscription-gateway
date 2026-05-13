@@ -2,7 +2,7 @@
 
 A precise credit-based AI API billing layer for WordPress. Bridges fixed-price subscriptions with variable AI API costs using a Unified Credit (UC) system, BPE tokenization, and an immutable SQL ledger.
 
-**Version:** 1.0.0 | **License:** GPL-2.0-or-later | **Requires:** PHP 7.4+, WordPress 5.8+
+**Version:** 1.0.7 | **License:** GPL-2.0-or-later | **Requires:** PHP 7.4+, WordPress 5.8+
 
 ---
 
@@ -388,12 +388,54 @@ See `Provider_Base` for optional method stubs (images, audio, video) you only ov
 Releases are published automatically when a version tag is pushed:
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.7
+git push origin v1.0.7
 ```
 
 The CI workflow builds a clean plugin ZIP and publishes a GitHub Release with auto-generated changelog notes.
 Local Codex desktop bridge releases are published separately at <https://github.com/alorbach/codex-local-bridge/releases>.
+
+---
+
+## Changelog
+
+### 1.0.7 - 2026-05-13
+
+- Extracted the Local Codex desktop bridge into the standalone `alorbach/codex-local-bridge` release project.
+- Added user-owned Local Codex tray bridge support for browser-mediated chat and image generation.
+- Improved Codex image setup, dynamic Codex model loading, image-job logging, GPT-image streaming reliability, and compound-key model handling.
+
+### 1.0.6 - 2026-05-11
+
+- Added clearer image-job error reporting and Codex reference-image support.
+- Aligned Gateway documentation with the runtime REST contracts.
+
+### 1.0.5 - 2026-04-22
+
+- Aligned public documentation with runtime contracts and tightened demo/admin UX.
+- Added the local Codex CLI image bridge path and expanded image-job metadata.
+
+### 1.0.4 - 2026-04-15
+
+- Added and hardened Hugging Face Spaces provider support and entry-scoped model import flows.
+- Added image queue cleanup, queue detail improvements, configurable plan management, and user plan visibility.
+- Split gateway defaults from demo settings and expanded downstream integration documentation.
+- Refined plugin-facing documentation and advanced-user screenshot assets.
+
+### 1.0.3 - 2026-03-19
+
+- Expanded developer documentation, README hooks, and custom provider guidance.
+- Hardened admin-layer security and sanitization.
+
+### 1.0.2 - 2026-03-19
+
+- Added AI-generated GitHub release notes through GitHub Models.
+- Added release body installation instructions to the deploy workflow.
+
+### 1.0.1 - 2026-03-19
+
+- Added the CI release workflow and release documentation.
+- Consolidated usage administration into User Balance and refactored User Balance helper code.
 
 ---
 
