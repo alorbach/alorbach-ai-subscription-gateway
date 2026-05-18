@@ -277,7 +277,7 @@ class Admin_Settings {
 		$debug_enabled              = (bool) get_option( 'alorbach_debug_enabled', false );
 		$google_import_default      = get_option( 'alorbach_google_import_default', 'all' );
 		$google_model_whitelist     = get_option( 'alorbach_google_model_whitelist', \Alorbach\AIGateway\Model_Importer::GOOGLE_MODEL_WHITELIST_DEFAULT );
-		$local_codex_enabled        = (bool) get_option( 'alorbach_local_codex_enabled', false );
+		$local_codex_enabled        = (bool) get_option( 'alorbach_local_codex_enabled', true );
 		$local_codex_bridge_url     = (string) get_option( 'alorbach_local_codex_bridge_url', 'http://127.0.0.1:8765' );
 		$local_codex_chat_fee_uc    = (int) get_option( 'alorbach_local_codex_chat_fee_uc', 0 );
 		$local_codex_image_fee_uc   = (int) get_option( 'alorbach_local_codex_image_fee_uc', 0 );

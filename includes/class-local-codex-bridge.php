@@ -26,7 +26,7 @@ class Local_Codex_Bridge {
 	 * @return bool
 	 */
 	public static function is_enabled() {
-		return (bool) get_option( 'alorbach_local_codex_enabled', false );
+		return (bool) get_option( 'alorbach_local_codex_enabled', true );
 	}
 
 	/**
