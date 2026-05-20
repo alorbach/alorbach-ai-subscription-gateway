@@ -19,7 +19,7 @@ class API_Keys_Helper {
 	/**
 	 * Get normalized entries array. Runs migration if legacy format detected.
 	 *
-	 * @return array<int, array{id: string, type: string, api_key: string, enabled: bool, name?: string, endpoint?: string, org?: string, free_pass_through?: bool}>
+	 * @return array<int, array{id: string, type: string, api_key: string, enabled: bool, name?: string, endpoint?: string, org?: string, free_pass_through?: bool, speech_endpoint?: string, speech_api_version?: string, speech_default_locale?: string}>
 	 */
 	public static function get_entries() {
 		$raw = get_option( 'alorbach_api_keys', array() );
@@ -56,7 +56,7 @@ class API_Keys_Helper {
 	/**
 	 * Save entries to option.
 	 *
-	 * @param array<int, array{id?: string, type: string, api_key: string, enabled?: bool, name?: string, endpoint?: string, org?: string, free_pass_through?: bool}> $entries Entries to save.
+	 * @param array<int, array{id?: string, type: string, api_key: string, enabled?: bool, name?: string, endpoint?: string, org?: string, free_pass_through?: bool, speech_endpoint?: string, speech_api_version?: string, speech_default_locale?: string}> $entries Entries to save.
 	 */
 	public static function save_entries( $entries ) {
 		$normalized = self::normalize_entries( $entries );
@@ -123,7 +123,7 @@ class API_Keys_Helper {
 	 * Get credentials for a provider (first enabled entry of that type).
 	 *
 	 * @param string $type Provider type: openai, azure, google, github_models.
-	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool}|null Credentials or null if not configured.
+	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool, speech_endpoint?: string, speech_api_version?: string, speech_default_locale?: string}|null Credentials or null if not configured.
 	 */
 	public static function get_credentials_for_provider( $type ) {
 		$entry = self::get_entry_by_type( $type );
@@ -131,18 +131,37 @@ class API_Keys_Helper {
 	}
 
 	/**
+	 * Get credentials for Azure Speech Services from the first enabled Azure entry with Speech fields.
+	 *
+	 * @return array{api_key: string, endpoint?: string, speech_endpoint?: string, speech_api_version?: string, speech_default_locale?: string}|null Credentials or null.
+	 */
+	public static function get_azure_speech_credentials() {
+		foreach ( self::get_entries() as $entry ) {
+			if ( 'azure' !== (string) ( $entry['type'] ?? '' ) || empty( $entry['enabled'] ) ) {
+				continue;
+			}
+			if ( empty( $entry['speech_endpoint'] ) || empty( $entry['api_key'] ) ) {
+				continue;
+			}
+			return self::entry_to_credentials( $entry );
+		}
+		return null;
+	}
+
+	/**
 	 * Get credentials for a specific entry by ID.
 	 *
 	 * @param string $entry_id Entry ID (UUID).
-	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool}|null Credentials or null.
+	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool, speech_endpoint?: string, speech_api_version?: string, speech_default_locale?: string}|null Credentials or null.
 	 */
 	public static function get_credentials_for_entry( $entry_id ) {
 		$entry = self::get_entry_by_id( $entry_id );
 		if ( ! $entry ) {
 			return null;
 		}
+		$type = (string) ( $entry['type'] ?? '' );
 		// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces may be public.
-		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+		if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		return self::entry_to_credentials( $entry );
@@ -155,8 +174,9 @@ class API_Keys_Helper {
 	 * @return array{api_key: string, endpoint?: string, org?: string, free_pass_through?: bool}|null
 	 */
 	private static function entry_to_credentials( $entry ) {
+		$type = (string) ( $entry['type'] ?? '' );
 		// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces may be public.
-		if ( ! in_array( ( $entry['type'] ?? '' ), array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+		if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		$creds = array( 'api_key' => $entry['api_key'] ?? '' );
@@ -177,6 +197,11 @@ class API_Keys_Helper {
 		}
 		if ( ! empty( $entry['free_pass_through'] ) ) {
 			$creds['free_pass_through'] = true;
+		}
+		foreach ( array( 'speech_endpoint', 'speech_api_version', 'speech_default_locale' ) as $field ) {
+			if ( isset( $entry[ $field ] ) && '' !== (string) $entry[ $field ] ) {
+				$creds[ $field ] = $entry[ $field ];
+			}
 		}
 		return $creds;
 	}
@@ -262,6 +287,15 @@ class API_Keys_Helper {
 			}
 			if ( isset( $e['endpoint'] ) ) {
 				$entry['endpoint'] = esc_url_raw( $e['endpoint'] );
+			}
+			if ( isset( $e['speech_endpoint'] ) ) {
+				$entry['speech_endpoint'] = esc_url_raw( $e['speech_endpoint'] );
+			}
+			if ( isset( $e['speech_api_version'] ) ) {
+				$entry['speech_api_version'] = sanitize_text_field( $e['speech_api_version'] );
+			}
+			if ( isset( $e['speech_default_locale'] ) ) {
+				$entry['speech_default_locale'] = sanitize_text_field( $e['speech_default_locale'] );
 			}
 			if ( isset( $e['org'] ) ) {
 				$entry['org'] = sanitize_text_field( $e['org'] );

@@ -180,7 +180,7 @@ class Admin_Image_Queue {
 		if ( in_array( $action, array( 'clear_failed', 'clear_stalled', 'clear_completed', 'clear_expired', 'clear_all' ), true ) ) {
 			$message = sprintf(
 				/* translators: %d: job count */
-				_n( 'Cleared %d image job.', 'Cleared %d image jobs.', $job_count, 'alorbach-ai-gateway' ),
+				_n( 'Cleared %d queue job.', 'Cleared %d queue jobs.', $job_count, 'alorbach-ai-gateway' ),
 				$job_count
 			);
 			if ( $attachment_count > 0 ) {
@@ -297,8 +297,8 @@ class Admin_Image_Queue {
 		$nonce      = wp_create_nonce( 'wp_rest' );
 		?>
 		<div class="wrap">
-			<h1><?php esc_html_e( 'Image Queue', 'alorbach-ai-gateway' ); ?></h1>
-			<p class="description"><?php esc_html_e( 'Monitor recent image jobs, active queue state, and per-job details. The list refreshes automatically.', 'alorbach-ai-gateway' ); ?></p>
+			<h1><?php esc_html_e( 'Queue', 'alorbach-ai-gateway' ); ?></h1>
+			<p class="description"><?php esc_html_e( 'Monitor recent image, text, audio, and video jobs with compact request and provider diagnostics. The list refreshes automatically.', 'alorbach-ai-gateway' ); ?></p>
 			<div data-role="queue-notice">
 				<?php if ( $stats_notice ) : ?>
 					<?php Admin_Helper::render_notice( (string) ( $stats_notice['message'] ?? '' ), (string) ( $stats_notice['type'] ?? 'info' ) ); ?>
@@ -329,6 +329,7 @@ class Admin_Image_Queue {
 							<thead>
 								<tr>
 									<th><?php esc_html_e( 'Job', 'alorbach-ai-gateway' ); ?></th>
+									<th><?php esc_html_e( 'Type', 'alorbach-ai-gateway' ); ?></th>
 									<th><?php esc_html_e( 'User', 'alorbach-ai-gateway' ); ?></th>
 									<th><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
 									<th><?php esc_html_e( 'Status', 'alorbach-ai-gateway' ); ?></th>
@@ -337,7 +338,7 @@ class Admin_Image_Queue {
 								</tr>
 							</thead>
 							<tbody data-role="rows">
-								<tr><td colspan="6"><?php esc_html_e( 'Loading...', 'alorbach-ai-gateway' ); ?></td></tr>
+								<tr><td colspan="7"><?php esc_html_e( 'Loading...', 'alorbach-ai-gateway' ); ?></td></tr>
 							</tbody>
 						</table>
 					</div>
@@ -671,7 +672,7 @@ class Admin_Image_Queue {
 					setStats(payload.stats || {});
 					if (!jobs.length) {
 						selectedJobId = null;
-						$rowsEl.html('<tr><td colspan="6">No image jobs found.</td></tr>');
+						$rowsEl.html('<tr><td colspan="7">No queue jobs found.</td></tr>');
 						resetDetails();
 						return;
 					}
@@ -688,6 +689,7 @@ class Admin_Image_Queue {
 						var shortJobId = job.job_id.length > 14 ? job.job_id.slice(0, 14) + '…' : job.job_id;
 						return '<tr class="alorbach-image-queue__row' + selected + '">' +
 							'<td data-label="Job"><button type="button" class="alorbach-image-queue__job-button" data-job-id="' + escapeHtml(job.job_id) + '" title="' + escapeHtml(job.job_id) + '">' + escapeHtml(shortJobId) + '</button></td>' +
+							'<td data-label="Type">' + escapeHtml(job.job_type_label || job.job_type || 'Image') + '</td>' +
 							'<td data-label="User">' + escapeHtml(job.user_label) + '</td>' +
 							'<td data-label="Model">' + escapeHtml(stripModelKey(job.model)) + '</td>' +
 							'<td data-label="Status">' + escapeHtml(job.status_label) + '</td>' +
@@ -792,13 +794,44 @@ class Admin_Image_Queue {
 					}).join('') + '</div>';
 				}
 
+				function renderResultPanel(job, requestText, resultText) {
+					var type = job.job_type || 'image';
+					if (type === 'image') {
+						var loadImagesButton = job.images_included ? '' : '<p><button type="button" class="button button-secondary" data-role="load-images">Load Images</button></p>';
+						return loadImagesButton +
+							'<h3 class="alorbach-image-queue__section-title">Reference Images</h3>' + renderThumbs(job.reference_images) +
+							'<h3 class="alorbach-image-queue__section-title">Preview Frames</h3>' + renderThumbs(job.preview_images) +
+							'<h3 class="alorbach-image-queue__section-title">Final Images</h3>' + renderThumbs(job.final_images);
+					}
+
+					var resultTitle = 'Returned Text';
+					if (type === 'chat') {
+						resultTitle = 'Chat Response';
+					} else if (type === 'video') {
+						resultTitle = 'Returned Media';
+					}
+
+					var requestTitle = type === 'chat' ? 'Chat Log' : 'Request';
+					var html = renderPromptCard(requestTitle, requestText, 'Copy Request');
+					if (resultText) {
+						html += renderPromptCard(resultTitle, resultText, 'Copy Result');
+					} else {
+						html += '<p class="alorbach-image-queue__empty">No returned text was recorded for this job.</p>';
+					}
+					return html;
+				}
+
 				function renderDetails(job) {
 					hasRenderedDetails = true;
-					var loadImagesButton = job.images_included ? '' : '<p><button type="button" class="button button-secondary" data-role="load-images">Load Images</button></p>';
 					var originalPrompt = job.original_prompt || job.prompt || '';
 					var prompt = job.prompt || '';
 					var internalPrompt = job.internal_prompt || '';
 					var revisedPrompt = job.revised_prompt || '';
+					var typeLabel = job.job_type_label || job.job_type || 'Image';
+					var isImageJob = (job.job_type || 'image') === 'image';
+					var assetsTabLabel = isImageJob ? 'Images' : 'Result';
+					var requestText = prompt || originalPrompt || '';
+					var resultText = internalPrompt || revisedPrompt || '';
 					var imageMeta = job.provider_details && job.provider_details.image_metadata ? job.provider_details.image_metadata : null;
 					var actualSize = (imageMeta && imageMeta.width && imageMeta.height) ? (String(imageMeta.width) + 'x' + String(imageMeta.height)) : '';
 					var errorMeta = '';
@@ -822,18 +855,19 @@ class Admin_Image_Queue {
 						'<div class="alorbach-image-queue__tabs" role="tablist" aria-label="Job detail tabs">' +
 							'<button type="button" class="alorbach-image-queue__tab" data-tab="overview" role="tab" aria-selected="false">Overview</button>' +
 							'<button type="button" class="alorbach-image-queue__tab" data-tab="prompts" role="tab" aria-selected="false">Prompts</button>' +
-							'<button type="button" class="alorbach-image-queue__tab" data-tab="images" role="tab" aria-selected="false">Images</button>' +
+							'<button type="button" class="alorbach-image-queue__tab" data-tab="images" role="tab" aria-selected="false">' + escapeHtml(assetsTabLabel) + '</button>' +
 							'<button type="button" class="alorbach-image-queue__tab" data-tab="errors" role="tab" aria-selected="false">Errors</button>' +						'<button type="button" class="alorbach-image-queue__tab" data-tab="logs" role="tab" aria-selected="false">Logs</button>' +						'</div>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="overview">' +
 							'<div class="alorbach-image-queue__meta">' +
 								'<div><span>Status</span><strong>' + escapeHtml(job.status_label) + '</strong></div>' +
+								'<div><span>Type</span><strong>' + escapeHtml(typeLabel) + '</strong></div>' +
 								'<div><span>Progress</span><strong>' + job.progress_percent + '%</strong></div>' +
 								'<div><span>User</span><strong>' + escapeHtml(job.user_label) + '</strong></div>' +
 								'<div><span>Model</span><strong>' + escapeHtml(stripModelKey(job.model)) + '</strong></div>' +
 								'<div><span>Size</span><strong>' + escapeHtml(job.size) + '</strong></div>' +
 								'<div><span>Actual Size</span><strong>' + (actualSize ? escapeHtml(actualSize) : 'Unknown') + '</strong></div>' +
 								'<div><span>Quality</span><strong>' + escapeHtml(job.quality) + '</strong></div>' +
-								'<div><span>Images</span><strong>' + job.n + '</strong></div>' +
+								'<div><span>Outputs</span><strong>' + job.n + '</strong></div>' +
 								'<div><span>References</span><strong>' + (job.reference_count || 0) + '</strong></div>' +
 								'<div><span>Mode</span><strong>' + escapeHtml(job.progress_mode) + '</strong></div>' +
 								'<div><span>Created</span><strong>' + escapeHtml(job.created_at_label) + '</strong></div>' +
@@ -851,10 +885,7 @@ class Admin_Image_Queue {
 							renderPromptCard('Revised Prompt', revisedPrompt, 'Copy Revised') +
 						'</section>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="images" hidden>' +
-							loadImagesButton +
-							'<h3 class="alorbach-image-queue__section-title">Reference Images</h3>' + renderThumbs(job.reference_images) +
-							'<h3 class="alorbach-image-queue__section-title">Preview Frames</h3>' + renderThumbs(job.preview_images) +
-							'<h3 class="alorbach-image-queue__section-title">Final Images</h3>' + renderThumbs(job.final_images) +
+							renderResultPanel(job, requestText, resultText) +
 						'</section>' +
 						'<section class="alorbach-image-queue__tab-panel" data-tab-panel="errors" hidden>' +
 							(hasErrors ? errorsHtml : '<p class="alorbach-image-queue__empty">No errors reported for this job.</p>') +
@@ -890,7 +921,7 @@ class Admin_Image_Queue {
 							return loadDetails(selectedJobId, false, false);
 						}
 					}).catch(function (error) {
-						$rowsEl.html('<tr><td colspan="6">Failed to load queue.</td></tr>');
+						$rowsEl.html('<tr><td colspan="7">Failed to load queue.</td></tr>');
 						$statusEl.text('Failed to load queue: ' + getErrorMessage(error));
 					});
 				}

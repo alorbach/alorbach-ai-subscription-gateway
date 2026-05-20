@@ -66,9 +66,20 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Whether the model ID targets Azure Speech Services transcription.
+	 *
+	 * @param string $model Model ID.
+	 * @return bool
+	 */
+	public static function is_speech_transcription_model( $model ) {
+		$model = strtolower( trim( (string) $model ) );
+		return in_array( $model, array( 'azure-speech', 'speech' ), true );
+	}
+
+	/**
 	 * {@inheritdoc}
 	 */
-	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials, $input_reference = array() ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
@@ -87,6 +98,47 @@ class Azure_Provider extends Provider_Base {
 			'size'     => $size ?: '1280x720',
 			'seconds'  => (string) $seconds,
 		);
+		$input_reference = is_array( $input_reference ) ? $input_reference : array();
+		if ( ! empty( $input_reference ) ) {
+			$b64 = isset( $input_reference['b64_json'] ) && is_string( $input_reference['b64_json'] ) ? trim( $input_reference['b64_json'] ) : '';
+			$mime = isset( $input_reference['mime_type'] ) && is_string( $input_reference['mime_type'] ) ? strtolower( trim( $input_reference['mime_type'] ) ) : 'image/png';
+			if ( '' === $b64 ) {
+				return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference must include base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			$binary = base64_decode( $b64, true );
+			if ( false === $binary || '' === $binary ) {
+				return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference image data could not be decoded.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			$extension = match ( $mime ) {
+				'image/jpeg', 'image/jpg' => 'jpg',
+				'image/webp'              => 'webp',
+				default                   => 'png',
+			};
+			$content_type = in_array( $mime, array( 'image/jpeg', 'image/jpg', 'image/png', 'image/webp' ), true ) ? $mime : 'image/png';
+			if ( 'image/jpg' === $content_type ) {
+				$content_type = 'image/jpeg';
+			}
+			$boundary = wp_generate_password( 24, false );
+			$multipart = '';
+			foreach ( $body as $name => $value ) {
+				$multipart .= '--' . $boundary . "\r\n";
+				$multipart .= 'Content-Disposition: form-data; name="' . $name . '"' . "\r\n\r\n";
+				$multipart .= (string) $value . "\r\n";
+			}
+			$multipart .= '--' . $boundary . "\r\n";
+			$multipart .= 'Content-Disposition: form-data; name="input_reference"; filename="input-reference.' . $extension . '"' . "\r\n";
+			$multipart .= 'Content-Type: ' . $content_type . "\r\n\r\n";
+			$multipart .= $binary . "\r\n";
+			$multipart .= '--' . $boundary . '--' . "\r\n";
+			return array(
+				'url'     => $url,
+				'headers' => array(
+					'Content-Type' => 'multipart/form-data; boundary=' . $boundary,
+					'api-key'     => $api_key,
+				),
+				'body'    => $multipart,
+			);
+		}
 		return array(
 			'url'     => $url,
 			'headers' => array(
@@ -342,7 +394,10 @@ class Azure_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null ) {
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null, $options = array() ) {
+		if ( self::is_speech_transcription_model( $model ) ) {
+			return $this->build_speech_transcribe_request( $file_path, $credentials, $format, $options );
+		}
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
@@ -438,6 +493,171 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Build Azure Speech Services synchronous transcription request.
+	 *
+	 * @param string      $file_path   Audio file path.
+	 * @param array       $credentials Azure credentials.
+	 * @param string|null $format      Audio format hint.
+	 * @param array       $options     Request options.
+	 * @return array|\WP_Error
+	 */
+	private function build_speech_transcribe_request( $file_path, $credentials, $format = null, $options = array() ) {
+		$endpoint = isset( $credentials['speech_endpoint'] ) ? rtrim( trim( (string) $credentials['speech_endpoint'] ), '/' ) : '';
+		$api_key  = isset( $credentials['api_key'] ) ? trim( (string) $credentials['api_key'] ) : '';
+		if ( '' === $endpoint || '' === $api_key ) {
+			return new \WP_Error( 'no_api_key', __( 'Azure Speech Services not configured.', 'alorbach-ai-gateway' ) );
+		}
+
+		$api_version = isset( $credentials['speech_api_version'] ) && '' !== trim( (string) $credentials['speech_api_version'] )
+			? trim( (string) $credentials['speech_api_version'] )
+			: '2024-11-15';
+		$locale = isset( $options['locale'] ) && '' !== trim( (string) $options['locale'] )
+			? trim( (string) $options['locale'] )
+			: ( isset( $options['language'] ) && '' !== trim( (string) $options['language'] )
+				? trim( (string) $options['language'] )
+				: ( isset( $credentials['speech_default_locale'] ) && '' !== trim( (string) $credentials['speech_default_locale'] )
+					? trim( (string) $credentials['speech_default_locale'] )
+					: 'en-US' ) );
+
+		global $wp_filesystem;
+		if ( ! $wp_filesystem ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			WP_Filesystem();
+		}
+		$audio_bytes = $wp_filesystem ? $wp_filesystem->get_contents( $file_path ) : false;
+		if ( false === $audio_bytes || '' === $audio_bytes ) {
+			return new \WP_Error( 'read_error', __( 'Could not read audio file.', 'alorbach-ai-gateway' ) );
+		}
+
+		$format = $format ? strtolower( (string) $format ) : strtolower( pathinfo( $file_path, PATHINFO_EXTENSION ) );
+		$content_type_map = array(
+			'wav'  => 'audio/wav',
+			'mp3'  => 'audio/mpeg',
+			'mp4'  => 'audio/mp4',
+			'm4a'  => 'audio/mp4',
+			'ogg'  => 'audio/ogg',
+			'opus' => 'audio/ogg',
+			'flac' => 'audio/flac',
+			'webm' => 'audio/webm',
+		);
+		$content_type = isset( $content_type_map[ $format ] ) ? $content_type_map[ $format ] : 'application/octet-stream';
+		$definition = array(
+			'locales'                    => array( $locale ),
+			'profanityFilterMode'        => 'None',
+			'wordLevelTimestampsEnabled' => true,
+		);
+
+		$boundary = wp_generate_password( 24, false );
+		$body  = '--' . $boundary . "\r\n";
+		$body .= 'Content-Disposition: form-data; name="audio"; filename="' . basename( $file_path ) . '"' . "\r\n";
+		$body .= 'Content-Type: ' . $content_type . "\r\n\r\n";
+		$body .= $audio_bytes . "\r\n";
+		$body .= '--' . $boundary . "\r\n";
+		$body .= 'Content-Disposition: form-data; name="definition"' . "\r\n";
+		$body .= 'Content-Type: application/json' . "\r\n\r\n";
+		$body .= wp_json_encode( $definition ) . "\r\n";
+		$body .= '--' . $boundary . '--' . "\r\n";
+
+		$endpoint_path = '/speechtotext/transcriptions:transcribe';
+		return array(
+			'url'              => $endpoint . $endpoint_path . '?api-version=' . rawurlencode( $api_version ),
+			'headers'          => array(
+				'Content-Type' => 'multipart/form-data; boundary=' . $boundary,
+				'Ocp-Apim-Subscription-Key' => $api_key,
+			),
+			'body'             => $body,
+			'response_format'  => 'azure_speech',
+			'provider_details' => array(
+				'provider'      => 'azure_speech',
+				'endpoint_path' => $endpoint_path,
+				'locale'        => $locale,
+				'api_version'   => $api_version,
+				'audio_format'  => $format,
+			),
+		);
+	}
+
+	/**
+	 * Normalize Azure Speech transcription response to the Gateway transcription shape.
+	 *
+	 * @param array  $body_response Decoded provider response.
+	 * @param string $raw_body      Raw response body.
+	 * @param array  $request       Original provider request metadata.
+	 * @return array
+	 */
+	public function parse_transcribe_response( $body_response, $raw_body, $request = array() ) {
+		if ( ! is_array( $body_response ) ) {
+			return array( 'text' => (string) $raw_body );
+		}
+
+		$combined_text = '';
+		if ( ! empty( $body_response['combinedPhrases'] ) && is_array( $body_response['combinedPhrases'] ) ) {
+			$parts = array();
+			foreach ( $body_response['combinedPhrases'] as $phrase ) {
+				if ( is_array( $phrase ) && isset( $phrase['text'] ) && '' !== trim( (string) $phrase['text'] ) ) {
+					$parts[] = trim( (string) $phrase['text'] );
+				}
+			}
+			$combined_text = trim( implode( ' ', $parts ) );
+		}
+
+		$words = array();
+		$segments = array();
+		$phrase_texts = array();
+		if ( ! empty( $body_response['phrases'] ) && is_array( $body_response['phrases'] ) ) {
+			foreach ( $body_response['phrases'] as $phrase ) {
+				if ( ! is_array( $phrase ) ) {
+					continue;
+				}
+				$phrase_text = isset( $phrase['text'] ) ? trim( (string) $phrase['text'] ) : '';
+				$start = isset( $phrase['offsetMilliseconds'] ) ? ( (float) $phrase['offsetMilliseconds'] / 1000.0 ) : 0.0;
+				$duration = isset( $phrase['durationMilliseconds'] ) ? ( (float) $phrase['durationMilliseconds'] / 1000.0 ) : 0.0;
+				if ( '' !== $phrase_text ) {
+					$phrase_texts[] = $phrase_text;
+					$segments[] = array(
+						'text'  => $phrase_text,
+						'start' => $start,
+						'end'   => $start + $duration,
+					);
+				}
+				if ( ! empty( $phrase['words'] ) && is_array( $phrase['words'] ) ) {
+					foreach ( $phrase['words'] as $word ) {
+						if ( ! is_array( $word ) ) {
+							continue;
+						}
+						$word_text = isset( $word['text'] ) ? trim( (string) $word['text'] ) : '';
+						if ( '' === $word_text ) {
+							continue;
+						}
+						$word_start = isset( $word['offsetMilliseconds'] ) ? ( (float) $word['offsetMilliseconds'] / 1000.0 ) : 0.0;
+						$word_duration = isset( $word['durationMilliseconds'] ) ? ( (float) $word['durationMilliseconds'] / 1000.0 ) : 0.0;
+						$words[] = array(
+							'word'  => $word_text,
+							'start' => $word_start,
+							'end'   => $word_start + $word_duration,
+						);
+					}
+				}
+			}
+		}
+
+		$text = '' !== $combined_text ? $combined_text : trim( implode( ' ', $phrase_texts ) );
+		$provider_details = isset( $request['provider_details'] ) && is_array( $request['provider_details'] ) ? $request['provider_details'] : array();
+		$provider_details['word_count'] = count( $words );
+		$provider_details['segment_count'] = count( $segments );
+		if ( isset( $body_response['durationMilliseconds'] ) ) {
+			$provider_details['duration_seconds'] = (float) $body_response['durationMilliseconds'] / 1000.0;
+		}
+
+		return array(
+			'text'             => $text,
+			'words'            => $words,
+			'segments'         => $segments,
+			'provider_details' => $provider_details,
+		);
+	}
+
+	/**
 	 * Check if endpoint is a Foundry-style host (services, models, or inference).
 	 *
 	 * @param string $endpoint Endpoint URL.
@@ -456,61 +676,184 @@ class Azure_Provider extends Provider_Base {
 	 */
 	public function verify_key( $credentials ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? trim( $credentials['endpoint'] ) : '';
-		$api_key  = $credentials['api_key'] ?? '';
-		if ( empty( $endpoint ) || empty( $api_key ) ) {
-			return array( 'success' => false, 'message' => __( 'Azure OpenAI not configured.', 'alorbach-ai-gateway' ) );
+		$api_key  = isset( $credentials['api_key'] ) ? trim( (string) $credentials['api_key'] ) : '';
+		$speech_endpoint = isset( $credentials['speech_endpoint'] ) ? trim( (string) $credentials['speech_endpoint'] ) : '';
+		if ( '' === $api_key ) {
+			return array( 'success' => false, 'message' => __( 'Azure API key not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$endpoint = rtrim( $endpoint, '/' );
-		if ( strpos( $endpoint, '.azure.com' ) === false ) {
-			return array( 'success' => false, 'message' => __( 'Endpoint must end with .azure.com (e.g. https://xxx.services.ai.azure.com)', 'alorbach-ai-gateway' ) );
+		if ( '' === $endpoint && '' === $speech_endpoint ) {
+			return array( 'success' => false, 'message' => __( 'Azure endpoint not configured.', 'alorbach-ai-gateway' ) );
 		}
-		$is_foundry = self::is_foundry_endpoint( $endpoint );
-		$urls       = $is_foundry
-			? array(
-				$endpoint . '/openai/v1/models',
-				$endpoint . '/openai/models?api-version=2024-12-01-preview',
-				$endpoint . '/openai/models?api-version=2024-10-21',
-				$endpoint . '/openai/deployments?api-version=2024-02-15-preview',
-				$endpoint . '/openai/deployments?api-version=2023-03-15-preview',
-			)
-			: array(
-				$endpoint . '/openai/models?api-version=2024-12-01-preview',
-				$endpoint . '/openai/models?api-version=2024-10-21',
-			);
+
+		$checks = array();
 		$last_error   = '';
 		$last_body    = '';
 		$last_url     = '';
 		$debug_enabled = (bool) get_option( 'alorbach_debug_enabled', false ) && current_user_can( 'manage_options' );
-		foreach ( $urls as $url ) {
-			$response = wp_remote_get(
-				$url,
-				array(
-					'headers' => array( 'api-key' => $api_key ),
-					'timeout' => 15,
-				)
-			);
-			if ( is_wp_error( $response ) ) {
-				$last_error = $response->get_error_message();
-				$last_url   = $url;
-				continue;
+
+		if ( '' !== $endpoint ) {
+			$endpoint = rtrim( $endpoint, '/' );
+			if ( strpos( $endpoint, '.azure.com' ) === false ) {
+				$checks['azure_openai'] = array(
+					'label'   => __( 'Azure OpenAI / Foundry', 'alorbach-ai-gateway' ),
+					'success' => false,
+					'message' => __( 'Endpoint must end with .azure.com (e.g. https://xxx.services.ai.azure.com)', 'alorbach-ai-gateway' ),
+				);
+			} else {
+				$is_foundry = self::is_foundry_endpoint( $endpoint );
+				$urls       = $is_foundry
+					? array(
+						$endpoint . '/openai/v1/models',
+						$endpoint . '/openai/models?api-version=2024-12-01-preview',
+						$endpoint . '/openai/models?api-version=2024-10-21',
+						$endpoint . '/openai/deployments?api-version=2024-02-15-preview',
+						$endpoint . '/openai/deployments?api-version=2023-03-15-preview',
+					)
+					: array(
+						$endpoint . '/openai/models?api-version=2024-12-01-preview',
+						$endpoint . '/openai/models?api-version=2024-10-21',
+					);
+				foreach ( $urls as $url ) {
+					$response = wp_remote_get(
+						$url,
+						array(
+							'headers' => array( 'api-key' => $api_key ),
+							'timeout' => 15,
+						)
+					);
+					if ( is_wp_error( $response ) ) {
+						$last_error = $response->get_error_message();
+						$last_url   = $url;
+						continue;
+					}
+					$code = wp_remote_retrieve_response_code( $response );
+					if ( $code < 400 ) {
+						$last_error = '';
+						break;
+					}
+					$body       = json_decode( wp_remote_retrieve_body( $response ), true );
+					$last_error = isset( $body['error']['message'] ) ? sanitize_text_field( (string) $body['error']['message'] ) : __( 'Invalid Azure configuration.', 'alorbach-ai-gateway' );
+					$last_body  = wp_remote_retrieve_body( $response );
+					$last_url   = $url;
+				}
+				$checks['azure_openai'] = array(
+					'label'   => __( 'Azure OpenAI / Foundry', 'alorbach-ai-gateway' ),
+					'success' => '' === $last_error,
+					'message' => '' === $last_error ? __( 'OK', 'alorbach-ai-gateway' ) : $last_error,
+				);
+				if ( $debug_enabled && '' !== $last_error ) {
+					$checks['azure_openai']['_debug'] = array(
+						'last_url' => $last_url,
+						'last_body' => $last_body,
+					);
+				}
 			}
-			$code = wp_remote_retrieve_response_code( $response );
-			if ( $code < 400 ) {
-				return array( 'success' => true );
-			}
-			$body       = json_decode( wp_remote_retrieve_body( $response ), true );
-			$last_error = isset( $body['error']['message'] ) ? $body['error']['message'] : __( 'Invalid Azure configuration.', 'alorbach-ai-gateway' );
-			$last_body  = wp_remote_retrieve_body( $response );
-			$last_url   = $url;
 		}
-		$result = array( 'success' => false, 'message' => $last_error );
-		if ( $debug_enabled ) {
-			$result['_debug'] = array(
-				'last_url'  => $last_url,
-				'last_body' => $last_body,
+
+		$speech_result = $this->verify_speech_endpoint( $credentials );
+		if ( ! empty( $speech_result['verified'] ) || '' !== $speech_endpoint ) {
+			$checks['azure_speech'] = array(
+				'label'   => __( 'Azure Speech', 'alorbach-ai-gateway' ),
+				'success' => ! empty( $speech_result['success'] ),
+				'message' => ! empty( $speech_result['message'] ) ? $speech_result['message'] : __( 'OK', 'alorbach-ai-gateway' ),
 			);
+		}
+
+		$success = true;
+		foreach ( $checks as $check ) {
+			if ( empty( $check['success'] ) ) {
+				$success = false;
+				break;
+			}
+		}
+		$result = array(
+			'success' => $success,
+			'checks'  => $checks,
+		);
+		if ( ! empty( $checks['azure_openai'] ) && ! empty( $checks['azure_speech'] ) ) {
+			$result['message'] = $success
+				? __( 'Azure OpenAI / Foundry and Azure Speech verified.', 'alorbach-ai-gateway' )
+				: __( 'One or more Azure checks failed.', 'alorbach-ai-gateway' );
+		} elseif ( ! empty( $checks['azure_openai'] ) ) {
+			$result['message'] = $checks['azure_openai']['message'];
+		} elseif ( ! empty( $checks['azure_speech'] ) ) {
+			$result['message'] = $checks['azure_speech']['message'];
 		}
 		return $result;
+	}
+
+	/**
+	 * Verify the optional Azure Speech Services endpoint for an Azure entry.
+	 *
+	 * @param array $credentials Azure credentials.
+	 * @return array{success: bool, message?: string, verified?: bool}
+	 */
+	private function verify_speech_endpoint( $credentials ) {
+		$speech_endpoint = isset( $credentials['speech_endpoint'] ) ? rtrim( trim( (string) $credentials['speech_endpoint'] ), '/' ) : '';
+		if ( '' === $speech_endpoint ) {
+			return array( 'success' => true, 'verified' => false );
+		}
+
+		$api_key = isset( $credentials['api_key'] ) ? trim( (string) $credentials['api_key'] ) : '';
+		if ( '' === $api_key ) {
+			return array(
+				'success' => false,
+				'message' => __( 'API key not configured.', 'alorbach-ai-gateway' ),
+			);
+		}
+
+		$host = wp_parse_url( $speech_endpoint, PHP_URL_HOST );
+		$host = is_string( $host ) ? strtolower( $host ) : '';
+		if (
+			'' === $host ||
+			(
+				! str_ends_with( $host, '.cognitiveservices.azure.com' ) &&
+				! str_ends_with( $host, '.api.cognitive.microsoft.com' )
+			)
+		) {
+			return array(
+				'success' => false,
+				'message' => __( 'Endpoint must be a Cognitive Services Speech endpoint, for example https://westus.api.cognitive.microsoft.com or https://name.cognitiveservices.azure.com.', 'alorbach-ai-gateway' ),
+			);
+		}
+
+		$api_version = isset( $credentials['speech_api_version'] ) && '' !== trim( (string) $credentials['speech_api_version'] )
+			? trim( (string) $credentials['speech_api_version'] )
+			: '2024-11-15';
+		$url = $speech_endpoint . '/speechtotext/models/base?api-version=' . rawurlencode( $api_version );
+		$response = wp_remote_get(
+			$url,
+			array(
+				'headers' => array(
+					'Ocp-Apim-Subscription-Key' => $api_key,
+				),
+				'timeout' => 15,
+			)
+		);
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'success' => false,
+				'message' => $response->get_error_message(),
+			);
+		}
+
+		$code = wp_remote_retrieve_response_code( $response );
+		if ( $code < 400 ) {
+			return array( 'success' => true, 'verified' => true );
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		$message = isset( $body['error']['message'] )
+			? sanitize_text_field( (string) $body['error']['message'] )
+			: sprintf(
+				/* translators: %d: HTTP response status code */
+				__( 'HTTP %d from Azure Speech endpoint.', 'alorbach-ai-gateway' ),
+				(int) $code
+			);
+		return array(
+			'success' => false,
+			'message' => $message,
+		);
 	}
 
 	/**

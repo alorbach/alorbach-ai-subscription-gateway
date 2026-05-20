@@ -144,12 +144,12 @@ class Admin_Demo_Defaults {
 	}
 
 	/**
-	 * Get available video models from video costs.
+	 * Get available video models from imported video model entries.
 	 *
-	 * @return array Model IDs.
+	 * @return array<string,string> Model key => display label.
 	 */
 	public static function get_video_models() {
-		return self::get_sorted_option_keys( 'alorbach_video_costs', array( 'sora-2' ) );
+		return self::get_entry_scoped_models( 'alorbach_video_models', 'alorbach_video_costs', array( 'sora-2' ), 'video' );
 	}
 
 	/**
@@ -158,7 +158,7 @@ class Admin_Demo_Defaults {
 	 * @return array Model IDs.
 	 */
 	public static function get_audio_models() {
-		return self::get_sorted_option_keys( 'alorbach_audio_costs', array( 'whisper-1' ) );
+		return self::get_sorted_option_keys( 'alorbach_audio_costs', array( 'whisper-1', 'azure-speech' ) );
 	}
 
 	/**
@@ -173,12 +173,141 @@ class Admin_Demo_Defaults {
 		$costs  = is_array( $costs ) ? $costs : array();
 		$models = array_keys( $costs );
 		if ( $option_key === 'alorbach_audio_costs' ) {
+			$models[] = 'azure-speech';
+			$models = array_unique( $models );
 			$models = self::filter_models_by_capability( $models, 'audio' );
 		} elseif ( $option_key === 'alorbach_video_costs' ) {
 			$models = self::filter_models_by_capability( $models, 'video' );
 		}
 		sort( $models );
 		return ! empty( $models ) ? $models : $default_fallback;
+	}
+
+	/**
+	 * Get entry-aware models from a model list option, falling back to cost keys.
+	 *
+	 * @param string $model_list_option Option containing plain or compound model IDs.
+	 * @param string $cost_option       Cost option keyed by plain model ID.
+	 * @param array  $default_fallback  Default plain model IDs.
+	 * @param string $capability_group  images, audio, or video.
+	 * @return array<string,string> Model key => display label.
+	 */
+	private static function get_entry_scoped_models( $model_list_option, $cost_option, $default_fallback, $capability_group ) {
+		$model_ids = get_option( $model_list_option, array() );
+		$model_ids = is_array( $model_ids ) ? array_values( array_filter( $model_ids, 'is_string' ) ) : array();
+		if ( empty( $model_ids ) ) {
+			$model_ids = self::get_sorted_option_keys( $cost_option, $default_fallback );
+		}
+		$model_ids = self::filter_models_by_capability( $model_ids, $capability_group );
+
+		$models = array();
+		foreach ( $model_ids as $model_id ) {
+			$parsed = \Alorbach\AIGateway\Cost_Matrix::parse_model_key( $model_id );
+			$entry_id = $parsed['entry_id'];
+			$plain_name = $parsed['model'];
+
+			if ( '' === $entry_id ) {
+				$entries = self::get_entries_for_model_capability( $plain_name, $capability_group );
+				if ( count( $entries ) > 1 ) {
+					foreach ( $entries as $entry ) {
+						$entry_key = $entry['id'] . '::' . $plain_name;
+						if ( ! isset( $models[ $entry_key ] ) ) {
+							$models[ $entry_key ] = self::format_entry_model_label( $plain_name, $entry['id'] );
+						}
+					}
+					continue;
+				}
+			}
+
+			$key = $entry_id ? $entry_id . '::' . $plain_name : $plain_name;
+			if ( ! isset( $models[ $key ] ) ) {
+				$models[ $key ] = $entry_id ? self::format_entry_model_label( $plain_name, $entry_id ) : $plain_name;
+			}
+		}
+
+		if ( empty( $models ) ) {
+			foreach ( $default_fallback as $fallback ) {
+				$models[ $fallback ] = $fallback;
+			}
+		}
+		asort( $models );
+		return $models;
+	}
+
+	/**
+	 * Find enabled API key entries that can run a model for a capability.
+	 *
+	 * @param string $model            Plain model ID.
+	 * @param string $capability_group images, audio, or video.
+	 * @return array<int,array>
+	 */
+	private static function get_entries_for_model_capability( $model, $capability_group ) {
+		$entries = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
+		$result  = array();
+		foreach ( $entries as $entry ) {
+			if ( empty( $entry['enabled'] ) || empty( $entry['id'] ) || empty( $entry['type'] ) ) {
+				continue;
+			}
+			if ( ! self::entry_type_matches_model( $entry['type'], $model ) ) {
+				continue;
+			}
+			$provider = \Alorbach\AIGateway\Providers\Provider_Registry::get( $entry['type'] );
+			if ( ! $provider ) {
+				continue;
+			}
+			if ( 'video' === $capability_group && ! $provider->supports_video() ) {
+				continue;
+			}
+			if ( 'audio' === $capability_group && ! $provider->supports_audio() ) {
+				continue;
+			}
+			if ( 'images' === $capability_group && ! $provider->supports_images() ) {
+				continue;
+			}
+			$result[] = $entry;
+		}
+		return $result;
+	}
+
+	/**
+	 * Check whether a provider type is a plausible owner for a plain model ID.
+	 *
+	 * @param string $entry_type Provider type.
+	 * @param string $model      Plain model ID.
+	 * @return bool
+	 */
+	private static function entry_type_matches_model( $entry_type, $model ) {
+		$model_lower = strtolower( (string) $model );
+		if ( strpos( $model_lower, 'sora' ) === 0 ) {
+			return in_array( $entry_type, array( 'openai', 'azure' ), true );
+		}
+		if ( strpos( $model_lower, 'veo-' ) === 0 || strpos( $model_lower, 'gemini' ) === 0 ) {
+			return 'google' === $entry_type;
+		}
+		if ( strpos( $model_lower, 'hf-space:' ) === 0 ) {
+			return 'huggingface_spaces' === $entry_type;
+		}
+		if ( strpos( $model_lower, '/' ) !== false ) {
+			return in_array( $entry_type, array( 'huggingface', 'github_models' ), true );
+		}
+		return true;
+	}
+
+	/**
+	 * Format a model label with its API key entry name.
+	 *
+	 * @param string $model    Plain model ID.
+	 * @param string $entry_id API key entry ID.
+	 * @return string
+	 */
+	private static function format_entry_model_label( $model, $entry_id ) {
+		$entry = \Alorbach\AIGateway\API_Keys_Helper::get_entry_by_id( $entry_id );
+		if ( ! $entry ) {
+			return $model;
+		}
+		$entry_type = ucfirst( $entry['type'] ?? '' );
+		$entry_name = $entry['name'] ?? $entry_id;
+		return $model . ' (' . $entry_type . ' / ' . $entry_name . ')';
 	}
 
 	/**

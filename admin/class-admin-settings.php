@@ -140,7 +140,46 @@ class Admin_Settings {
 	 */
 	public static function get_default_video_model( $video_models ) {
 		self::maybe_migrate_general_defaults();
-		return (string) get_option( 'alorbach_default_video_model', $video_models[0] ?? 'sora-2' );
+		return self::normalize_model_key(
+			(string) get_option( 'alorbach_default_video_model', '' ),
+			$video_models,
+			'sora-2'
+		);
+	}
+
+	/**
+	 * Normalize a saved model default against flat or keyed model options.
+	 *
+	 * @param string $stored   Saved option value.
+	 * @param array  $models   Available models.
+	 * @param string $fallback Fallback model.
+	 * @return string
+	 */
+	private static function normalize_model_key( $stored, $models, $fallback ) {
+		$models = is_array( $models ) ? $models : array();
+		if ( empty( $models ) ) {
+			return $stored ?: $fallback;
+		}
+
+		$options = array();
+		foreach ( $models as $key => $value ) {
+			$options[] = is_int( $key ) ? (string) $value : (string) $key;
+		}
+
+		if ( in_array( $stored, $options, true ) ) {
+			return $stored;
+		}
+
+		if ( '' !== $stored && false === strpos( $stored, '::' ) ) {
+			foreach ( $options as $option ) {
+				$parsed = \Alorbach\AIGateway\Cost_Matrix::parse_model_key( $option );
+				if ( $parsed['model'] === $stored ) {
+					return $option;
+				}
+			}
+		}
+
+		return $options[0] ?? $fallback;
 	}
 
 	/**
@@ -399,8 +438,11 @@ class Admin_Settings {
 								<th scope="row"><label for="alorbach_default_video_model"><?php esc_html_e( 'Default video model', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<select name="alorbach_default_video_model" id="alorbach_default_video_model">
-										<?php foreach ( $video_models as $model ) : ?>
-											<option value="<?php echo esc_attr( $model ); ?>" <?php selected( $default_video_model, $model ); ?>><?php echo esc_html( $model ); ?></option>
+										<?php foreach ( $video_models as $model_value => $model_label ) : ?>
+											<?php
+											$model_value = is_int( $model_value ) ? $model_label : $model_value;
+											?>
+											<option value="<?php echo esc_attr( $model_value ); ?>" <?php selected( $default_video_model, $model_value ); ?>><?php echo esc_html( $model_label ); ?></option>
 										<?php endforeach; ?>
 									</select>
 								</td>

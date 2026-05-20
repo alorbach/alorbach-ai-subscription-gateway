@@ -63,7 +63,7 @@ All pages are under the **AI Gateway** top-level menu.
 | **Settings** | Tabbed gateway-wide defaults, rate limits, quotas, billing/account URLs, provider import settings, advanced controls |
 | **Models** | Import and manage AI models with per-model pricing |
 | **Demo Defaults** | Demo-only UI controls and sample page creation |
-| **Image Queue** | Monitor recent image jobs, prompts, progress, previews, and final outputs |
+| **Queue** | Monitor recent image, text, audio, and video jobs with prompts, progress, provider details, and outputs |
 | **Plans** | Manage configurable paid plans plus the protected free Basic fallback plan |
 | **User Plans** | Review each user's resolved plan and assign or clear manual plan overrides |
 | **User Balance** | Manually credit or adjust individual users |
@@ -124,7 +124,8 @@ Used for image generation via `/images` or the async image-job endpoints.
 Used for speech-to-text transcription via `/transcribe`.
 
 - Typical use cases: transcription, dictated notes, uploaded audio processing
-- Main providers: OpenAI, Azure OpenAI
+- Main providers: OpenAI, Azure OpenAI, Azure Speech Services
+- Use model `azure-speech` for Azure Speech Services transcription with word-level timestamps; `speech` is accepted as a request alias.
 - Demo surface: `[alorbach_demo_transcribe]`
 
 ### Video Models
@@ -228,9 +229,9 @@ Base URL: `/wp-json/alorbach/v1`
 | `POST` | `/admin/reset-models` | Reset models to defaults |
 | `POST` | `/admin/refresh-azure-prices` | Refresh Azure retail pricing |
 | `POST` | `/admin/save-google-whitelist` | Configure Google API whitelist |
-| `GET` | `/admin/image-jobs` | List recent image jobs for queue monitoring |
-| `GET` | `/admin/image-jobs/<job_id>` | Read one image job detail payload |
-| `POST` | `/admin/image-jobs/actions` | Run image queue maintenance actions |
+| `GET` | `/admin/image-jobs` | List recent queue jobs for monitoring |
+| `GET` | `/admin/image-jobs/<job_id>` | Read one queue job detail payload |
+| `POST` | `/admin/image-jobs/actions` | Run queue maintenance actions |
 
 ### Image Job Notes
 
@@ -238,7 +239,8 @@ Base URL: `/wp-json/alorbach/v1`
 - The image sample page now prefers `/images/jobs` and uses `/images/jobs/<job_id>/stream` plus status polling for preview-capable models.
 - `/me/models` includes image preview/progress capability metadata used by the sample UI.
 - Credits are checked before job creation and deducted only after successful completion.
-- Preview images can be inspected in both the sample page and the Image Queue admin screen when the selected model supports them.
+- Preview images can be inspected in both the sample page and the Queue admin screen when the selected model supports them.
+- Synchronous chat, transcription, and video requests add compact Queue diagnostics for debugging prompts, provider responses, costs, and errors.
 
 ---
 

@@ -76,6 +76,17 @@ class Admin_API_Keys {
 				if ( in_array( $type, array( 'azure', 'huggingface', 'huggingface_spaces' ), true ) && isset( $e['endpoint'] ) ) {
 					$entry['endpoint'] = esc_url_raw( wp_unslash( $e['endpoint'] ) );
 				}
+				if ( 'azure' === $type ) {
+					if ( isset( $e['speech_endpoint'] ) ) {
+						$entry['speech_endpoint'] = esc_url_raw( wp_unslash( $e['speech_endpoint'] ) );
+					}
+					if ( isset( $e['speech_api_version'] ) ) {
+						$entry['speech_api_version'] = sanitize_text_field( wp_unslash( $e['speech_api_version'] ) );
+					}
+					if ( isset( $e['speech_default_locale'] ) ) {
+						$entry['speech_default_locale'] = sanitize_text_field( wp_unslash( $e['speech_default_locale'] ) );
+					}
+				}
 				if ( $type === 'huggingface_spaces' ) {
 					if ( isset( $e['space_id'] ) ) {
 						$entry['space_id'] = sanitize_text_field( wp_unslash( $e['space_id'] ) );
@@ -178,6 +189,8 @@ class Admin_API_Keys {
 			.alorbach-api-keys tr[data-type="huggingface"] .entry-endpoint,
 			.alorbach-api-keys tr[data-type="huggingface_spaces"] .entry-endpoint { visibility: visible; }
 			.alorbach-api-keys tr[data-type="github_models"] .entry-org, .alorbach-api-keys tr[data-type="github_models"] .entry-free { visibility: visible; }
+			.alorbach-api-keys .azure-speech-extra-fields { display: none; margin-top: 6px; gap: 6px; }
+			.alorbach-api-keys tr[data-type="azure"] .azure-speech-extra-fields { display: grid; }
 			.alorbach-api-keys tr[data-type="codex"] .entry-endpoint,
 			.alorbach-api-keys tr[data-type="codex"] .entry-org { display: none; }
 			.alorbach-api-keys .spaces-extra-fields { display: none; margin-top: 6px; }
@@ -238,6 +251,32 @@ class Admin_API_Keys {
 			var hideText = <?php echo wp_json_encode( __( 'Hide', 'alorbach-ai-gateway' ) ); ?>;
 			var typeOptions = <?php echo wp_json_encode( self::$type_options ); ?>;
 
+			function renderTestResult(resultEl, data) {
+				resultEl.textContent = '';
+				resultEl.style.color = '';
+				if (data && data.checks && typeof data.checks === 'object') {
+					var order = ['azure_openai', 'azure_speech'];
+					Object.keys(data.checks).forEach(function(key) {
+						if (order.indexOf(key) === -1) order.push(key);
+					});
+					order.forEach(function(key) {
+						var check = data.checks[key];
+						if (!check) return;
+						var line = document.createElement('span');
+						line.className = 'alorbach-test-result-line';
+						line.style.display = 'block';
+						line.style.color = check.success ? 'green' : 'red';
+						var label = check.label || key;
+						var message = check.message || (check.success ? okText : errText);
+						line.textContent = label + ': ' + message;
+						resultEl.appendChild(line);
+					});
+					return;
+				}
+				resultEl.textContent = (data && data.message) || (data && data.success ? okText : errText);
+				resultEl.style.color = data && data.success ? 'green' : 'red';
+			}
+
 			function initRow(row) {
 				var typeSel = row.querySelector('select[name*="[type]"]');
 				var toggleBtn = row.querySelector('.alorbach-toggle-pw');
@@ -281,13 +320,7 @@ class Admin_API_Keys {
 							headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
 							body: JSON.stringify(body)
 						}).then(function(r) { return r.json(); }).then(function(data) {
-							if (data.success) {
-								resultEl.textContent = okText;
-								resultEl.style.color = 'green';
-							} else {
-								resultEl.innerHTML = data.message || errText;
-								resultEl.style.color = 'red';
-							}
+							renderTestResult(resultEl, data);
 						}).catch(function(err) {
 							resultEl.textContent = err.message || errText;
 							resultEl.style.color = 'red';
@@ -372,13 +405,14 @@ class Admin_API_Keys {
 				); ?>
 				<?php self::render_setup_guide_card(
 					__( 'Azure OpenAI / Foundry', 'alorbach-ai-gateway' ),
-					__( 'Use this when your models are deployed in Azure OpenAI or Azure AI Foundry and require both a key and a base endpoint.', 'alorbach-ai-gateway' ),
+					__( 'Use this when your models are deployed in Azure OpenAI or Azure AI Foundry. The same Azure API key can also be used with Azure Speech Services for azure-speech transcription.', 'alorbach-ai-gateway' ),
 					array(
 						__( 'In the Azure portal open your Azure OpenAI or Azure AI Foundry resource.', 'alorbach-ai-gateway' ),
 						__( 'Copy one of the API keys from Keys and Endpoint.', 'alorbach-ai-gateway' ),
 						__( 'Copy the resource endpoint URL shown by Azure.', 'alorbach-ai-gateway' ),
 						__( 'In the table above add a row with type "Azure OpenAI / Foundry".', 'alorbach-ai-gateway' ),
 						__( 'Paste the API key into API Key and the Azure resource URL into Endpoint.', 'alorbach-ai-gateway' ),
+						__( 'For Azure Speech Services, fill the Azure Speech endpoint, API version, and default locale in the extra Azure Speech fields. The normal API Key field is used for Speech requests too.', 'alorbach-ai-gateway' ),
 						__( 'Save API Keys, then click Test.', 'alorbach-ai-gateway' ),
 					)
 				); ?>
@@ -486,6 +520,9 @@ class Admin_API_Keys {
 		$enabled  = ! empty( $entry['enabled'] );
 		$name     = $entry['name'] ?? '';
 		$endpoint = $entry['endpoint'] ?? '';
+		$speech_endpoint = $entry['speech_endpoint'] ?? '';
+		$speech_api_version = $entry['speech_api_version'] ?? '2024-11-15';
+		$speech_default_locale = $entry['speech_default_locale'] ?? 'en-US';
 		$space_id = $entry['space_id'] ?? '';
 		$request_mode = $entry['request_mode'] ?? 'custom_http';
 		$schema_preset = $entry['schema_preset'] ?? '';
@@ -560,6 +597,11 @@ class Admin_API_Keys {
 			<?php if ( $type !== 'codex' ) : ?>
 			<td class="entry-endpoint">
 				<input type="url" name="entries[<?php echo esc_attr( $index ); ?>][endpoint]" value="<?php echo esc_attr( $endpoint ); ?>" placeholder="<?php echo esc_attr( $endpoint_placeholder ); ?>" class="large-text" />
+				<div class="azure-speech-extra-fields">
+					<input type="url" name="entries[<?php echo esc_attr( $index ); ?>][speech_endpoint]" value="<?php echo esc_attr( $speech_endpoint ); ?>" placeholder="Azure Speech endpoint, e.g. https://westeurope.api.cognitive.microsoft.com" class="large-text" />
+					<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][speech_api_version]" value="<?php echo esc_attr( $speech_api_version ); ?>" placeholder="2024-11-15" class="regular-text" />
+					<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][speech_default_locale]" value="<?php echo esc_attr( $speech_default_locale ); ?>" placeholder="en-US" class="regular-text" />
+				</div>
 				<div class="spaces-extra-fields">
 					<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][space_id]" value="<?php echo esc_attr( $space_id ); ?>" placeholder="owner/space-name" class="regular-text" />
 					<select name="entries[<?php echo esc_attr( $index ); ?>][request_mode]">

@@ -833,7 +833,7 @@ class Admin_Cost_Matrix {
 				</div>
 
 				<h2><?php esc_html_e( 'Audio (transcription)', 'alorbach-ai-gateway' ); ?></h2>
-				<p class="description"><?php esc_html_e( 'Cost per second of audio by model. Add custom models as needed. Test works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-audio-1.5. TTS models (*-tts) use a different API.', 'alorbach-ai-gateway' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Cost per second of audio by model. Add custom models as needed. Test works for whisper-1, gpt-4o-transcribe, gpt-4o-mini-transcribe, gpt-audio-1.5, and azure-speech. TTS models (*-tts) use a different API.', 'alorbach-ai-gateway' ); ?></p>
 				<div class="alorbach-cost-grid-wrapper">
 					<table class="alorbach-cost-grid form-table">
 						<thead>

@@ -275,12 +275,16 @@ Request fields:
 - `duration_seconds` optional
 - `model` optional
 - `prompt` optional
+- `locale` optional for Azure Speech Services, for example `en-US` or `de-DE`
+- `language` optional fallback when `locale` is not provided
 
 Typical use cases:
 
 - uploaded audio transcription
 - dictated notes
 - speech-to-text processing in WordPress integrations
+
+Use `model: "azure-speech"` to route transcription through Azure Speech Services inside the Gateway's Azure provider. `speech` is accepted as a request alias. Azure Speech responses are normalized to `text`, `words` as `{ word, start, end }` in seconds, and `segments` when phrase timing is available.
 
 ### `POST /video`
 
@@ -497,7 +501,8 @@ Used for image generation via `/images` or the async image-job endpoints.
 Used for speech-to-text transcription via `/transcribe`.
 
 - typical use cases: transcription, dictated notes, uploaded audio processing
-- main providers: OpenAI, Azure OpenAI
+- main providers: OpenAI, Azure OpenAI, Azure Speech Services
+- `azure-speech` uses Azure Speech Services for transcription with word-level timestamps
 
 ### Video Models
 

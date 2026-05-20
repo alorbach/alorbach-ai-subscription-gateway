@@ -207,7 +207,7 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null ) {
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null, $options = array() ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
@@ -305,7 +305,7 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials, $input_reference = array() ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
@@ -320,6 +320,47 @@ class OpenAI_Provider extends Provider_Base {
 			'size'     => $size ?: '1280x720',
 			'seconds'  => (string) $seconds,
 		);
+		$input_reference = is_array( $input_reference ) ? $input_reference : array();
+		if ( ! empty( $input_reference ) ) {
+			$b64 = isset( $input_reference['b64_json'] ) && is_string( $input_reference['b64_json'] ) ? trim( $input_reference['b64_json'] ) : '';
+			$mime = isset( $input_reference['mime_type'] ) && is_string( $input_reference['mime_type'] ) ? strtolower( trim( $input_reference['mime_type'] ) ) : 'image/png';
+			if ( '' === $b64 ) {
+				return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference must include base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			$binary = base64_decode( $b64, true );
+			if ( false === $binary || '' === $binary ) {
+				return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference image data could not be decoded.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			$extension = match ( $mime ) {
+				'image/jpeg', 'image/jpg' => 'jpg',
+				'image/webp'              => 'webp',
+				default                   => 'png',
+			};
+			$content_type = in_array( $mime, array( 'image/jpeg', 'image/jpg', 'image/png', 'image/webp' ), true ) ? $mime : 'image/png';
+			if ( 'image/jpg' === $content_type ) {
+				$content_type = 'image/jpeg';
+			}
+			$boundary = wp_generate_password( 24, false );
+			$multipart = '';
+			foreach ( $body as $name => $value ) {
+				$multipart .= '--' . $boundary . "\r\n";
+				$multipart .= 'Content-Disposition: form-data; name="' . $name . '"' . "\r\n\r\n";
+				$multipart .= (string) $value . "\r\n";
+			}
+			$multipart .= '--' . $boundary . "\r\n";
+			$multipart .= 'Content-Disposition: form-data; name="input_reference"; filename="input-reference.' . $extension . '"' . "\r\n";
+			$multipart .= 'Content-Type: ' . $content_type . "\r\n\r\n";
+			$multipart .= $binary . "\r\n";
+			$multipart .= '--' . $boundary . '--' . "\r\n";
+			return array(
+				'url'     => 'https://api.openai.com/v1/videos',
+				'headers' => array(
+					'Content-Type'  => 'multipart/form-data; boundary=' . $boundary,
+					'Authorization' => 'Bearer ' . $api_key,
+				),
+				'body'    => $multipart,
+			);
+		}
 		return array(
 			'url'     => 'https://api.openai.com/v1/videos',
 			'headers' => array(

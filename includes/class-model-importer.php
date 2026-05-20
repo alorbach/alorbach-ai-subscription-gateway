@@ -64,6 +64,7 @@ class Model_Importer {
 	private static $audio_models = array(
 		'whisper-1'         => 100,
 		'gpt-4o-transcribe' => 600,
+		'azure-speech'      => 100,
 	);
 
 	/**
@@ -394,6 +395,7 @@ class Model_Importer {
 		update_option( 'alorbach_image_models', array() );
 		update_option( 'alorbach_image_model_costs', array() );
 		update_option( 'alorbach_image_model_entries', array() );
+		update_option( 'alorbach_video_models', array() );
 		update_option( 'alorbach_video_costs', array() );
 		update_option( 'alorbach_audio_costs', array() );
 		update_option( 'alorbach_model_max_tokens', array() );
@@ -428,6 +430,8 @@ class Model_Importer {
 		$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
 		$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
 		$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
+		$video_models = get_option( 'alorbach_video_models', array() );
+		$video_models = is_array( $video_models ) ? $video_models : array();
 		$video_costs = get_option( 'alorbach_video_costs', array() );
 		$video_costs = is_array( $video_costs ) ? $video_costs : array();
 		$audio_costs = get_option( 'alorbach_audio_costs', array() );
@@ -653,10 +657,20 @@ class Model_Importer {
 		$video_to_add = ( $selected_video !== null )
 			? $selected_video
 			: ( $selected_entries !== null ? array() : array_keys( self::$video_models ) );
+		$selected_video_entries = array();
 		if ( $selected_entries !== null ) {
-			foreach ( $selected_entries as $sel ) {
+			foreach ( $selected_entries as $entry_id => $sel ) {
 				$ids = isset( $sel['video'] ) && is_array( $sel['video'] ) ? $sel['video'] : array();
 				$video_to_add = array_merge( $video_to_add, $ids );
+				foreach ( $ids as $video_id ) {
+					$video_id = is_string( $video_id ) ? $video_id : (string) $video_id;
+					if ( '' !== $video_id ) {
+						if ( ! isset( $selected_video_entries[ $video_id ] ) ) {
+							$selected_video_entries[ $video_id ] = array();
+						}
+						$selected_video_entries[ $video_id ][] = (string) $entry_id;
+					}
+				}
 			}
 			$video_to_add = array_unique( $video_to_add );
 		}
@@ -665,13 +679,25 @@ class Model_Importer {
 			if ( empty( $model ) ) {
 				continue;
 			}
-			if ( ! $overwrite && isset( $video_costs[ $model ] ) ) {
-				$result['skipped']['video'][] = $model;
-				continue;
+			$entry_ids_for_model = isset( $selected_video_entries[ $model ] ) && is_array( $selected_video_entries[ $model ] )
+				? $selected_video_entries[ $model ]
+				: array( '' );
+			foreach ( $entry_ids_for_model as $video_entry_id ) {
+				$video_entry_id = (string) $video_entry_id;
+				$compound       = $video_entry_id ? $video_entry_id . '::' . $model : $model;
+				if ( ! $overwrite && in_array( $compound, $video_models, true ) ) {
+					$result['skipped']['video'][] = $compound;
+					continue;
+				}
+				$video_models[] = $compound;
+				$result['added']['video'][] = $compound;
 			}
-			$video_costs[ $model ] = isset( self::$video_models[ $model ] ) ? self::$video_models[ $model ] : 400000;
-			$result['added']['video'][] = $model;
+			if ( $overwrite || ! isset( $video_costs[ $model ] ) ) {
+				$video_costs[ $model ] = isset( self::$video_models[ $model ] ) ? self::$video_models[ $model ] : 400000;
+			}
 		}
+		$video_models = array_unique( array_values( $video_models ) );
+		sort( $video_models );
 
 		$audio_to_add = ( $selected_audio !== null )
 			? $selected_audio
@@ -701,6 +727,7 @@ class Model_Importer {
 		update_option( 'alorbach_image_models', $image_models );
 		update_option( 'alorbach_image_model_costs', $image_model_costs );
 		update_option( 'alorbach_image_model_entries', $image_model_entries );
+		update_option( 'alorbach_video_models', $video_models );
 		update_option( 'alorbach_video_costs', $video_costs );
 		update_option( 'alorbach_audio_costs', $audio_costs );
 

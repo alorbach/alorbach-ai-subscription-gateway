@@ -212,6 +212,7 @@ class API_Validator {
 		'gpt-4o-transcribe',
 		'gpt-4o-mini-transcribe',
 		'gpt-4o-transcribe-diarize',
+		'azure-speech',
 	);
 
 	/**
@@ -224,7 +225,8 @@ class API_Validator {
 		$model = $model ?: 'whisper-1';
 		$supports_transcription = in_array( $model, self::$transcription_models, true )
 			|| strpos( $model, '-transcribe' ) !== false
-			|| strpos( $model, 'gpt-audio' ) === 0;
+			|| strpos( $model, 'gpt-audio' ) === 0
+			|| \Alorbach\AIGateway\Providers\Azure_Provider::is_speech_transcription_model( $model );
 		if ( ! $supports_transcription ) {
 			$is_tts = ( strpos( $model, '-tts' ) !== false );
 			if ( $is_tts ) {

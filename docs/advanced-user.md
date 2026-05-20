@@ -2,7 +2,7 @@
 
 This guide helps plugin operators and integrators use the gateway in production-like setups and understand the current state of Hugging Face Spaces support.
 
-Last updated: 2026-04-22
+Last updated: 2026-05-21
 
 ## Table of Contents
 
@@ -51,16 +51,18 @@ The relevant admin flows are:
 3. Add or edit a provider row:
    1. Provider identifier and label
    2. Encrypted key value
-   3. Optional endpoint or header overrides
-4. Save and verify the status indicator.
+   3. Optional endpoint or provider-specific fields
+4. Save and verify each configured backend check.
 
 ![Provider setup and API key status](images/advanced-user/provider-setup.png)
+
+The screenshot uses example endpoint names only. Do not publish live Azure resource hostnames, API keys, tokens, account names, or tenant-specific identifiers in documentation screenshots.
 
 ### What to check
 
 1. Key fields are present and masked in UI.
 2. Provider-specific extra fields appear only where relevant.
-3. Save produces a successful admin notice.
+3. Azure rows with both Azure OpenAI / Foundry and Azure Speech configured show separate verification results.
 4. No secrets are visible in screenshots or shared links.
 
 ## Hugging Face Spaces advanced setup

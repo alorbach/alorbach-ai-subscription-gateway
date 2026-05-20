@@ -35,6 +35,7 @@ delete_option( 'alorbach_general_defaults_migrated' );
 delete_option( 'alorbach_demo_allow_image_size_select' );
 delete_option( 'alorbach_demo_allow_image_quality_select' );
 delete_option( 'alorbach_demo_image_options_migrated' );
+delete_option( 'alorbach_video_models' );
 delete_option( 'alorbach_video_costs' );
 delete_option( 'alorbach_audio_costs' );
 delete_option( 'alorbach_whisper_cost_per_second' );

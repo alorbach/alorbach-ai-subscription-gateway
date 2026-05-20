@@ -115,6 +115,10 @@ class API_Client {
 
 		$helper = API_Keys_Helper::class;
 
+		if ( \Alorbach\AIGateway\Providers\Azure_Provider::is_speech_transcription_model( $model ) ) {
+			return 'azure';
+		}
+
 		if ( strpos( (string) $model, 'hf-space:' ) === 0 && $helper::has_provider( 'huggingface_spaces' ) ) {
 			return 'huggingface_spaces';
 		}
@@ -1461,9 +1465,10 @@ class API_Client {
 	 * @param string      $model    Model (e.g. whisper-1, gpt-4o-transcribe).
 	 * @param string      $prompt   Optional prompt.
 	 * @param string|null $format   Optional format (wav, mp3, flac, opus, m4a, webm). Auto-detected from path if null.
+	 * @param array       $options  Optional provider-specific request options.
 	 * @return array|WP_Error Response with 'text' or error.
 	 */
-	public static function transcribe( $file_path, $model = 'whisper-1', $prompt = '', $format = null ) {
+	public static function transcribe( $file_path, $model = 'whisper-1', $prompt = '', $format = null, $options = array() ) {
 		$model  = $model ?: 'whisper-1';
 		$prompt = is_string( $prompt ) ? trim( $prompt ) : '';
 		if ( ! file_exists( $file_path ) ) {
@@ -1484,11 +1489,18 @@ class API_Client {
 				)
 			);
 		}
-		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$creds = \Alorbach\AIGateway\Providers\Azure_Provider::is_speech_transcription_model( $model )
+			? API_Keys_Helper::get_azure_speech_credentials()
+			: API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			return new \WP_Error( 'no_api_key', __( 'API key not configured.', 'alorbach-ai-gateway' ) );
+			return new \WP_Error(
+				'no_api_key',
+				\Alorbach\AIGateway\Providers\Azure_Provider::is_speech_transcription_model( $model )
+					? __( 'Azure Speech Services not configured. Add an enabled Azure API key entry with Speech endpoint and Speech subscription key.', 'alorbach-ai-gateway' )
+					: __( 'API key not configured.', 'alorbach-ai-gateway' )
+			);
 		}
-		$request = $prov->build_transcribe_request( $file_path, $model, $prompt, $creds, $format );
+		$request = $prov->build_transcribe_request( $file_path, $model, $prompt, $creds, $format, is_array( $options ) ? $options : array() );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Transcription not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -1505,7 +1517,17 @@ class API_Client {
 		$body_response = json_decode( $raw_body, true );
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
-			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+			$error_data = array( 'status' => $code );
+			if ( ! empty( $request['provider_details'] ) && is_array( $request['provider_details'] ) ) {
+				$error_data['provider_details'] = array_merge(
+					$request['provider_details'],
+					array(
+						'http_status'    => $code,
+						'provider_error' => $msg,
+					)
+				);
+			}
+			return new \WP_Error( 'api_error', $msg, $error_data );
 		}
 		// gpt-audio uses chat completions; response has choices[0].message.content.
 		if ( ! empty( $request['response_format'] ) && $request['response_format'] === 'chat_completions' ) {
@@ -1513,6 +1535,13 @@ class API_Client {
 				? (string) $body_response['choices'][0]['message']['content']
 				: '';
 			return array( 'text' => $text );
+		}
+		if ( ! empty( $request['response_format'] ) && $request['response_format'] === 'azure_speech' && method_exists( $prov, 'parse_transcribe_response' ) ) {
+			$result = $prov->parse_transcribe_response( $body_response, $raw_body, $request );
+			if ( isset( $result['provider_details'] ) && is_array( $result['provider_details'] ) ) {
+				$result['provider_details']['http_status'] = $code;
+			}
+			return $result;
 		}
 		return is_array( $body_response ) ? $body_response : array( 'text' => (string) $raw_body );
 	}
@@ -1525,10 +1554,14 @@ class API_Client {
 	 * @param string $model           Model ID (e.g. sora-2, veo-3.1-generate-preview).
 	 * @param string $size            Size (e.g. 1280x720). Default 1280x720.
 	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
+	 * @param array  $input_reference  Optional image reference payload.
 	 * @return array|WP_Error Array with 'id' => job_id, 'provider' => provider, or WP_Error.
 	 */
-	public static function create_video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
-		$provider = self::get_provider_for_model( $model );
+	public static function create_video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8, $input_reference = array() ) {
+		$parsed   = Cost_Matrix::parse_model_key( $model );
+		$model_id = $parsed['model'];
+		$entry_id = $parsed['entry_id'];
+		$provider = self::get_provider_for_model( $model_id, $entry_id );
 		$prov     = Provider_Registry::get( $provider );
 		if ( ! $prov ) {
 			return new \WP_Error( 'no_api_key', sprintf(
@@ -1547,7 +1580,7 @@ class API_Client {
 				)
 			);
 		}
-		$creds = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$creds = $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			return new \WP_Error( 'no_api_key', sprintf(
 				/* translators: 1: provider name */
@@ -1555,7 +1588,7 @@ class API_Client {
 				self::get_provider_label( $provider )
 			) );
 		}
-		$request = $prov->build_video_request( $prompt, $model, $size, $duration_seconds, $creds );
+		$request = $prov->build_video_request( $prompt, $model_id, $size, $duration_seconds, $creds, $input_reference );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_api_key', __( 'Video generation not configured for this provider.', 'alorbach-ai-gateway' ) );
 		}
@@ -1578,7 +1611,7 @@ class API_Client {
 		if ( empty( $video_id ) ) {
 			return new \WP_Error( 'api_error', __( 'No video ID returned from API.', 'alorbach-ai-gateway' ) );
 		}
-		return array( 'id' => $video_id, 'provider' => $provider );
+		return array( 'id' => $video_id, 'provider' => $provider, 'entry_id' => $entry_id );
 	}
 
 	/**
@@ -1588,20 +1621,22 @@ class API_Client {
 	 * @param string $model            Model ID (e.g. sora-2).
 	 * @param string $size             Size (e.g. 1280x720). Default 1280x720.
 	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
+	 * @param array  $input_reference  Optional image reference payload.
 	 * @return array|WP_Error Response with data[url] or error.
 	 */
-	public static function video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8 ) {
+	public static function video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8, $input_reference = array() ) {
 		$max_polls     = (int) apply_filters( 'alorbach_video_poll_max', 60 );
 		$poll_interval = (int) apply_filters( 'alorbach_video_poll_interval', 5 );
 		// Set a bounded execution time limit covering the full polling window.
 		set_time_limit( $max_polls * $poll_interval + 30 );
-		$create_result = self::create_video( $prompt, $model, $size, $duration_seconds );
+		$create_result = self::create_video( $prompt, $model, $size, $duration_seconds, $input_reference );
 		if ( is_wp_error( $create_result ) ) {
 			return $create_result;
 		}
 		$video_id  = $create_result['id'] ?? '';
 		$provider  = $create_result['provider'] ?? 'openai';
-		$creds     = API_Keys_Helper::get_credentials_for_provider( $provider );
+		$entry_id  = $create_result['entry_id'] ?? '';
+		$creds     = $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 
 		// Azure Sora 2 and OpenAI both use /v1/videos endpoint; Azure uses endpoint + api-key.
 		$base_url = ( $provider === 'azure' && ! empty( $creds['endpoint'] ) )

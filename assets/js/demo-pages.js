@@ -1237,7 +1237,7 @@
 				video.options.forEach(function (opt) {
 					var o = document.createElement('option');
 					o.value = opt;
-					o.textContent = opt;
+					o.textContent = (video.labels && video.labels[opt]) || opt;
 					if (opt === video.default) o.selected = true;
 					modelSelect.appendChild(o);
 				});

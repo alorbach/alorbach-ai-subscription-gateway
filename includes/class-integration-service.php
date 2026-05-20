@@ -314,7 +314,7 @@ class Integration_Service {
 				'image_sizes'     => array_values( $image_sizes ),
 				'image_qualities' => $qualities,
 				'audio_models'    => array_values( $audio_models ),
-				'video_models'    => array_values( $video_models ),
+				'video_models'    => array_keys( $video_models ),
 				'video_sizes'     => $video_sizes,
 				'video_durations' => $video_lengths,
 			),
@@ -950,7 +950,7 @@ class Integration_Service {
 			'chat'  => array_keys( $admin::get_text_models() ),
 			'image' => array_keys( $admin::get_image_models() ),
 			'audio' => array_values( $admin::get_audio_models() ),
-			'video' => array_values( $admin::get_video_models() ),
+			'video' => array_keys( $admin::get_video_models() ),
 		);
 	}
 

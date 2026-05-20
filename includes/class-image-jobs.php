@@ -283,6 +283,154 @@ class Image_Jobs {
 	}
 
 	/**
+	 * Record a synchronous generation request in the queue monitor for debugging.
+	 *
+	 * This is intentionally not dispatched through the image worker. It gives text,
+	 * audio, and video requests the same admin diagnostics surface as async image
+	 * jobs without changing their synchronous REST contract.
+	 *
+	 * @param string $type    Capability type: chat, audio, or video.
+	 * @param int    $user_id WordPress user ID.
+	 * @param array  $args    Debug job args.
+	 * @return string Job ID.
+	 */
+	public static function record_debug_job( $type, $user_id, $args = array() ) {
+		$type = sanitize_key( (string) $type );
+		if ( ! in_array( $type, array( 'chat', 'audio', 'video' ), true ) ) {
+			$type = 'chat';
+		}
+
+		$user_id    = max( 0, (int) $user_id );
+		$started_at = isset( $args['started_at'] ) ? (int) $args['started_at'] : time();
+		$finished_at = isset( $args['finished_at'] ) ? (int) $args['finished_at'] : time();
+		$error      = isset( $args['error'] ) && is_wp_error( $args['error'] ) ? $args['error'] : null;
+		$response   = isset( $args['response'] ) && is_array( $args['response'] ) ? $args['response'] : array();
+		$model      = isset( $args['model'] ) ? sanitize_text_field( (string) $args['model'] ) : '';
+		$prompt     = self::truncate_debug_text( isset( $args['prompt'] ) ? (string) $args['prompt'] : '' );
+		$original   = self::truncate_debug_text( isset( $args['original_prompt'] ) ? (string) $args['original_prompt'] : $prompt );
+		$output     = self::truncate_debug_text( isset( $args['output'] ) ? (string) $args['output'] : self::extract_debug_output_text( $type, $response ) );
+		$details    = isset( $args['provider_details'] ) && is_array( $args['provider_details'] ) ? $args['provider_details'] : array();
+		$usage      = isset( $args['provider_usage'] ) && is_array( $args['provider_usage'] ) ? $args['provider_usage'] : ( isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array() );
+		$cost_uc    = isset( $args['cost_uc'] ) ? (int) $args['cost_uc'] : ( isset( $response['cost_uc'] ) ? (int) $response['cost_uc'] : 0 );
+		$api_cost_uc = isset( $args['api_cost_uc'] ) ? (int) $args['api_cost_uc'] : 0;
+		$job_id     = wp_generate_uuid4();
+
+		$details = array_merge(
+			array(
+				'type'         => $type,
+				'endpoint'     => isset( $args['endpoint'] ) ? sanitize_text_field( (string) $args['endpoint'] ) : $type,
+				'runtime_ms'   => max( 0, ( $finished_at - $started_at ) * 1000 ),
+			),
+			$details
+		);
+		foreach ( array( 'size', 'quality', 'duration_seconds', 'audio_format', 'steps_count' ) as $key ) {
+			if ( isset( $args[ $key ] ) && '' !== $args[ $key ] ) {
+				$details[ $key ] = is_scalar( $args[ $key ] ) ? (string) $args[ $key ] : $args[ $key ];
+			}
+		}
+
+		$job = array(
+			'job_id'             => $job_id,
+			'job_type'           => $type,
+			'user_id'            => $user_id,
+			'status'             => $error ? 'failed' : 'completed',
+			'progress_stage'     => $error ? 'failed' : 'completed',
+			'progress_percent'   => $error ? 0 : 100,
+			'progress_mode'      => 'provider',
+			'supports_previews'  => false,
+			'provider_progress'  => false,
+			'size'               => isset( $args['size'] ) ? sanitize_text_field( (string) $args['size'] ) : '',
+			'n'                  => 1,
+			'quality'            => isset( $args['quality'] ) ? sanitize_text_field( (string) $args['quality'] ) : '',
+			'model'              => $model,
+			'preview_count'      => 0,
+			'final_count'        => 0,
+			'reference_count'    => isset( $args['reference_count'] ) ? (int) $args['reference_count'] : 0,
+			'cost_uc'            => $cost_uc,
+			'cost_credits'       => User_Display::uc_to_credits( $cost_uc ),
+			'cost_usd'           => User_Display::uc_to_usd( $cost_uc ),
+			'api_cost_uc'        => $api_cost_uc,
+			'request_signature'  => isset( $args['request_signature'] ) ? sanitize_text_field( (string) $args['request_signature'] ) : '',
+			'deduction_applied'  => ! empty( $args['deduction_applied'] ),
+			'error'              => $error ? $error->get_error_message() : '',
+			'revised_prompt'     => $output,
+			'provider_usage'     => $usage,
+			'provider_details'   => $details,
+			'dispatch_token'     => '',
+			'dispatched_at'      => 0,
+			'created_at'         => $started_at,
+			'updated_at'         => $finished_at,
+		);
+
+		if ( $error ) {
+			self::apply_wp_error_context( $job, $error );
+		}
+
+		self::save_full_job(
+			$job,
+			array(
+				'preview_images'   => array(),
+				'final_images'     => array(),
+				'reference_images' => array(),
+			),
+			array(
+				'prompt'          => $prompt,
+				'original_prompt' => $original,
+				'internal_prompt' => $output,
+			)
+		);
+
+		self::append_job_log( $job_id, array(
+			'event' => $error ? $type . '_failed' : $type . '_completed',
+			'msg'   => $error ? $error->get_error_message() : sprintf( '%s request completed.', ucfirst( $type ) ),
+		) );
+
+		return $job_id;
+	}
+
+	/**
+	 * Truncate debug text so queue records stay lightweight.
+	 *
+	 * @param string $text Raw text.
+	 * @return string
+	 */
+	private static function truncate_debug_text( $text ) {
+		$text = (string) $text;
+		if ( strlen( $text ) <= 8000 ) {
+			return $text;
+		}
+
+		return substr( $text, 0, 8000 ) . "\n\n[truncated]";
+	}
+
+	/**
+	 * Extract a compact output preview from a provider response.
+	 *
+	 * @param string $type     Capability type.
+	 * @param array  $response Provider response.
+	 * @return string
+	 */
+	private static function extract_debug_output_text( $type, $response ) {
+		if ( 'chat' === $type && isset( $response['choices'][0]['message']['content'] ) ) {
+			return (string) $response['choices'][0]['message']['content'];
+		}
+		if ( 'audio' === $type && isset( $response['text'] ) ) {
+			return (string) $response['text'];
+		}
+		if ( 'video' === $type && isset( $response['data'] ) && is_array( $response['data'] ) ) {
+			$urls = array();
+			foreach ( $response['data'] as $item ) {
+				if ( is_array( $item ) && ! empty( $item['url'] ) ) {
+					$urls[] = (string) $item['url'];
+				}
+			}
+			return implode( "\n", $urls );
+		}
+
+		return '';
+	}
+
+	/**
 	 * Dispatch background processing for a job.
 	 *
 	 * @param array $job Job state.
@@ -1044,6 +1192,8 @@ class Image_Jobs {
 
 		return array(
 			'job_id'              => (string) ( $job['job_id'] ?? '' ),
+			'job_type'            => (string) ( $job['job_type'] ?? 'image' ),
+			'job_type_label'      => ucfirst( str_replace( '_', ' ', (string) ( $job['job_type'] ?? 'image' ) ) ),
 			'user_id'             => $user_id,
 			'user_label'          => $user ? $user->user_login . ' (' . $user->user_email . ')' : '#' . $user_id,
 			'status'              => (string) ( $job['status'] ?? 'queued' ),
@@ -1112,6 +1262,8 @@ class Image_Jobs {
 
 		return array(
 			'job_id'             => (string) ( $job['job_id'] ?? '' ),
+			'job_type'           => (string) ( $job['job_type'] ?? 'image' ),
+			'job_type_label'     => ucfirst( str_replace( '_', ' ', (string) ( $job['job_type'] ?? 'image' ) ) ),
 			'user_id'            => $user_id,
 			'user_label'         => $user ? $user->user_login . ' (' . $user->user_email . ')' : '#' . $user_id,
 			'status'             => (string) ( $job['status'] ?? 'queued' ),

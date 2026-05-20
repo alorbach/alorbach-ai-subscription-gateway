@@ -413,6 +413,8 @@ class REST_Proxy {
 				'duration_seconds' => array( 'required' => false, 'sanitize_callback' => 'absint' ),
 				'model'            => array( 'default' => 'whisper-1', 'sanitize_callback' => 'sanitize_text_field' ),
 				'prompt'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
+				'language'         => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
+				'locale'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -706,8 +708,19 @@ class REST_Proxy {
 			);
 		}
 
+		$queue_started_at = time();
 		$response = API_Client::chat( $provider, $body );
 		if ( is_wp_error( $response ) ) {
+			Image_Jobs::record_debug_job( 'chat', $user_id, array(
+				'started_at'      => $queue_started_at,
+				'finished_at'     => time(),
+				'endpoint'        => 'chat',
+				'model'           => $model,
+				'prompt'          => self::debug_prompt_from_messages( $messages ),
+				'original_prompt' => wp_json_encode( $messages ),
+				'error'           => $response,
+				'request_signature' => $request_signature,
+			) );
 			return $response;
 		}
 
@@ -715,6 +728,18 @@ class REST_Proxy {
 			$response['cost_uc']      = 0;
 			$response['cost_credits'] = User_Display::uc_to_credits( 0 );
 			$response['cost_usd']     = User_Display::uc_to_usd( 0 );
+			Image_Jobs::record_debug_job( 'chat', $user_id, array(
+				'started_at'      => $queue_started_at,
+				'finished_at'     => time(),
+				'endpoint'        => 'chat',
+				'model'           => $model,
+				'prompt'          => self::debug_prompt_from_messages( $messages ),
+				'original_prompt' => wp_json_encode( $messages ),
+				'response'        => $response,
+				'cost_uc'         => 0,
+				'request_signature' => $request_signature,
+				'deduction_applied' => false,
+			) );
 			return rest_ensure_response( $response );
 		}
 
@@ -741,6 +766,20 @@ class REST_Proxy {
 		$response['cost_uc']      = $uc_cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $uc_cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $uc_cost );
+		Image_Jobs::record_debug_job( 'chat', $user_id, array(
+			'started_at'      => $queue_started_at,
+			'finished_at'     => time(),
+			'endpoint'        => 'chat',
+			'model'           => $model,
+			'prompt'          => self::debug_prompt_from_messages( $messages ),
+			'original_prompt' => wp_json_encode( $messages ),
+			'response'        => $response,
+			'provider_usage'  => isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array(),
+			'cost_uc'         => $uc_cost,
+			'api_cost_uc'     => $api_cost,
+			'request_signature' => $request_signature,
+			'deduction_applied' => true,
+		) );
 		return rest_ensure_response( $response );
 	}
 
@@ -813,6 +852,12 @@ class REST_Proxy {
 			$image_model_labels[ $key ] = isset( $image_model_catalog[ $key ] ) ? $image_model_catalog[ $key ] : $key;
 		}
 
+		$video_model_catalog = $admin::get_video_models();
+		$video_model_labels  = array();
+		foreach ( $config['capabilities']['video_models'] ?? array() as $key ) {
+			$video_model_labels[ $key ] = isset( $video_model_catalog[ $key ] ) ? $video_model_catalog[ $key ] : $key;
+		}
+
 		return rest_ensure_response( array(
 			'text'  => array(
 				'enabled'      => ! empty( $config['plan_capabilities']['chat'] ),
@@ -864,6 +909,7 @@ class REST_Proxy {
 				'default'      => $config['defaults']['video_model'],
 				'allow_select' => (bool) get_option( 'alorbach_demo_allow_video_model_select', false ),
 				'options'      => $config['capabilities']['video_models'],
+				'labels'       => $video_model_labels,
 				'size'         => array(
 					'default'      => '1280x720',
 					'allow_select'  => true,
@@ -1430,8 +1476,15 @@ class REST_Proxy {
 		$audio_b64 = $request->get_param( 'audio_base64' );
 		$duration  = (int) $request->get_param( 'duration_seconds' );
 		$model     = $request->get_param( 'model' ) ?: 'whisper-1';
+		if ( \Alorbach\AIGateway\Providers\Azure_Provider::is_speech_transcription_model( $model ) ) {
+			$model = 'azure-speech';
+		}
 		$prompt    = $request->get_param( 'prompt' ) ?: '';
 		$format    = $request->get_param( 'audio_format' ) ?: null;
+		$language  = $request->get_param( 'language' );
+		$locale    = $request->get_param( 'locale' );
+		$language  = is_string( $language ) ? sanitize_text_field( $language ) : '';
+		$locale    = is_string( $locale ) ? sanitize_text_field( $locale ) : '';
 
 		$plan_error = self::enforce_user_plan_access( $user_id, 'audio', $model );
 		if ( $plan_error ) {
@@ -1451,7 +1504,7 @@ class REST_Proxy {
 		// Idempotency: reject duplicate transcribe requests within a 5-minute window.
 		// Include prompt so retries with different instructions are allowed.
 		$time_bucket       = (int) ( time() / 300 );
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'transcribe', hash( 'sha256', $audio_b64 ), $model, $prompt, $time_bucket ) ) );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'transcribe', hash( 'sha256', $audio_b64 ), $model, $prompt, $locale, $language, $time_bucket ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -1503,10 +1556,31 @@ class REST_Proxy {
 			);
 		}
 
-		$response = API_Client::transcribe( $tmp, $model, $prompt, $format );
+		$queue_started_at = time();
+		$response = API_Client::transcribe( $tmp, $model, $prompt, $format, array(
+			'locale'   => $locale,
+			'language' => $language,
+		) );
 		wp_delete_file( $tmp );
 
 		if ( is_wp_error( $response ) ) {
+			$error_data = $response->get_error_data();
+			$provider_details = is_array( $error_data ) && isset( $error_data['provider_details'] ) && is_array( $error_data['provider_details'] ) ? $error_data['provider_details'] : array();
+			Image_Jobs::record_debug_job( 'audio', $user_id, array(
+				'started_at'        => $queue_started_at,
+				'finished_at'       => time(),
+				'endpoint'          => 'transcribe',
+				'model'             => $model,
+				'prompt'            => $prompt,
+				'original_prompt'   => sprintf( 'Audio transcription. duration=%ds format=%s prompt=%s', $duration, (string) $format, (string) $prompt ),
+				'audio_format'      => (string) $format,
+				'duration_seconds'  => $duration,
+				'error'             => $response,
+				'provider_details'  => $provider_details,
+				'cost_uc'           => $cost,
+				'api_cost_uc'       => $api_cost,
+				'request_signature' => $request_signature,
+			) );
 			return $response;
 		}
 
@@ -1516,7 +1590,56 @@ class REST_Proxy {
 		$response['cost_credits']       = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']           = User_Display::uc_to_usd( $cost );
 		$response['duration_seconds']   = $duration;
+		$provider_details = isset( $response['provider_details'] ) && is_array( $response['provider_details'] ) ? $response['provider_details'] : array();
+		unset( $response['provider_details'] );
+		Image_Jobs::record_debug_job( 'audio', $user_id, array(
+			'started_at'        => $queue_started_at,
+			'finished_at'       => time(),
+			'endpoint'          => 'transcribe',
+			'model'             => $model,
+			'prompt'            => $prompt,
+			'original_prompt'   => sprintf( 'Audio transcription. duration=%ds format=%s prompt=%s', $duration, (string) $format, (string) $prompt ),
+			'audio_format'      => (string) $format,
+			'duration_seconds'  => $duration,
+			'response'          => $response,
+			'provider_details'  => $provider_details,
+			'cost_uc'           => $cost,
+			'api_cost_uc'       => $api_cost,
+			'request_signature' => $request_signature,
+			'deduction_applied' => true,
+		) );
 		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Normalize one video input reference image from an integration payload.
+	 *
+	 * @param mixed $input_reference Raw request value.
+	 * @return array|\WP_Error
+	 */
+	private static function normalize_video_input_reference( $input_reference ) {
+		if ( empty( $input_reference ) || ! is_array( $input_reference ) ) {
+			return array();
+		}
+		$b64 = isset( $input_reference['b64_json'] ) && is_string( $input_reference['b64_json'] ) ? preg_replace( '/\s+/', '', $input_reference['b64_json'] ) : '';
+		$mime = isset( $input_reference['mime_type'] ) && is_string( $input_reference['mime_type'] ) ? strtolower( trim( $input_reference['mime_type'] ) ) : 'image/png';
+		if ( '' === $b64 ) {
+			return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference must include base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		if ( ! in_array( $mime, array( 'image/jpeg', 'image/jpg', 'image/png', 'image/webp' ), true ) ) {
+			return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference must be a JPEG, PNG, or WebP image.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		$decoded = base64_decode( $b64, true );
+		if ( false === $decoded || '' === $decoded ) {
+			return new \WP_Error( 'invalid_video_input_reference', __( 'Video input reference image data could not be decoded.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		return array(
+			'b64_json'  => $b64,
+			'mime_type' => 'image/jpg' === $mime ? 'image/jpeg' : $mime,
+			'width'     => isset( $input_reference['width'] ) ? absint( $input_reference['width'] ) : 0,
+			'height'    => isset( $input_reference['height'] ) ? absint( $input_reference['height'] ) : 0,
+			'source'    => isset( $input_reference['source'] ) ? sanitize_key( (string) $input_reference['source'] ) : '',
+		);
 	}
 
 	/**
@@ -1541,6 +1664,10 @@ class REST_Proxy {
 		$prompt  = $request->get_param( 'prompt' );
 		$model   = $request->get_param( 'model' ) ?: 'sora-2';
 		$size    = $request->get_param( 'size' ) ?: '1280x720';
+		$input_reference = self::normalize_video_input_reference( $request->get_param( 'input_reference' ) );
+		if ( is_wp_error( $input_reference ) ) {
+			return $input_reference;
+		}
 		$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
 		if ( ! in_array( (string) $duration, array( '4', '8', '12' ), true ) ) {
 			$duration = 8;
@@ -1553,7 +1680,7 @@ class REST_Proxy {
 
 		// Idempotency: reject duplicate video requests within a 5-minute window.
 		$time_bucket       = (int) ( time() / 300 );
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'video', $prompt, $model, $size, $duration, $time_bucket ) ) );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'video', $prompt, $model, $size, $duration, md5( wp_json_encode( $input_reference ) ), $time_bucket ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -1575,8 +1702,23 @@ class REST_Proxy {
 			);
 		}
 
-		$response = API_Client::video( $prompt, $model, $size, $duration );
+		$queue_started_at = time();
+		$response = API_Client::video( $prompt, $model, $size, $duration, $input_reference );
 		if ( is_wp_error( $response ) ) {
+			Image_Jobs::record_debug_job( 'video', $user_id, array(
+				'started_at'        => $queue_started_at,
+				'finished_at'       => time(),
+				'endpoint'          => 'video',
+				'model'             => $model,
+				'prompt'            => $prompt,
+				'size'              => $size,
+				'duration_seconds'  => $duration,
+				'reference_count'   => empty( $input_reference ) ? 0 : 1,
+				'error'             => $response,
+				'cost_uc'           => $cost,
+				'api_cost_uc'       => $api_cost,
+				'request_signature' => $request_signature,
+			) );
 			return $response;
 		}
 
@@ -1585,6 +1727,21 @@ class REST_Proxy {
 		$response['cost_uc']      = $cost;
 		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
 		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
+		Image_Jobs::record_debug_job( 'video', $user_id, array(
+			'started_at'        => $queue_started_at,
+			'finished_at'       => time(),
+			'endpoint'          => 'video',
+			'model'             => $model,
+			'prompt'            => $prompt,
+			'size'              => $size,
+			'duration_seconds'  => $duration,
+			'reference_count'   => empty( $input_reference ) ? 0 : 1,
+			'response'          => $response,
+			'cost_uc'           => $cost,
+			'api_cost_uc'       => $api_cost,
+			'request_signature' => $request_signature,
+			'deduction_applied' => true,
+		) );
 		return rest_ensure_response( $response );
 	}
 
@@ -1889,6 +2046,7 @@ class REST_Proxy {
 		$steps                   = array();
 		$last_response           = null;
 		$current_messages        = $messages;
+		$queue_started_at        = time();
 		set_transient( $lock_key, 1, $timeout + 30 );
 
 		for ( $step = 1; $step <= $max_steps; $step++ ) {
@@ -1928,6 +2086,19 @@ class REST_Proxy {
 			$response         = API_Client::chat( $provider, $body );
 			if ( is_wp_error( $response ) ) {
 				delete_transient( $lock_key );
+				Image_Jobs::record_debug_job( 'chat', $user_id, array(
+					'started_at'      => $queue_started_at,
+					'finished_at'     => time(),
+					'endpoint'        => 'chat multi-step',
+					'model'           => $model,
+					'prompt'          => self::debug_prompt_from_messages( $messages ),
+					'original_prompt' => wp_json_encode( $messages ),
+					'steps_count'     => count( $steps ),
+					'error'           => $response,
+					'cost_uc'         => $total_uc_cost,
+					'api_cost_uc'     => $total_api_cost,
+					'request_signature' => $base_signature,
+				) );
 				return $response;
 			}
 
@@ -1986,7 +2157,19 @@ class REST_Proxy {
 		// Merge all chunks into the final choices content.
 		if ( ! $last_response ) {
 			delete_transient( $lock_key );
-			return new \WP_Error( 'chat_timeout', __( 'Multi-step chat timed out before a response was completed.', 'alorbach-ai-gateway' ), array( 'status' => 504 ) );
+			$error = new \WP_Error( 'chat_timeout', __( 'Multi-step chat timed out before a response was completed.', 'alorbach-ai-gateway' ), array( 'status' => 504 ) );
+			Image_Jobs::record_debug_job( 'chat', $user_id, array(
+				'started_at'      => $queue_started_at,
+				'finished_at'     => time(),
+				'endpoint'        => 'chat multi-step',
+				'model'           => $model,
+				'prompt'          => self::debug_prompt_from_messages( $messages ),
+				'original_prompt' => wp_json_encode( $messages ),
+				'steps_count'     => count( $steps ),
+				'error'           => $error,
+				'request_signature' => $base_signature,
+			) );
+			return $error;
 		}
 
 		$combined_content = implode( '', $content_chunks );
@@ -2014,7 +2197,51 @@ class REST_Proxy {
 		Ledger::insert_transaction( $user_id, 'chat_deduction', $model_name, 0, null, null, null, $base_signature );
 		delete_transient( $lock_key );
 
+		Image_Jobs::record_debug_job( 'chat', $user_id, array(
+			'started_at'      => $queue_started_at,
+			'finished_at'     => time(),
+			'endpoint'        => 'chat multi-step',
+			'model'           => $model,
+			'prompt'          => self::debug_prompt_from_messages( $messages ),
+			'original_prompt' => wp_json_encode( $messages ),
+			'response'        => $last_response,
+			'output'          => $combined_content,
+			'provider_usage'  => isset( $last_response['usage'] ) && is_array( $last_response['usage'] ) ? $last_response['usage'] : array(),
+			'steps_count'     => count( $steps ),
+			'cost_uc'         => $free_pass_through ? 0 : $total_uc_cost,
+			'api_cost_uc'     => $free_pass_through ? 0 : $total_api_cost,
+			'request_signature' => $base_signature,
+			'deduction_applied' => ! $free_pass_through,
+		) );
+
 		return rest_ensure_response( $last_response );
+	}
+
+	/**
+	 * Build a compact human-readable prompt summary from chat messages.
+	 *
+	 * @param array $messages Chat messages.
+	 * @return string
+	 */
+	private static function debug_prompt_from_messages( $messages ) {
+		if ( ! is_array( $messages ) ) {
+			return '';
+		}
+
+		$lines = array();
+		foreach ( $messages as $message ) {
+			if ( ! is_array( $message ) ) {
+				continue;
+			}
+			$role = isset( $message['role'] ) ? sanitize_key( (string) $message['role'] ) : 'message';
+			$content = $message['content'] ?? '';
+			if ( is_array( $content ) ) {
+				$content = wp_json_encode( $content );
+			}
+			$lines[] = strtoupper( $role ) . ': ' . (string) $content;
+		}
+
+		return implode( "\n\n", $lines );
 	}
 
 	/**

@@ -66,7 +66,7 @@ abstract class Provider_Base implements Provider_Interface {
 	 *
 	 * @return null
 	 */
-	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null ) {
+	public function build_transcribe_request( $file_path, $model, $prompt, $credentials, $format = null, $options = array() ) {
 		return null;
 	}
 
@@ -78,9 +78,10 @@ abstract class Provider_Base implements Provider_Interface {
 	 * @param string $size             Size (e.g. 1280x720).
 	 * @param int    $duration_seconds Duration in seconds.
 	 * @param array  $credentials      Credentials.
+	 * @param array  $input_reference  Optional image reference payload.
 	 * @return null
 	 */
-	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials ) {
+	public function build_video_request( $prompt, $model, $size, $duration_seconds, $credentials, $input_reference = array() ) {
 		return null;
 	}
 
