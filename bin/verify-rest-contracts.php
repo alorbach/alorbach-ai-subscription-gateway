@@ -236,6 +236,63 @@ try {
 	alorbach_require( 1 === count( $parsed_speech['segments'] ), 'Azure Speech parser must return phrase segments.' );
 	alorbach_require( 2 === (int) $parsed_speech['provider_details']['word_count'], 'Azure Speech debug metadata must include word count.' );
 
+	\Alorbach\AIGateway\API_Keys_Helper::save_entries(
+		array(
+			array(
+				'id'                    => 'verify-speech-raw-response',
+				'type'                  => 'azure',
+				'api_key'               => 'speech-secret',
+				'speech_endpoint'       => 'https://westeurope.api.cognitive.microsoft.com',
+				'speech_api_version'   => '2024-11-15',
+				'speech_default_locale' => 'en-US',
+				'enabled'               => true,
+			),
+		)
+	);
+	$raw_speech_body = wp_json_encode(
+		array(
+			'durationMilliseconds' => 1000,
+			'combinedPhrases'      => array( array( 'text' => 'Raw timing' ) ),
+			'phrases'              => array(
+				array(
+					'offsetMilliseconds'   => 100,
+					'durationMilliseconds' => 500,
+					'text'                 => 'Raw timing',
+					'words'                => array(
+						array( 'text' => 'Raw', 'offsetMilliseconds' => 100, 'durationMilliseconds' => 200 ),
+						array( 'text' => 'timing', 'offsetMilliseconds' => 350, 'durationMilliseconds' => 250 ),
+					),
+				),
+			),
+		)
+	);
+	$transcribe_http = static function ( $preempt, $args, $url ) use ( $raw_speech_body ) {
+		if ( false !== strpos( $url, '/speechtotext/transcriptions:transcribe?api-version=2024-11-15' ) ) {
+			return array(
+				'headers'  => array(),
+				'body'     => $raw_speech_body,
+				'response' => array( 'code' => 200, 'message' => 'OK' ),
+				'cookies'  => array(),
+			);
+		}
+		return $preempt;
+	};
+	$tmp_audio = wp_tempnam( 'alorbach-verify-speech-raw-' );
+	if ( ! $tmp_audio ) {
+		throw new RuntimeException( 'Could not create temporary Azure Speech raw-response fixture.' );
+	}
+	file_put_contents( $tmp_audio, "RIFF\x24\x00\x00\x00WAVEfmt " . str_repeat( "\0", 64 ) );
+	add_filter( 'pre_http_request', $transcribe_http, 10, 3 );
+	$transcribed_speech = \Alorbach\AIGateway\API_Client::transcribe( $tmp_audio, 'azure-speech', '', 'wav', array( 'locale' => 'en-US' ) );
+	remove_filter( 'pre_http_request', $transcribe_http, 10 );
+	wp_delete_file( $tmp_audio );
+	update_option( 'alorbach_api_keys', $original_api_keys );
+	alorbach_require( ! is_wp_error( $transcribed_speech ), 'Azure Speech transcription should return the mocked response.' );
+	alorbach_require( 'Raw timing' === $transcribed_speech['text'], 'Azure Speech transcription should still return normalized text.' );
+	alorbach_require( isset( $transcribed_speech['provider_details']['raw_provider_response_body'] ), 'Azure Speech queue diagnostics must include the raw provider response body.' );
+	alorbach_require( $raw_speech_body === $transcribed_speech['provider_details']['raw_provider_response_body'], 'Azure Speech raw provider response must be preserved exactly for queue comparison.' );
+	alorbach_require( strlen( $raw_speech_body ) === (int) $transcribed_speech['provider_details']['raw_provider_response_bytes'], 'Azure Speech raw provider response byte count must be recorded.' );
+
 	$openai_provider = \Alorbach\AIGateway\Providers\Provider_Registry::get( 'openai' );
 	$tmp_audio = wp_tempnam( 'alorbach-verify-openai-audio-' );
 	if ( ! $tmp_audio ) {

@@ -332,6 +332,13 @@
 		flex-direction: column;
 		align-items: flex-start;
 	}
+	.alorbach-local-codex-status {
+		align-items: flex-start;
+		flex-wrap: wrap;
+	}
+	.alorbach-local-codex-reconnect {
+		width: 100%;
+	}
 	.alorbach-demo-video-options {
 		grid-template-columns: 1fr;
 	}
@@ -414,6 +421,93 @@
 	padding: 0.75rem 1rem;
 	border-radius: 4px;
 	margin-bottom: 1rem;
+}
+
+.alorbach-local-codex-status {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: 1rem;
+	padding: 0.75rem 0.85rem;
+	background: #f8fafc;
+	border: 1px solid #cbd5e1;
+	border-radius: 8px;
+	color: #334155;
+}
+
+.alorbach-local-codex-status.is-hidden {
+	display: none;
+}
+
+.alorbach-local-codex-dot {
+	width: 0.65rem;
+	height: 0.65rem;
+	flex: 0 0 0.65rem;
+	border-radius: 999px;
+	background: #94a3b8;
+	box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.18);
+}
+
+.alorbach-local-codex-status.is-connected {
+	background: #f0fdf4;
+	border-color: #86efac;
+	color: #166534;
+}
+
+.alorbach-local-codex-status.is-connected .alorbach-local-codex-dot {
+	background: #16a34a;
+	box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.16);
+}
+
+.alorbach-local-codex-status.is-unpaired {
+	background: #fff7ed;
+	border-color: #fdba74;
+	color: #9a3412;
+}
+
+.alorbach-local-codex-status.is-unpaired .alorbach-local-codex-dot {
+	background: #f97316;
+	box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+}
+
+.alorbach-local-codex-status.is-offline {
+	background: #fef2f2;
+	border-color: #fca5a5;
+	color: #991b1b;
+}
+
+.alorbach-local-codex-status.is-offline .alorbach-local-codex-dot {
+	background: #dc2626;
+	box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.16);
+}
+
+.alorbach-local-codex-status.is-checking .alorbach-local-codex-dot {
+	background: #2563eb;
+	box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.alorbach-local-codex-copy {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	flex-direction: column;
+	gap: 0.15rem;
+}
+
+.alorbach-local-codex-title {
+	font-size: 0.88rem;
+	line-height: 1.25;
+}
+
+.alorbach-local-codex-detail {
+	font-size: 0.8rem;
+	line-height: 1.35;
+	color: currentColor;
+	opacity: 0.86;
+}
+
+.alorbach-local-codex-reconnect {
+	flex: 0 0 auto;
 }
 
 .alorbach-demo {

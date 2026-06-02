@@ -66,60 +66,151 @@
 		return fetch(url, opts);
 	}
 
+	function localCodexReadJson(response) {
+		return response.json().catch(function () {
+			return {};
+		});
+	}
+
+	function getLocalCodexErrorMessage(err, fallback) {
+		if (!err) {
+			return fallback || 'Local Codex bridge failed.';
+		}
+		return err.message || (err.error && err.error.message) || (err.data && err.data.message) || err.code || fallback || 'Local Codex bridge failed.';
+	}
+
+	function withLocalCodexContext(err, bridge) {
+		var normalized = (err && typeof err === 'object') ? err : { message: String(err || 'Local Codex bridge failed.') };
+		normalized.localCodex = true;
+		if (bridge) {
+			normalized.bridgeUrl = bridge.bridgeUrl || bridge.bridge_url || normalized.bridgeUrl || '';
+			normalized.origin = bridge.origin || normalized.origin || '';
+		}
+		normalized.message = getLocalCodexErrorMessage(normalized);
+		return normalized;
+	}
+
+	function isLocalCodexPairingError(err) {
+		var msg = getLocalCodexErrorMessage(err, '').toLowerCase();
+		var code = String((err && err.code) || (err && err.error) || '').toLowerCase();
+		var status = err && err.data && err.data.status;
+		return msg.indexOf('not paired') !== -1
+			|| msg.indexOf('pairing') !== -1
+			|| msg.indexOf('bridge token') !== -1
+			|| code.indexOf('pair') !== -1
+			|| code.indexOf('token') !== -1
+			|| ((status === 401 || status === 403) && msg.indexOf('codex') !== -1);
+	}
+
+	function getLocalCodexBridge(localConfig, forcePairing) {
+		var bridgeUrl = String(localConfig.bridge_url || 'http://127.0.0.1:8765').replace(/\/$/, '');
+		var origin = localConfig.origin || window.location.origin;
+		var storageKey = getLocalCodexStorageKey(origin);
+		if (forcePairing && window.localStorage) {
+			window.localStorage.removeItem(storageKey);
+		}
+		return {
+			bridgeUrl: bridgeUrl,
+			origin: origin,
+			storageKey: storageKey,
+			token: window.localStorage ? window.localStorage.getItem(storageKey) : ''
+		};
+	}
+
+	function saveLocalCodexToken(bridge, token) {
+		bridge.token = token;
+		if (window.localStorage) {
+			window.localStorage.setItem(bridge.storageKey, token);
+		}
+		return bridge;
+	}
+
+	function getLocalCodexStatus(localConfig) {
+		var bridge = getLocalCodexBridge(localConfig, false);
+		return localCodexFetch(bridge.bridgeUrl + '/v1/status', { method: 'GET' }).then(function (statusResponse) {
+			if (!statusResponse.ok) {
+				return localCodexReadJson(statusResponse).then(function (d) {
+					throw withLocalCodexContext(d, bridge);
+				});
+			}
+			return localCodexReadJson(statusResponse).then(function (statusData) {
+				return {
+					state: bridge.token ? 'connected' : 'unpaired',
+					bridge: bridge,
+					status: statusData,
+					message: bridge.token ? 'Codex Bridge connected.' : 'Codex Bridge is installed, but this WordPress origin is not paired.'
+				};
+			});
+		}).catch(function (err) {
+			return {
+				state: 'offline',
+				bridge: bridge,
+				error: withLocalCodexContext(err, bridge),
+				message: 'Codex Bridge is not reachable at ' + bridge.bridgeUrl + '.'
+			};
+		});
+	}
+
+	function pairLocalCodexBridge(bridge) {
+		var pairingCode = window.prompt('Enter the pairing code shown in the Alorbach Codex Bridge tray app.');
+		if (!pairingCode) {
+			throw withLocalCodexContext({ message: 'Local Codex pairing was cancelled.' }, bridge);
+		}
+		return localCodexFetch(bridge.bridgeUrl + '/v1/pair', {
+			method: 'POST',
+			body: { origin: bridge.origin, pairing_code: pairingCode }
+		}).then(function (pairResponse) {
+			if (!pairResponse.ok) {
+				return localCodexReadJson(pairResponse).then(function (d) {
+					throw withLocalCodexContext(d, bridge);
+				});
+			}
+			return localCodexReadJson(pairResponse);
+		}).then(function (pairData) {
+			if (!pairData.token) {
+				throw withLocalCodexContext({ message: 'Local Codex bridge did not return a pairing token.' }, bridge);
+			}
+			return saveLocalCodexToken(bridge, pairData.token);
+		});
+	}
+
 	function getLocalCodexConfig() {
 		return apiFetch('/local-codex/config').then(function (r) {
-			if (!r.ok) return r.json().then(function (d) { throw d; });
+			if (!r.ok) return localCodexReadJson(r).then(function (d) { throw withLocalCodexContext(d); });
 			return r.json();
 		});
 	}
 
-	function ensureLocalCodexPairing(localConfig) {
-		var bridgeUrl = String(localConfig.bridge_url || 'http://127.0.0.1:8765').replace(/\/$/, '');
-		var origin = localConfig.origin || window.location.origin;
-		var storageKey = getLocalCodexStorageKey(origin);
-		var token = window.localStorage ? window.localStorage.getItem(storageKey) : '';
+	function ensureLocalCodexPairing(localConfig, options) {
+		var opts = options || {};
+		var bridge = getLocalCodexBridge(localConfig, !!opts.forcePairing);
 
-		return localCodexFetch(bridgeUrl + '/v1/status', { method: 'GET' }).then(function (statusResponse) {
+		return localCodexFetch(bridge.bridgeUrl + '/v1/status', { method: 'GET' }).then(function (statusResponse) {
 			if (!statusResponse.ok) {
-				return statusResponse.json().then(function (d) { throw { message: d.message || 'Local Codex tray app is not ready.' }; });
+				return localCodexReadJson(statusResponse).then(function (d) {
+					throw withLocalCodexContext({ message: d.message || 'Local Codex tray app is not ready.' }, bridge);
+				});
 			}
-			if (token) {
-				return { bridgeUrl: bridgeUrl, origin: origin, token: token };
+			if (bridge.token && !opts.forcePairing) {
+				return bridge;
 			}
-			var pairingCode = window.prompt('Enter the pairing code shown in the Alorbach Codex Bridge tray app.');
-			if (!pairingCode) {
-				throw { message: 'Local Codex pairing was cancelled.' };
-			}
-			return localCodexFetch(bridgeUrl + '/v1/pair', {
-				method: 'POST',
-				body: { origin: origin, pairing_code: pairingCode }
-			}).then(function (pairResponse) {
-				if (!pairResponse.ok) return pairResponse.json().then(function (d) { throw d; });
-				return pairResponse.json();
-			}).then(function (pairData) {
-				if (!pairData.token) {
-					throw { message: 'Local Codex bridge did not return a pairing token.' };
-				}
-				if (window.localStorage) {
-					window.localStorage.setItem(storageKey, pairData.token);
-				}
-				return { bridgeUrl: bridgeUrl, origin: origin, token: pairData.token };
-			});
+			return pairLocalCodexBridge(bridge);
+		}).catch(function (err) {
+			throw withLocalCodexContext(err, bridge);
 		});
 	}
 
-	function localCodexExecute(type, payload) {
+	function localCodexExecute(type, payload, options) {
 		var localConfig;
-		var job;
-		return getLocalCodexConfig().then(function (cfg) {
-			localConfig = cfg;
-			return ensureLocalCodexPairing(localConfig);
-		}).then(function (bridge) {
+		var opts = options || {};
+
+		function runWithBridge(bridge) {
+			var job;
 			return apiFetch('/local-codex/jobs', {
 				method: 'POST',
 				body: { type: type, payload: payload }
 			}).then(function (r) {
-				if (!r.ok) return r.json().then(function (d) { throw d; });
+				if (!r.ok) return localCodexReadJson(r).then(function (d) { throw withLocalCodexContext(d, bridge); });
 				return r.json();
 			}).then(function (createdJob) {
 				job = createdJob;
@@ -140,7 +231,7 @@
 				});
 			}).then(function (bridgeResponse) {
 				if (!bridgeResponse.ok) {
-					return bridgeResponse.json().then(function (d) { throw d; });
+					return localCodexReadJson(bridgeResponse).then(function (d) { throw withLocalCodexContext(d, bridge); });
 				}
 				return bridgeResponse.json();
 			}).then(function (bridgeResult) {
@@ -155,7 +246,7 @@
 						result: bridgeResult
 					}
 				}).then(function (r) {
-					if (!r.ok) return r.json().then(function (d) { throw d; });
+					if (!r.ok) return localCodexReadJson(r).then(function (d) { throw withLocalCodexContext(d, bridge); });
 					return r.json();
 				});
 			}).catch(function (err) {
@@ -169,9 +260,28 @@
 						}
 					}).catch(function () {});
 				}
-				throw err;
+				throw withLocalCodexContext(err, bridge);
 			});
-		});
+		}
+
+		function attempt(forcePairing, allowReconnect) {
+			return (localConfig ? Promise.resolve(localConfig) : getLocalCodexConfig().then(function (cfg) {
+				localConfig = cfg;
+				return localConfig;
+			})).then(function (cfg) {
+				return ensureLocalCodexPairing(cfg, { forcePairing: forcePairing });
+			}).then(function (bridge) {
+				return runWithBridge(bridge);
+			}).catch(function (err) {
+				var normalized = withLocalCodexContext(err, getLocalCodexBridge(localConfig || {}, false));
+				if (allowReconnect && isLocalCodexPairingError(normalized)) {
+					return attempt(true, false);
+				}
+				throw normalized;
+			});
+		}
+
+		return attempt(!!opts.forcePairing, opts.retryPairing !== false);
 	}
 
 	function getBalance(container) {
@@ -224,6 +334,99 @@
 	function clearError(container) {
 		var el = container.querySelector('.alorbach-demo-error');
 		if (el) el.style.display = 'none';
+	}
+
+	function getLocalCodexStatusHelper(container) {
+		var helper = container.querySelector('.alorbach-local-codex-status');
+		var formCard;
+		var actionRow;
+		if (helper) {
+			return helper;
+		}
+		formCard = container.querySelector('.alorbach-demo-form-card') || container;
+		actionRow = formCard.querySelector('.alorbach-demo-action-row');
+		helper = document.createElement('div');
+		helper.className = 'alorbach-local-codex-status is-hidden';
+		helper.setAttribute('aria-live', 'polite');
+		helper.innerHTML = '<span class="alorbach-local-codex-dot" aria-hidden="true"></span><span class="alorbach-local-codex-copy"><strong class="alorbach-local-codex-title">Codex Bridge</strong><span class="alorbach-local-codex-detail">Checking bridge status...</span></span><button type="button" class="button alorbach-local-codex-reconnect">Reconnect</button>';
+		if (actionRow && actionRow.parentNode) {
+			actionRow.parentNode.insertBefore(helper, actionRow);
+		} else {
+			formCard.appendChild(helper);
+		}
+		return helper;
+	}
+
+	function setLocalCodexStatus(container, state, title, detail) {
+		var helper = getLocalCodexStatusHelper(container);
+		helper.className = 'alorbach-local-codex-status is-' + state;
+		helper.querySelector('.alorbach-local-codex-title').textContent = title || 'Codex Bridge';
+		helper.querySelector('.alorbach-local-codex-detail').textContent = detail || '';
+		return helper;
+	}
+
+	function hideLocalCodexStatus(container) {
+		var helper = container.querySelector('.alorbach-local-codex-status');
+		if (helper) {
+			helper.className = 'alorbach-local-codex-status is-hidden';
+		}
+	}
+
+	function refreshLocalCodexStatus(container, selectedModel) {
+		if (!isLocalCodexModel(selectedModel)) {
+			hideLocalCodexStatus(container);
+			return Promise.resolve(null);
+		}
+
+		setLocalCodexStatus(container, 'checking', 'Codex Bridge', 'Checking bridge status...');
+		return getLocalCodexConfig().then(function (cfg) {
+			return getLocalCodexStatus(cfg);
+		}).then(function (status) {
+			if (status.state === 'connected') {
+				setLocalCodexStatus(container, 'connected', 'Codex Bridge connected', 'Local bridge is reachable and this browser has a pairing token.');
+			} else if (status.state === 'unpaired') {
+				setLocalCodexStatus(container, 'unpaired', 'Codex Bridge pairing needed', status.message);
+			} else {
+				setLocalCodexStatus(container, 'offline', 'Codex Bridge not reachable', status.message);
+			}
+			return status;
+		}).catch(function (err) {
+			setLocalCodexStatus(container, 'offline', 'Codex Bridge unavailable', getLocalCodexErrorMessage(err, 'Local Codex configuration is unavailable.'));
+			return null;
+		});
+	}
+
+	function bindLocalCodexStatus(container, getSelectedModel) {
+		var helper = getLocalCodexStatusHelper(container);
+		var reconnectBtn = helper.querySelector('.alorbach-local-codex-reconnect');
+
+		function selectedModel() {
+			return getSelectedModel ? getSelectedModel() : '';
+		}
+
+		if (reconnectBtn) {
+			reconnectBtn.addEventListener('click', function () {
+				if (!isLocalCodexModel(selectedModel())) {
+					hideLocalCodexStatus(container);
+					return;
+				}
+				reconnectBtn.disabled = true;
+				setLocalCodexStatus(container, 'checking', 'Reconnecting Codex Bridge', 'Checking the tray app and refreshing this origin pairing...');
+				getLocalCodexConfig().then(function (cfg) {
+					return ensureLocalCodexPairing(cfg, { forcePairing: true });
+				}).then(function () {
+					setLocalCodexStatus(container, 'connected', 'Codex Bridge connected', 'Pairing token refreshed for this WordPress origin.');
+				}).catch(function (err) {
+					var msg = getLocalCodexErrorMessage(err, 'Could not reconnect to Codex Bridge.');
+					var state = isLocalCodexPairingError(err) ? 'unpaired' : 'offline';
+					setLocalCodexStatus(container, state, state === 'unpaired' ? 'Codex Bridge pairing needed' : 'Codex Bridge not reachable', msg);
+				}).finally(function () {
+					reconnectBtn.disabled = false;
+				});
+			});
+		}
+
+		return refreshLocalCodexStatus(container, selectedModel());
 	}
 
 	function downloadFileName(item, fallback) {
@@ -313,6 +516,10 @@
 		var modelSelect = container.querySelector('.alorbach-demo-model-select');
 		var maxTokensSelect = container.querySelector('.alorbach-demo-max-tokens');
 
+		function currentChatModel() {
+			return (modelSelect && modelSelect.value) || container.dataset.model || 'gpt-4.1-mini';
+		}
+
 		getModels(container).then(function (models) {
 			var text = models.text || {};
 			var canSelectTextModel = isAllowSelectEnabled(text.allow_select);
@@ -349,9 +556,18 @@
 					maxTokensSelect.appendChild(o);
 				});
 			}
+			refreshLocalCodexStatus(container, currentChatModel());
 		});
 
-			function appendMessage(role, content, usageInfo) {
+		bindLocalCodexStatus(container, currentChatModel);
+		if (modelSelect) {
+			modelSelect.addEventListener('change', function () {
+				container.dataset.model = modelSelect.value || container.dataset.model || 'gpt-4.1-mini';
+				refreshLocalCodexStatus(container, currentChatModel());
+			});
+		}
+
+		function appendMessage(role, content, usageInfo) {
 			var div = document.createElement('div');
 			div.className = 'alorbach-demo-message ' + role;
 			var html = '<div class="role">' + role + '</div><div class="content">' + (content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</div>';
@@ -365,7 +581,7 @@
 			var text = (inputEl && inputEl.value || '').trim();
 			if (!text) return;
 			clearError(container);
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'gpt-4.1-mini';
+			var model = currentChatModel();
 			var maxTokens = (maxTokensSelect && parseInt(maxTokensSelect.value, 10)) || 1024;
 			var messages = [];
 			var msgEls = container.querySelectorAll('.alorbach-demo-message');
@@ -408,6 +624,9 @@
 				getBalance(container);
 			}).catch(function (err) {
 				handleError(err, container);
+				if (err && err.localCodex) {
+					refreshLocalCodexStatus(container, currentChatModel());
+				}
 			}).finally(function () {
 				container.classList.remove('alorbach-demo-loading');
 				if (sendBtn) sendBtn.disabled = false;
@@ -450,6 +669,10 @@
 		var activeJobId = null;
 		var streamSettled = false;
 
+		function currentImageModel() {
+			return (modelSelect && modelSelect.value) || container.dataset.model || 'dall-e-3';
+		}
+
 		function isCodexImageModel(model) {
 			return String(model || '').indexOf('codex-image-') === 0 || model === 'codex-local:image';
 		}
@@ -476,7 +699,7 @@
 		function syncQualityOptions() {
 			if (!qualitySelect) return;
 			var q = imageConfig && imageConfig.quality ? imageConfig.quality : {};
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || '';
+			var model = currentImageModel();
 			var options = getAllowedQualityOptions(model, q);
 			var desired = (qualitySelect.value || container.dataset.quality || '').toLowerCase();
 			var fallback = getDefaultQualityForModel(model, q);
@@ -539,13 +762,14 @@
 			container.dataset.quality = getDefaultQualityForModel(container.dataset.model, q);
 			syncQualityOptions();
 			syncQualityVisibility();
+			refreshLocalCodexStatus(container, currentImageModel());
 			refreshImageCost();
 		});
 
 		function refreshImageCost() {
 			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1024x1024';
 			var quality = (qualitySelect && qualitySelect.value) || container.dataset.quality || 'medium';
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'dall-e-3';
+			var model = currentImageModel();
 			var n = (nInput && parseInt(nInput.value, 10)) || 1;
 			n = Math.min(10, Math.max(1, n));
 			var estimateParams = { type: 'image', size: size, model: model, n: n };
@@ -555,8 +779,10 @@
 
 		if (sizeSelect) sizeSelect.addEventListener('change', refreshImageCost);
 		if (modelSelect) modelSelect.addEventListener('change', function () {
+			container.dataset.model = modelSelect.value || container.dataset.model || 'dall-e-3';
 			syncQualityOptions();
 			syncQualityVisibility();
+			refreshLocalCodexStatus(container, currentImageModel());
 			refreshImageCost();
 		});
 		if (qualitySelect) qualitySelect.addEventListener('change', function () {
@@ -565,6 +791,7 @@
 		});
 		if (nInput) nInput.addEventListener('change', refreshImageCost);
 		if (nInput) nInput.addEventListener('input', refreshImageCost);
+		bindLocalCodexStatus(container, currentImageModel);
 
 		function stageLabel(stage) {
 			return labels[stage] || stage || (labels.queued || 'Queued');
@@ -928,7 +1155,7 @@
 			clearError(container);
 			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1024x1024';
 			var quality = (qualitySelect && qualitySelect.value) || container.dataset.quality || 'medium';
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'dall-e-3';
+			var model = currentImageModel();
 			var n = (nInput && parseInt(nInput.value, 10)) || 1;
 			n = Math.min(10, Math.max(1, n));
 			container.classList.add('alorbach-demo-loading');
@@ -955,6 +1182,9 @@
 					getBalance(container);
 				}).catch(function (err) {
 					handleError(err, container);
+					if (err && err.localCodex) {
+						refreshLocalCodexStatus(container, currentImageModel());
+					}
 				}).finally(function () {
 					finishGenerate();
 				});

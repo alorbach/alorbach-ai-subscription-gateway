@@ -591,6 +591,26 @@ class API_Client {
 	}
 
 	/**
+	 * Build bounded raw provider response diagnostics for queue inspection.
+	 *
+	 * @param string $raw_body Raw provider response body.
+	 * @param int    $code     HTTP status code.
+	 * @return array
+	 */
+	private static function raw_provider_response_debug( $raw_body, $code ) {
+		$raw_body  = (string) $raw_body;
+		$max_bytes = 262144;
+		$bytes     = strlen( $raw_body );
+
+		return array(
+			'http_status'                    => (int) $code,
+			'raw_provider_response_bytes'    => $bytes,
+			'raw_provider_response_truncated' => $bytes > $max_bytes,
+			'raw_provider_response_body'     => substr( $raw_body, 0, $max_bytes ),
+		);
+	}
+
+	/**
 	 * Normalize Gemini API response to OpenAI-style format.
 	 *
 	 * @param array $body Gemini response.
@@ -1518,13 +1538,23 @@ class API_Client {
 		if ( $code >= 400 ) {
 			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
 			$error_data = array( 'status' => $code );
+			$raw_debug = self::raw_provider_response_debug( $raw_body, $code );
 			if ( ! empty( $request['provider_details'] ) && is_array( $request['provider_details'] ) ) {
 				$error_data['provider_details'] = array_merge(
 					$request['provider_details'],
 					array(
 						'http_status'    => $code,
 						'provider_error' => $msg,
-					)
+					),
+					$raw_debug
+				);
+			} else {
+				$error_data['provider_details'] = array_merge(
+					array(
+						'http_status'    => $code,
+						'provider_error' => $msg,
+					),
+					$raw_debug
 				);
 			}
 			return new \WP_Error( 'api_error', $msg, $error_data );
@@ -1534,16 +1564,27 @@ class API_Client {
 			$text = isset( $body_response['choices'][0]['message']['content'] )
 				? (string) $body_response['choices'][0]['message']['content']
 				: '';
-			return array( 'text' => $text );
+			return array(
+				'text'             => $text,
+				'provider_details' => self::raw_provider_response_debug( $raw_body, $code ),
+			);
 		}
 		if ( ! empty( $request['response_format'] ) && $request['response_format'] === 'azure_speech' && method_exists( $prov, 'parse_transcribe_response' ) ) {
 			$result = $prov->parse_transcribe_response( $body_response, $raw_body, $request );
-			if ( isset( $result['provider_details'] ) && is_array( $result['provider_details'] ) ) {
-				$result['provider_details']['http_status'] = $code;
-			}
+			$result['provider_details'] = array_merge(
+				isset( $result['provider_details'] ) && is_array( $result['provider_details'] ) ? $result['provider_details'] : array(),
+				self::raw_provider_response_debug( $raw_body, $code )
+			);
 			return $result;
 		}
-		return is_array( $body_response ) ? $body_response : array( 'text' => (string) $raw_body );
+		$result = is_array( $body_response ) ? $body_response : array( 'text' => (string) $raw_body );
+		if ( is_array( $result ) ) {
+			$result['provider_details'] = array_merge(
+				isset( $result['provider_details'] ) && is_array( $result['provider_details'] ) ? $result['provider_details'] : array(),
+				self::raw_provider_response_debug( $raw_body, $code )
+			);
+		}
+		return $result;
 	}
 
 	/**

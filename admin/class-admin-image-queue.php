@@ -775,7 +775,7 @@ class Admin_Image_Queue {
 
 					var entries = Object.keys(details).filter(function (key) {
 						var value = details[key];
-						return value !== null && value !== '' && typeof value !== 'undefined' && (!Array.isArray(value) || value.length);
+						return key !== 'raw_provider_response_body' && value !== null && value !== '' && typeof value !== 'undefined' && (!Array.isArray(value) || value.length);
 					});
 					if (!entries.length) {
 						return '<p class="alorbach-image-queue__empty">No provider details recorded.</p>';
@@ -817,6 +817,13 @@ class Admin_Image_Queue {
 						html += renderPromptCard(resultTitle, resultText, 'Copy Result');
 					} else {
 						html += '<p class="alorbach-image-queue__empty">No returned text was recorded for this job.</p>';
+					}
+					if (job.provider_details && job.provider_details.raw_provider_response_body) {
+						var rawTitle = 'Raw Provider Response';
+						if (job.provider_details.raw_provider_response_truncated) {
+							rawTitle += ' (truncated at ' + String(job.provider_details.raw_provider_response_body.length) + ' bytes)';
+						}
+						html += renderPromptCard(rawTitle, job.provider_details.raw_provider_response_body, 'Copy Raw Response');
 					}
 					return html;
 				}
