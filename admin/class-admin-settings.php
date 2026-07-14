@@ -249,6 +249,8 @@ class Admin_Settings {
 			$local_codex_bridge_url     = isset( $_POST['alorbach_local_codex_bridge_url'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_local_codex_bridge_url'] ) ) : 'http://127.0.0.1:8765';
 			$local_codex_chat_fee_uc    = isset( $_POST['alorbach_local_codex_chat_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_chat_fee_uc'] ) ) ) : 0;
 			$local_codex_image_fee_uc   = isset( $_POST['alorbach_local_codex_image_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_image_fee_uc'] ) ) ) : 0;
+			$local_codex_audio_fee_uc   = isset( $_POST['alorbach_local_codex_audio_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_audio_fee_uc'] ) ) ) : 0;
+			$local_codex_video_fee_uc   = isset( $_POST['alorbach_local_codex_video_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_video_fee_uc'] ) ) ) : 0;
 			$rate_limit_window          = isset( $_POST['alorbach_rate_limit_window'] ) ? max( 10, min( 3600, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_window'] ) ) ) ) : 60;
 			$rate_limit_chat            = isset( $_POST['alorbach_rate_limit_chat'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_chat'] ) ) ) ) : 100;
 			$rate_limit_images          = isset( $_POST['alorbach_rate_limit_images'] ) ? max( 1, min( 9999, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_rate_limit_images'] ) ) ) ) : 30;
@@ -296,10 +298,12 @@ class Admin_Settings {
 			} elseif ( 'providers' === $active_tab ) {
 				update_option( 'alorbach_google_import_default', $google_import_default );
 				update_option( 'alorbach_google_model_whitelist', $google_model_whitelist );
-				update_option( 'alorbach_local_codex_enabled', $local_codex_enabled );
-				update_option( 'alorbach_local_codex_bridge_url', $local_codex_bridge_url ?: 'http://127.0.0.1:8765' );
-				update_option( 'alorbach_local_codex_chat_fee_uc', $local_codex_chat_fee_uc );
-				update_option( 'alorbach_local_codex_image_fee_uc', $local_codex_image_fee_uc );
+				\Alorbach\AIGateway\AI_Bridge::update_setting( 'enabled', $local_codex_enabled );
+				\Alorbach\AIGateway\AI_Bridge::update_setting( 'bridge_url', $local_codex_bridge_url ?: 'http://127.0.0.1:8765' );
+				\Alorbach\AIGateway\AI_Bridge::update_setting( 'chat_fee_uc', $local_codex_chat_fee_uc );
+				\Alorbach\AIGateway\AI_Bridge::update_setting( 'image_fee_uc', $local_codex_image_fee_uc );
+				\Alorbach\AIGateway\AI_Bridge::update_setting( 'audio_fee_uc', $local_codex_audio_fee_uc );
+				\Alorbach\AIGateway\AI_Bridge::update_setting( 'video_fee_uc', $local_codex_video_fee_uc );
 			} else {
 				update_option( 'alorbach_selling_enabled', $selling_enabled );
 				update_option( 'alorbach_selling_multiplier', $selling_multiplier );
@@ -316,10 +320,12 @@ class Admin_Settings {
 		$debug_enabled              = (bool) get_option( 'alorbach_debug_enabled', false );
 		$google_import_default      = get_option( 'alorbach_google_import_default', 'all' );
 		$google_model_whitelist     = get_option( 'alorbach_google_model_whitelist', \Alorbach\AIGateway\Model_Importer::GOOGLE_MODEL_WHITELIST_DEFAULT );
-		$local_codex_enabled        = (bool) get_option( 'alorbach_local_codex_enabled', true );
-		$local_codex_bridge_url     = (string) get_option( 'alorbach_local_codex_bridge_url', 'http://127.0.0.1:8765' );
-		$local_codex_chat_fee_uc    = (int) get_option( 'alorbach_local_codex_chat_fee_uc', 0 );
-		$local_codex_image_fee_uc   = (int) get_option( 'alorbach_local_codex_image_fee_uc', 0 );
+		$local_codex_enabled        = (bool) \Alorbach\AIGateway\AI_Bridge::get_setting( 'enabled', true );
+		$local_codex_bridge_url     = (string) \Alorbach\AIGateway\AI_Bridge::get_setting( 'bridge_url', 'http://127.0.0.1:8765' );
+		$local_codex_chat_fee_uc    = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'chat_fee_uc', 0 );
+		$local_codex_image_fee_uc   = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'image_fee_uc', 0 );
+		$local_codex_audio_fee_uc   = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'audio_fee_uc', 0 );
+		$local_codex_video_fee_uc   = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'video_fee_uc', 0 );
 		$rate_limit_window          = (int) get_option( 'alorbach_rate_limit_window', 60 );
 		$rate_limit_chat            = (int) get_option( 'alorbach_rate_limit_chat', 100 );
 		$rate_limit_images          = (int) get_option( 'alorbach_rate_limit_images', 30 );
@@ -544,43 +550,57 @@ class Admin_Settings {
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><?php esc_html_e( 'User-owned local Codex', 'alorbach-ai-gateway' ); ?></th>
+								<th scope="row"><?php esc_html_e( 'User-owned AI Model Relay', 'alorbach-ai-gateway' ); ?></th>
 								<td>
 									<label for="alorbach_local_codex_enabled">
 										<input type="checkbox" name="alorbach_local_codex_enabled" id="alorbach_local_codex_enabled" value="1" <?php checked( $local_codex_enabled ); ?> />
-										<?php esc_html_e( 'Allow logged-in users to use their own local Codex tray bridge', 'alorbach-ai-gateway' ); ?>
+										<?php esc_html_e( 'Allow logged-in users to use their own AI Model Relay tray app', 'alorbach-ai-gateway' ); ?>
 									</label>
 									<p class="description"><?php esc_html_e( 'The browser talks to the user-owned tray app on localhost. WordPress still controls plans, quotas, and audit records.', 'alorbach-ai-gateway' ); ?></p>
 									<p class="description">
 										<?php
 										printf(
-											/* translators: %s: Local Codex Bridge releases URL. */
-											wp_kses_post( __( 'Users install the Windows companion app from <a href="%s" target="_blank" rel="noopener noreferrer">Local Codex Bridge releases</a>.', 'alorbach-ai-gateway' ) ),
-											esc_url( 'https://github.com/alorbach/codex-local-bridge/releases' )
+											/* translators: %s: AI Model Relay releases URL. */
+											wp_kses_post( __( 'Users install the Windows companion app from <a href="%s" target="_blank" rel="noopener noreferrer">AI Model Relay releases</a>.', 'alorbach-ai-gateway' ) ),
+											esc_url( 'https://github.com/alorbach/ai-model-relay/releases' )
 										);
 										?>
 									</p>
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><label for="alorbach_local_codex_bridge_url"><?php esc_html_e( 'Local Codex bridge URL', 'alorbach-ai-gateway' ); ?></label></th>
+								<th scope="row"><label for="alorbach_local_codex_bridge_url"><?php esc_html_e( 'AI Model Relay URL', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<input type="url" name="alorbach_local_codex_bridge_url" id="alorbach_local_codex_bridge_url" value="<?php echo esc_attr( $local_codex_bridge_url ); ?>" class="regular-text code" />
 									<p class="description"><?php esc_html_e( 'Default: http://127.0.0.1:8765. Keep this as localhost unless you intentionally package a different port.', 'alorbach-ai-gateway' ); ?></p>
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><label for="alorbach_local_codex_chat_fee_uc"><?php esc_html_e( 'Local Codex chat fee (UC)', 'alorbach-ai-gateway' ); ?></label></th>
+								<th scope="row"><label for="alorbach_local_codex_chat_fee_uc"><?php esc_html_e( 'AI Model Relay chat fee (UC)', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<input type="number" name="alorbach_local_codex_chat_fee_uc" id="alorbach_local_codex_chat_fee_uc" value="<?php echo esc_attr( $local_codex_chat_fee_uc ); ?>" min="0" step="1000" class="regular-text" />
-									<p class="description"><?php esc_html_e( 'Optional Gateway fee charged per local Codex chat request. 0 means the user only spends their own Codex allowance.', 'alorbach-ai-gateway' ); ?></p>
+									<p class="description"><?php esc_html_e( 'Optional Gateway fee charged per AI Model Relay chat request. 0 means the user only spends their own provider allowance.', 'alorbach-ai-gateway' ); ?></p>
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><label for="alorbach_local_codex_image_fee_uc"><?php esc_html_e( 'Local Codex image fee (UC)', 'alorbach-ai-gateway' ); ?></label></th>
+								<th scope="row"><label for="alorbach_local_codex_image_fee_uc"><?php esc_html_e( 'AI Model Relay image fee (UC)', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<input type="number" name="alorbach_local_codex_image_fee_uc" id="alorbach_local_codex_image_fee_uc" value="<?php echo esc_attr( $local_codex_image_fee_uc ); ?>" min="0" step="1000" class="regular-text" />
-									<p class="description"><?php esc_html_e( 'Optional Gateway fee charged per local Codex image request.', 'alorbach-ai-gateway' ); ?></p>
+									<p class="description"><?php esc_html_e( 'Optional Gateway fee charged per AI Model Relay image request.', 'alorbach-ai-gateway' ); ?></p>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row"><label for="alorbach_local_codex_audio_fee_uc"><?php esc_html_e( 'AI Model Relay audio fee (UC)', 'alorbach-ai-gateway' ); ?></label></th>
+								<td>
+									<input type="number" name="alorbach_local_codex_audio_fee_uc" id="alorbach_local_codex_audio_fee_uc" value="<?php echo esc_attr( $local_codex_audio_fee_uc ); ?>" min="0" step="1000" class="regular-text" />
+									<p class="description"><?php esc_html_e( 'Optional Gateway fee charged per AI Model Relay transcription request.', 'alorbach-ai-gateway' ); ?></p>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row"><label for="alorbach_local_codex_video_fee_uc"><?php esc_html_e( 'AI Model Relay video fee (UC)', 'alorbach-ai-gateway' ); ?></label></th>
+								<td>
+									<input type="number" name="alorbach_local_codex_video_fee_uc" id="alorbach_local_codex_video_fee_uc" value="<?php echo esc_attr( $local_codex_video_fee_uc ); ?>" min="0" step="1000" class="regular-text" />
+									<p class="description"><?php esc_html_e( 'Optional Gateway fee charged per experimental relay video request.', 'alorbach-ai-gateway' ); ?></p>
 								</td>
 							</tr>
 						</table>

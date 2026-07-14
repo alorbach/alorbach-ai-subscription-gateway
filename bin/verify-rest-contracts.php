@@ -81,6 +81,18 @@ function alorbach_require( $condition, $message ) {
 	}
 }
 
+/**
+ * Attach JSON body params to a REST request.
+ *
+ * @param WP_REST_Request $request Request.
+ * @param array           $params Params.
+ * @return void
+ */
+function alorbach_set_json_body( WP_REST_Request $request, array $params ) {
+	$request->set_header( 'Content-Type', 'application/json' );
+	$request->set_body( wp_json_encode( $params ) );
+}
+
 try {
 	$config  = alorbach_verify_request( '/alorbach/v1/integration/config' );
 	$plans   = alorbach_verify_request( '/alorbach/v1/integration/plans' );
@@ -103,6 +115,225 @@ try {
 	foreach ( $models['image']['preview_models'] as $preview_model ) {
 		if ( ! in_array( $preview_model, $models['image']['provider_progress_models'], true ) ) {
 			throw new RuntimeException( 'Every preview model must also be listed as a provider-progress model.' );
+		}
+	}
+
+	$old_local_codex_enabled = get_option( 'alorbach_local_codex_enabled', true );
+	$old_local_codex_audio_fee_uc = get_option( 'alorbach_local_codex_audio_fee_uc', 0 );
+	$old_ai_bridge_enabled = get_option( 'alorbach_ai_bridge_enabled', '__alorbach_missing__' );
+	$old_ai_bridge_audio_fee_uc = get_option( 'alorbach_ai_bridge_audio_fee_uc', '__alorbach_missing__' );
+	$old_plans = get_option( 'alorbach_plans', '__alorbach_missing__' );
+	try {
+		$local_codex_verify_run_id = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : uniqid( 'local-codex-audio-', true );
+		\Alorbach\AIGateway\AI_Bridge::update_setting( 'enabled', true );
+		\Alorbach\AIGateway\AI_Bridge::update_setting( 'audio_fee_uc', 0 );
+		delete_option( 'alorbach_ai_bridge_contract_probe' );
+		update_option( 'alorbach_local_codex_contract_probe', 'legacy-value', false );
+		alorbach_require( 'legacy-value' === \Alorbach\AIGateway\AI_Bridge::get_setting( 'contract_probe' ) && 'legacy-value' === get_option( 'alorbach_ai_bridge_contract_probe' ), 'AI Bridge settings must migrate legacy option values on read.' );
+		\Alorbach\AIGateway\AI_Bridge::update_setting( 'contract_probe', 'dual-value' );
+		alorbach_require( 'dual-value' === get_option( 'alorbach_ai_bridge_contract_probe' ) && 'dual-value' === get_option( 'alorbach_local_codex_contract_probe' ), 'AI Bridge settings must dual-write canonical and legacy option names.' );
+		delete_option( 'alorbach_ai_bridge_contract_probe' );
+		delete_option( 'alorbach_local_codex_contract_probe' );
+		$test_plans = is_array( $old_plans ) ? $old_plans : \Alorbach\AIGateway\Integration_Service::get_default_plans();
+		foreach ( $test_plans as &$test_plan ) {
+			$test_plan['capabilities'] = array( 'chat' => true, 'image' => true, 'audio' => true, 'video' => true );
+			$test_plan['allowed_models'] = array( 'chat' => array(), 'image' => array(), 'audio' => array(), 'video' => array() );
+		}
+		unset( $test_plan );
+		update_option( 'alorbach_plans', $test_plans, false );
+		$local_codex_verify = \Alorbach\AIGateway\API_Validator::verify_key( 'codex_local' );
+		$ai_bridge_verify = \Alorbach\AIGateway\API_Validator::verify_key( 'ai_bridge' );
+		alorbach_require( ! empty( $local_codex_verify['success'] ) && false !== strpos( (string) ( $local_codex_verify['message'] ?? '' ), 'browser tray app' ), 'Legacy Local Codex validation must pass when AI Model Relay is enabled without a stored API key.' );
+		alorbach_require( ! empty( $ai_bridge_verify['success'] ), 'The canonical AI Bridge provider must be registered and enabled.' );
+		$local_codex_config = \Alorbach\AIGateway\Integration_Service::get_integration_config( 0 );
+		alorbach_require( isset( $local_codex_config['ai_bridge'] ) && $local_codex_config['ai_bridge'] === $local_codex_config['local_codex'], '/integration/config must expose identical ai_bridge and local_codex compatibility objects.' );
+		alorbach_require( 'codex-local:audio' === ( $local_codex_config['local_codex']['audio_model'] ?? '' ), '/integration/config must expose the Local Codex audio model id.' );
+		alorbach_require( in_array( 'codex-local:audio', $local_codex_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose codex-local:audio in the audio catalog.' );
+		alorbach_require( in_array( 'codex-local:audio:whisper-large-v3', $local_codex_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose Local Whisper submodels in the audio catalog.' );
+
+		$ai_bridge_config = alorbach_verify_request( '/alorbach/v1/ai-bridge/config' );
+		$legacy_bridge_config = alorbach_verify_request( '/alorbach/v1/local-codex/config' );
+		alorbach_require( 'AI Model Relay' === ( $ai_bridge_config['product_name'] ?? '' ) && ( $ai_bridge_config['bridge_url'] ?? '' ) === ( $legacy_bridge_config['bridge_url'] ?? null ), 'Canonical and legacy bridge config routes must expose equivalent settings.' );
+		alorbach_require( 'model-relay:*' === ( $ai_bridge_config['model_policy']['relay_wildcard'] ?? '' ), 'AI Bridge config must expose the capability-scoped relay wildcard policy.' );
+
+		$relay_chat_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $relay_chat_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:cursor-cli:auto', 'messages' => array( array( 'role' => 'user', 'content' => 'Relay contract ' . $local_codex_verify_run_id ) ) ) ) );
+		$relay_chat_response = rest_do_request( $relay_chat_create );
+		$relay_chat_data = $relay_chat_response->get_data();
+		alorbach_require( 200 === $relay_chat_response->get_status() && 'model-relay:cursor-cli:auto' === ( $relay_chat_data['payload']['model'] ?? '' ), 'Canonical AI Bridge jobs must sign Cursor chat models.' );
+		$relay_chat_complete = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $relay_chat_data['job_id'] ?? '' ) ) . '/complete' );
+		alorbach_set_json_body( $relay_chat_complete, array( 'job_token' => (string) ( $relay_chat_data['job_token'] ?? '' ), 'request_hash' => (string) ( $relay_chat_data['request_hash'] ?? '' ), 'result' => array( 'response' => array( 'choices' => array( array( 'message' => array( 'role' => 'assistant', 'content' => 'Cursor relay reply' ) ) ), 'usage' => array( 'prompt_tokens' => 2, 'completion_tokens' => 3 ) ) ) ) );
+		$relay_chat_complete_response = rest_do_request( $relay_chat_complete );
+		alorbach_require( 200 === $relay_chat_complete_response->get_status() && 'Cursor relay reply' === ( $relay_chat_complete_response->get_data()['choices'][0]['message']['content'] ?? '' ) && ! empty( $relay_chat_complete_response->get_data()['ai_bridge'] ), 'Relay chat completion must preserve OpenAI-compatible choices and usage.' );
+		alorbach_require( 200 !== rest_do_request( $relay_chat_complete )->get_status(), 'A completed relay job must reject duplicate completion.' );
+
+		$relay_image_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $relay_image_create, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:grok-cli:image', 'prompt' => 'Grok image contract ' . $local_codex_verify_run_id, 'reference_images' => array( 'data:image/png;base64,' . base64_encode( 'reference' ) ) ) ) );
+		$relay_image_response = rest_do_request( $relay_image_create );
+		$relay_image_data = $relay_image_response->get_data();
+		alorbach_require( 200 === $relay_image_response->get_status(), 'Canonical AI Bridge jobs must sign Grok reference-image requests.' );
+		$relay_image_complete = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $relay_image_data['job_id'] ?? '' ) ) . '/complete' );
+		alorbach_set_json_body( $relay_image_complete, array( 'job_token' => (string) ( $relay_image_data['job_token'] ?? '' ), 'request_hash' => (string) ( $relay_image_data['request_hash'] ?? '' ), 'result' => array( 'response' => array( 'data' => array( array( 'b64_json' => base64_encode( 'image contract' ) ) ) ) ) ) );
+		$relay_image_complete_response = rest_do_request( $relay_image_complete );
+		alorbach_require( 200 === $relay_image_complete_response->get_status() && ! empty( $relay_image_complete_response->get_data()['data'][0]['b64_json'] ), 'Relay image completion must preserve validated base64 image entries.' );
+
+		$cross_capability_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $cross_capability_create, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:cursor-cli:auto', 'prompt' => 'Reject cross capability ' . $local_codex_verify_run_id ) ) );
+		$cross_capability_response = rest_do_request( $cross_capability_create );
+		alorbach_require( 400 === $cross_capability_response->get_status() && 'invalid_local_codex_model' === ( $cross_capability_response->get_data()['code'] ?? '' ), 'Dynamic relay models must not cross capability boundaries.' );
+
+		$malformed_relay_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $malformed_relay_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:custom:unsafe', 'messages' => array( array( 'role' => 'user', 'content' => 'Reject custom backend' ) ) ) ) );
+		$malformed_relay_response = rest_do_request( $malformed_relay_create );
+		alorbach_require( 400 === $malformed_relay_response->get_status(), 'Unadvertised custom relay backends must be rejected.' );
+
+		$video_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $video_create, array( 'type' => 'video', 'payload' => array( 'model' => 'model-relay:grok-cli:video', 'prompt' => 'Experimental relay video ' . $local_codex_verify_run_id, 'input_reference' => 'data:image/png;base64,' . base64_encode( 'reference' ) ) ) );
+		$video_create_response = rest_do_request( $video_create );
+		$video_create_data = $video_create_response->get_data();
+		alorbach_require( 200 === $video_create_response->get_status(), 'Canonical AI Bridge jobs must sign Grok experimental video requests.' );
+		$video_complete = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $video_create_data['job_id'] ?? '' ) ) . '/complete' );
+		alorbach_set_json_body( $video_complete, array( 'job_token' => (string) ( $video_create_data['job_token'] ?? '' ), 'request_hash' => (string) ( $video_create_data['request_hash'] ?? '' ), 'result' => array( 'response' => array( 'b64_video' => base64_encode( 'video contract' ), 'mime_type' => 'video/mp4', 'experimental' => true ) ) ) );
+		$video_complete_response = rest_do_request( $video_complete );
+		$video_complete_data = $video_complete_response->get_data();
+		alorbach_require( 200 === $video_complete_response->get_status() && ! empty( $video_complete_data['ai_bridge'] ) && ! empty( $video_complete_data['local_codex'] ) && ! empty( $video_complete_data['experimental'] ) && 'video/mp4' === ( $video_complete_data['data'][0]['mime_type'] ?? '' ), 'Grok video completion must retain experimental metadata and both compatibility markers.' );
+
+		$wildcard_plan = array( 'capabilities' => array( 'chat' => true ), 'allowed_models' => array( 'chat' => array( 'model-relay:*' ) ) );
+		$restricted_plan = array( 'capabilities' => array( 'chat' => true ), 'allowed_models' => array( 'chat' => array( 'codex-local:auto' ) ) );
+		alorbach_require( \Alorbach\AIGateway\Integration_Service::plan_allows_capability( $wildcard_plan, 'chat', 'model-relay:grok-cli:auto' ), 'model-relay:* must allow relay models for its capability.' );
+		alorbach_require( ! \Alorbach\AIGateway\Integration_Service::plan_allows_capability( $restricted_plan, 'chat', 'model-relay:grok-cli:auto' ), 'Existing exact Local Codex allowlists must not gain relay access automatically.' );
+		alorbach_require( 'ai_bridge' === \Alorbach\AIGateway\API_Client::get_provider_for_model( 'model-relay:cursor-cli:auto' ), 'Relay models must resolve to the canonical ai_bridge provider.' );
+
+		$local_audio_create = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs' );
+		alorbach_set_json_body(
+			$local_audio_create,
+			array(
+				'type'    => 'transcribe',
+				'payload' => array(
+					'model'            => 'codex-local:audio:whisper-large-v3',
+					'audio_base64'     => base64_encode( 'verify audio' ),
+					'audio_format'     => 'mp3',
+					'duration_seconds' => 3,
+					'prompt'           => 'Return word timing. Verify run ' . $local_codex_verify_run_id,
+				),
+			)
+		);
+		$local_audio_create_response = rest_do_request( $local_audio_create );
+		$local_audio_create_data = $local_audio_create_response->get_data();
+		alorbach_require( 200 === $local_audio_create_response->get_status() && 'transcribe' === ( $local_audio_create_data['type'] ?? '' ) && 'codex-local:audio:whisper-large-v3' === ( $local_audio_create_data['payload']['model'] ?? '' ), 'Local Codex signed jobs must allow transcribe type and preserve explicit Whisper submodels.' );
+
+		$local_future_audio_create = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs' );
+		alorbach_set_json_body(
+			$local_future_audio_create,
+			array(
+				'type'    => 'transcribe',
+				'payload' => array(
+					'model'            => 'codex-local:audio:verify-future-asr.1',
+					'audio_base64'     => base64_encode( 'verify future audio' ),
+					'audio_format'     => 'mp3',
+					'duration_seconds' => 3,
+					'prompt'           => 'Return word timing. Verify run ' . $local_codex_verify_run_id,
+				),
+			)
+		);
+		$local_future_audio_create_response = rest_do_request( $local_future_audio_create );
+		$local_future_audio_create_data     = $local_future_audio_create_response->get_data();
+		alorbach_require( 200 === $local_future_audio_create_response->get_status() && 'codex-local:audio:verify-future-asr.1' === ( $local_future_audio_create_data['payload']['model'] ?? '' ), 'Local Codex signed jobs must allow future browser bridge ASR submodels.' );
+
+		$local_audio_complete = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs/' . rawurlencode( (string) ( $local_audio_create_data['job_id'] ?? '' ) ) . '/complete' );
+		alorbach_set_json_body(
+			$local_audio_complete,
+			array(
+				'job_token'    => (string) ( $local_audio_create_data['job_token'] ?? '' ),
+				'request_hash' => (string) ( $local_audio_create_data['request_hash'] ?? '' ),
+				'result'       => array(
+					'success'  => true,
+					'response' => array(
+						'text'  => 'Forbidden heaven',
+						'words' => array(
+							array( 'word' => 'Forbidden', 'start' => 1.25, 'end' => 1.75 ),
+							array( 'word' => 'heaven', 'start' => 1.75, 'end' => 2.4 ),
+						),
+					),
+				),
+			)
+		);
+		$local_audio_complete_response = rest_do_request( $local_audio_complete );
+		$local_audio_complete_data = $local_audio_complete_response->get_data();
+		alorbach_require( 200 === $local_audio_complete_response->get_status() && 'codex-local:audio:whisper-large-v3' === ( $local_audio_complete_data['model'] ?? '' ) && ! empty( $local_audio_complete_data['local_codex'] ) && 'Forbidden' === ( $local_audio_complete_data['words'][0]['word'] ?? '' ), 'Local Codex transcribe completion must normalize word timing output.' );
+		global $wpdb;
+		$local_audio_ledger_type = $wpdb->get_var( $wpdb->prepare( 'SELECT transaction_type FROM ' . \Alorbach\AIGateway\Ledger::get_table_name() . ' WHERE request_signature = %s', (string) ( $local_audio_create_data['request_hash'] ?? '' ) ) );
+		alorbach_require( 'audio_deduction' === $local_audio_ledger_type, 'Local Codex transcribe completion must record an audio deduction ledger row.' );
+
+		$local_audio_unknown = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs' );
+		alorbach_set_json_body(
+			$local_audio_unknown,
+			array(
+				'type'    => 'transcribe',
+				'payload' => array(
+					'model'            => 'codex-local:audio:../not-real',
+					'audio_base64'     => base64_encode( 'verify audio unknown' ),
+					'audio_format'     => 'mp3',
+					'duration_seconds' => 3,
+					'prompt'           => 'Return word timing. Verify unknown run ' . $local_codex_verify_run_id,
+				),
+			)
+		);
+		$local_audio_unknown_response = rest_do_request( $local_audio_unknown );
+		alorbach_require( 400 === $local_audio_unknown_response->get_status() && 'invalid_local_codex_model' === ( $local_audio_unknown_response->get_data()['code'] ?? '' ), 'Local Codex transcribe jobs must reject malformed future ASR submodels.' );
+
+		$local_audio_invalid = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs' );
+		alorbach_set_json_body(
+			$local_audio_invalid,
+			array(
+				'type'    => 'transcribe',
+				'payload' => array(
+					'model'            => 'codex-local:audio',
+					'audio_base64'     => base64_encode( 'verify audio invalid' ),
+					'audio_format'     => 'mp3',
+					'duration_seconds' => 3,
+					'prompt'           => 'Return word timing. Verify invalid run ' . $local_codex_verify_run_id,
+				),
+			)
+		);
+		$local_audio_invalid_create = rest_do_request( $local_audio_invalid )->get_data();
+		$local_audio_invalid_complete = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs/' . rawurlencode( (string) ( $local_audio_invalid_create['job_id'] ?? '' ) ) . '/complete' );
+		alorbach_set_json_body(
+			$local_audio_invalid_complete,
+			array(
+				'job_token'    => (string) ( $local_audio_invalid_create['job_token'] ?? '' ),
+				'request_hash' => (string) ( $local_audio_invalid_create['request_hash'] ?? '' ),
+				'result'       => array(
+					'success'  => true,
+					'response' => array( 'text' => 'plain transcript only' ),
+				),
+			)
+		);
+		$local_audio_invalid_response = rest_do_request( $local_audio_invalid_complete );
+		alorbach_require( 400 === $local_audio_invalid_response->get_status(), 'Local Codex transcribe completion must reject missing word timing.' );
+
+		\Alorbach\AIGateway\AI_Bridge::update_setting( 'enabled', false );
+		$local_codex_disabled_verify = \Alorbach\AIGateway\API_Validator::verify_key( 'codex_local' );
+		alorbach_require( empty( $local_codex_disabled_verify['success'] ) && false !== strpos( (string) ( $local_codex_disabled_verify['message'] ?? '' ), 'disabled' ), 'Local Codex validation must report disabled state clearly.' );
+	} finally {
+		delete_option( 'alorbach_ai_bridge_contract_probe' );
+		delete_option( 'alorbach_local_codex_contract_probe' );
+		update_option( 'alorbach_local_codex_enabled', $old_local_codex_enabled, false );
+		update_option( 'alorbach_local_codex_audio_fee_uc', $old_local_codex_audio_fee_uc, false );
+		if ( '__alorbach_missing__' === $old_ai_bridge_enabled ) {
+			delete_option( 'alorbach_ai_bridge_enabled' );
+		} else {
+			update_option( 'alorbach_ai_bridge_enabled', $old_ai_bridge_enabled, false );
+		}
+		if ( '__alorbach_missing__' === $old_ai_bridge_audio_fee_uc ) {
+			delete_option( 'alorbach_ai_bridge_audio_fee_uc' );
+		} else {
+			update_option( 'alorbach_ai_bridge_audio_fee_uc', $old_ai_bridge_audio_fee_uc, false );
+		}
+		if ( '__alorbach_missing__' === $old_plans ) {
+			delete_option( 'alorbach_plans' );
+		} else {
+			update_option( 'alorbach_plans', $old_plans, false );
 		}
 	}
 
@@ -307,6 +538,8 @@ try {
 
 	$unfiltered_config = \Alorbach\AIGateway\Integration_Service::get_integration_config( 0 );
 	alorbach_require( in_array( 'azure-speech', $unfiltered_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose azure-speech in the audio catalog.' );
+	alorbach_require( in_array( 'codex-local:audio', $unfiltered_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose codex-local:audio in the audio catalog.' );
+	alorbach_require( in_array( 'codex-local:audio:whisper-small', $unfiltered_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose Local Whisper submodels in the unfiltered audio catalog.' );
 
 	echo "REST contract verification passed.\n";
 	exit( 0 );

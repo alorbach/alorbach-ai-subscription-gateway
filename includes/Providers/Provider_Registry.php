@@ -36,6 +36,7 @@ class Provider_Registry {
 		self::register( new Hugging_Face_Provider() );
 		self::register( new Hugging_Face_Spaces_Provider() );
 		self::register( new GitHub_Models_Provider() );
+		self::register( new AI_Bridge_Provider() );
 		self::register( new Codex_Local_Provider() );
 
 		/**

@@ -280,12 +280,13 @@ class Admin_Plans {
 	 * @return void
 	 */
 	private static function render_allowed_models_field( $base_name, $capability, $options, $selected ) {
+		$options = is_array( $options ) ? $options : array();
+		$is_keyed = ! empty( $options ) && ! is_int( key( $options ) );
 		?>
 		<div class="alorbach-plan-field">
 			<label><?php echo esc_html( ucfirst( $capability ) . ' ' . __( 'models', 'alorbach-ai-gateway' ) ); ?></label>
 			<select multiple name="<?php echo esc_attr( $base_name ); ?>[allowed_models][<?php echo esc_attr( $capability ); ?>][]">
 				<?php
-				$is_keyed = ! empty( $options ) && ! is_int( key( $options ) );
 				foreach ( $options as $opt_key => $opt_label ) :
 					if ( ! $is_keyed ) {
 						// Flat array: key is an integer, label is the model ID — use it as both value and text.
@@ -301,6 +302,7 @@ class Admin_Plans {
 				?>
 					<option value="<?php echo esc_attr( $opt_key ); ?>" <?php selected( $is_selected ); ?>><?php echo esc_html( $opt_label ); ?></option>
 				<?php endforeach; ?>
+				<option value="model-relay:*" <?php selected( in_array( 'model-relay:*', $selected, true ) ); ?>><?php esc_html_e( 'All AI Model Relay models for this capability', 'alorbach-ai-gateway' ); ?></option>
 			</select>
 			<p class="description"><?php esc_html_e( 'Leave empty to allow all configured models for this capability.', 'alorbach-ai-gateway' ); ?></p>
 		</div>

@@ -149,6 +149,9 @@ class API_Client {
 		if ( strpos( $model, 'codex-local:' ) === 0 ) {
 			return 'codex_local';
 		}
+		if ( strpos( $model, 'model-relay:' ) === 0 || 'local-asr' === $model || strpos( $model, 'local-asr:' ) === 0 ) {
+			return 'ai_bridge';
+		}
 
 		// Codex models: route to the dedicated OAuth provider when available.
 		if ( strpos( $model, 'codex' ) !== false && $helper::has_provider( 'codex' ) ) {
@@ -293,6 +296,8 @@ class API_Client {
 				return 'OpenAI';
 			case 'codex_local':
 				return 'Local Codex';
+			case 'ai_bridge':
+				return 'AI Model Relay';
 			case 'azure':
 				return 'Azure';
 			case 'google':
@@ -732,8 +737,8 @@ class API_Client {
 		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			$message = ( 'codex_local' === $provider )
-				? __( 'Local Codex requests must be executed through the browser tray bridge.', 'alorbach-ai-gateway' )
+			$message = in_array( $provider, array( 'ai_bridge', 'codex_local' ), true )
+				? __( 'AI Model Relay requests must be executed through the browser tray app.', 'alorbach-ai-gateway' )
 				: __( 'API key not configured.', 'alorbach-ai-gateway' );
 			return new \WP_Error( 'no_api_key', $message );
 		}
@@ -1173,8 +1178,8 @@ class API_Client {
 		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			$message = ( 'codex_local' === $provider )
-				? __( 'Local Codex requests must be executed through the browser tray bridge.', 'alorbach-ai-gateway' )
+			$message = in_array( $provider, array( 'ai_bridge', 'codex_local' ), true )
+				? __( 'AI Model Relay requests must be executed through the browser tray app.', 'alorbach-ai-gateway' )
 				: __( 'API key not configured.', 'alorbach-ai-gateway' );
 			return new \WP_Error( 'no_api_key', $message );
 		}

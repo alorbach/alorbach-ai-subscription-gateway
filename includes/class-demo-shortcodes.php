@@ -85,6 +85,10 @@ class Demo_Shortcodes {
 					<label for="alorbach-image-prompt"><?php esc_html_e( 'Prompt', 'alorbach-ai-gateway' ); ?></label>
 					<textarea id="alorbach-image-prompt" class="alorbach-demo-prompt" rows="3" placeholder="<?php esc_attr_e( 'Describe the image you want to create...', 'alorbach-ai-gateway' ); ?>"></textarea>
 				</div>
+				<label class="alorbach-demo-image-reference-wrap">
+					<?php esc_html_e( 'Optional image reference (AI Model Relay)', 'alorbach-ai-gateway' ); ?>
+					<input type="file" class="alorbach-demo-image-reference" accept="image/png,image/jpeg,image/webp" />
+				</label>
 				<div class="alorbach-demo-image-options">
 					<div class="alorbach-demo-settings">
 						<label class="alorbach-demo-model-wrap" style="display:none;">
@@ -209,6 +213,10 @@ class Demo_Shortcodes {
 					<label for="alorbach-video-prompt"><?php esc_html_e( 'Prompt', 'alorbach-ai-gateway' ); ?></label>
 					<textarea id="alorbach-video-prompt" class="alorbach-demo-prompt" rows="3" placeholder="<?php esc_attr_e( 'Describe the video you want to create...', 'alorbach-ai-gateway' ); ?>"></textarea>
 				</div>
+				<label class="alorbach-demo-video-reference-wrap">
+					<?php esc_html_e( 'Optional image reference (AI Model Relay)', 'alorbach-ai-gateway' ); ?>
+					<input type="file" class="alorbach-demo-video-reference" accept="image/png,image/jpeg,image/webp" />
+				</label>
 				<div class="alorbach-demo-video-options">
 					<div class="alorbach-demo-settings">
 						<label class="alorbach-demo-duration-wrap">

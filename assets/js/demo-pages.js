@@ -45,10 +45,15 @@
 	}
 
 	function isLocalCodexModel(model) {
-		return String(model || '').indexOf('codex-local:') === 0;
+		model = String(model || '');
+		return model.indexOf('codex-local:') === 0 || model.indexOf('model-relay:') === 0 || model === 'local-asr' || model.indexOf('local-asr:') === 0;
 	}
 
 	function getLocalCodexStorageKey(origin) {
+		return 'alorbachAiBridgeToken:' + String(origin || window.location.origin);
+	}
+
+	function getLegacyLocalCodexStorageKey(origin) {
 		return 'alorbachLocalCodexToken:' + String(origin || window.location.origin);
 	}
 
@@ -72,15 +77,24 @@
 		});
 	}
 
+	function readFileDataUrl(file) {
+		return new Promise(function (resolve, reject) {
+			var reader = new FileReader();
+			reader.onload = function () { resolve(String(reader.result || '')); };
+			reader.onerror = function () { reject(new Error('Could not read reference image.')); };
+			reader.readAsDataURL(file);
+		});
+	}
+
 	function getLocalCodexErrorMessage(err, fallback) {
 		if (!err) {
-			return fallback || 'Local Codex bridge failed.';
+			return fallback || 'AI Model Relay failed.';
 		}
-		return err.message || (err.error && err.error.message) || (err.data && err.data.message) || err.code || fallback || 'Local Codex bridge failed.';
+		return err.message || (err.error && err.error.message) || (err.data && err.data.message) || err.code || fallback || 'AI Model Relay failed.';
 	}
 
 	function withLocalCodexContext(err, bridge) {
-		var normalized = (err && typeof err === 'object') ? err : { message: String(err || 'Local Codex bridge failed.') };
+		var normalized = (err && typeof err === 'object') ? err : { message: String(err || 'AI Model Relay failed.') };
 		normalized.localCodex = true;
 		if (bridge) {
 			normalized.bridgeUrl = bridge.bridgeUrl || bridge.bridge_url || normalized.bridgeUrl || '';
@@ -99,21 +113,48 @@
 			|| msg.indexOf('bridge token') !== -1
 			|| code.indexOf('pair') !== -1
 			|| code.indexOf('token') !== -1
-			|| ((status === 401 || status === 403) && msg.indexOf('codex') !== -1);
+			|| ((status === 401 || status === 403) && (msg.indexOf('codex') !== -1 || msg.indexOf('relay') !== -1 || msg.indexOf('bridge') !== -1));
+	}
+
+	function isLocalCodexBridgeReachabilityError(err) {
+		var msg = getLocalCodexErrorMessage(err, '').toLowerCase();
+		var code = String((err && err.code) || (err && err.error) || '').toLowerCase();
+		var category = String((err && err.category) || '').toLowerCase();
+		if (isLocalCodexPairingError(err)) {
+			return true;
+		}
+		if (code.indexOf('codex_') === 0 || category === 'rate_limit' || category === 'output_detection' || category === 'codex_cli') {
+			return false;
+		}
+		if (err && err.debug_help) {
+			return false;
+		}
+		return msg.indexOf('not running') !== -1
+			|| msg.indexOf('not reachable') !== -1
+			|| msg.indexOf('failed to fetch') !== -1
+			|| msg.indexOf('networkerror') !== -1
+			|| code.indexOf('network') !== -1;
 	}
 
 	function getLocalCodexBridge(localConfig, forcePairing) {
 		var bridgeUrl = String(localConfig.bridge_url || 'http://127.0.0.1:8765').replace(/\/$/, '');
 		var origin = localConfig.origin || window.location.origin;
 		var storageKey = getLocalCodexStorageKey(origin);
+		var legacyStorageKey = getLegacyLocalCodexStorageKey(origin);
 		if (forcePairing && window.localStorage) {
 			window.localStorage.removeItem(storageKey);
+			window.localStorage.removeItem(legacyStorageKey);
+		}
+		var token = window.localStorage ? window.localStorage.getItem(storageKey) : '';
+		if (!token && window.localStorage) {
+			token = window.localStorage.getItem(legacyStorageKey) || '';
+			if (token) window.localStorage.setItem(storageKey, token);
 		}
 		return {
 			bridgeUrl: bridgeUrl,
 			origin: origin,
 			storageKey: storageKey,
-			token: window.localStorage ? window.localStorage.getItem(storageKey) : ''
+			token: token
 		};
 	}
 
@@ -138,7 +179,7 @@
 					state: bridge.token ? 'connected' : 'unpaired',
 					bridge: bridge,
 					status: statusData,
-					message: bridge.token ? 'Codex Bridge connected.' : 'Codex Bridge is installed, but this WordPress origin is not paired.'
+					message: bridge.token ? 'AI Model Relay connected.' : 'AI Model Relay is installed, but this WordPress origin is not paired.'
 				};
 			});
 		}).catch(function (err) {
@@ -146,15 +187,15 @@
 				state: 'offline',
 				bridge: bridge,
 				error: withLocalCodexContext(err, bridge),
-				message: 'Codex Bridge is not reachable at ' + bridge.bridgeUrl + '.'
+				message: 'AI Model Relay is not reachable at ' + bridge.bridgeUrl + '.'
 			};
 		});
 	}
 
 	function pairLocalCodexBridge(bridge) {
-		var pairingCode = window.prompt('Enter the pairing code shown in the Alorbach Codex Bridge tray app.');
+		var pairingCode = window.prompt('Enter the pairing code shown in the AI Model Relay tray app.');
 		if (!pairingCode) {
-			throw withLocalCodexContext({ message: 'Local Codex pairing was cancelled.' }, bridge);
+			throw withLocalCodexContext({ message: 'AI Model Relay pairing was cancelled.' }, bridge);
 		}
 		return localCodexFetch(bridge.bridgeUrl + '/v1/pair', {
 			method: 'POST',
@@ -168,14 +209,14 @@
 			return localCodexReadJson(pairResponse);
 		}).then(function (pairData) {
 			if (!pairData.token) {
-				throw withLocalCodexContext({ message: 'Local Codex bridge did not return a pairing token.' }, bridge);
+				throw withLocalCodexContext({ message: 'AI Model Relay did not return a pairing token.' }, bridge);
 			}
 			return saveLocalCodexToken(bridge, pairData.token);
 		});
 	}
 
 	function getLocalCodexConfig() {
-		return apiFetch('/local-codex/config').then(function (r) {
+		return apiFetch('/ai-bridge/config').then(function (r) {
 			if (!r.ok) return localCodexReadJson(r).then(function (d) { throw withLocalCodexContext(d); });
 			return r.json();
 		});
@@ -188,7 +229,7 @@
 		return localCodexFetch(bridge.bridgeUrl + '/v1/status', { method: 'GET' }).then(function (statusResponse) {
 			if (!statusResponse.ok) {
 				return localCodexReadJson(statusResponse).then(function (d) {
-					throw withLocalCodexContext({ message: d.message || 'Local Codex tray app is not ready.' }, bridge);
+					throw withLocalCodexContext({ message: d.message || 'AI Model Relay tray app is not ready.' }, bridge);
 				});
 			}
 			if (bridge.token && !opts.forcePairing) {
@@ -206,7 +247,7 @@
 
 		function runWithBridge(bridge) {
 			var job;
-			return apiFetch('/local-codex/jobs', {
+			return apiFetch('/ai-bridge/jobs', {
 				method: 'POST',
 				body: { type: type, payload: payload }
 			}).then(function (r) {
@@ -214,7 +255,12 @@
 				return r.json();
 			}).then(function (createdJob) {
 				job = createdJob;
-				var endpoint = type === 'chat' ? '/v1/chat' : '/v1/images';
+				var model = String(job.payload && job.payload.model || '');
+				var legacy = model.indexOf('codex-local:') === 0;
+				var legacyEndpoints = { chat: '/v1/chat', image: '/v1/images', transcribe: '/v1/transcribe' };
+				var relayEndpoints = { chat: '/v1/relay/jobs/chat', image: '/v1/relay/jobs/images', video: '/v1/relay/jobs/videos', transcribe: '/v1/relay/jobs/transcribe' };
+				var endpoint = legacy && legacyEndpoints[type] ? legacyEndpoints[type] : relayEndpoints[type];
+				if (!endpoint) throw withLocalCodexContext({ message: 'AI Model Relay does not support this job type.' }, bridge);
 				return localCodexFetch(bridge.bridgeUrl + endpoint, {
 					method: 'POST',
 					headers: {
@@ -238,7 +284,7 @@
 				if (!bridgeResult.success) {
 					throw bridgeResult;
 				}
-				return apiFetch('/local-codex/jobs/' + encodeURIComponent(job.job_id) + '/complete', {
+				return apiFetch('/ai-bridge/jobs/' + encodeURIComponent(job.job_id) + '/complete', {
 					method: 'POST',
 					body: {
 						job_token: job.job_token,
@@ -251,12 +297,12 @@
 				});
 			}).catch(function (err) {
 				if (job && job.job_id) {
-					apiFetch('/local-codex/jobs/' + encodeURIComponent(job.job_id) + '/fail', {
+					apiFetch('/ai-bridge/jobs/' + encodeURIComponent(job.job_id) + '/fail', {
 						method: 'POST',
 						body: {
 							job_token: job.job_token,
 							request_hash: job.request_hash,
-							message: err.message || 'Local Codex bridge failed.'
+							message: err.message || 'AI Model Relay failed.'
 						}
 					}).catch(function () {});
 				}
@@ -298,7 +344,106 @@
 	}
 
 	function getModels(container) {
-		return apiFetch('/me/models').then(function (r) { return r.json(); });
+		return apiFetch('/me/models').then(function (r) { return r.json(); }).then(function (models) {
+			return discoverAiBridgeModels(models).catch(function () { return models; });
+		});
+	}
+
+	function addDiscoveredModel(models, type, id, label) {
+		var parent = models[type] || {};
+		var section = type === 'image' ? (parent.model || {}) : parent;
+		section.options = Array.isArray(section.options) ? section.options : [];
+		section.labels = section.labels || {};
+		if (section.options.indexOf(id) === -1) section.options.push(id);
+		section.labels[id] = label || id;
+		if (type === 'image') {
+			parent.model = section;
+			models[type] = parent;
+		} else {
+			models[type] = section;
+		}
+	}
+
+	function removeUndiscoveredRelayModels(models) {
+		['text', 'image', 'audio', 'video'].forEach(function (type) {
+			var parent = models[type] || {};
+			var section = type === 'image' ? (parent.model || {}) : parent;
+			section.options = (section.options || []).filter(function (id) {
+				id = String(id || '');
+				return id.indexOf('model-relay:') !== 0 && id !== 'local-asr' && id.indexOf('local-asr:') !== 0;
+			});
+			if (type === 'image') {
+				parent.model = section;
+				models[type] = parent;
+			} else {
+				models[type] = section;
+			}
+		});
+		return models;
+	}
+
+	function relayModelType(id) {
+		if (id === 'local-asr' || id.indexOf('local-asr:') === 0 || id.indexOf('model-relay:local-asr:') === 0) return 'audio';
+		if (/:image$/.test(id)) return 'image';
+		if (/:video$/.test(id)) return 'video';
+		return 'text';
+	}
+
+	function isSupportedDiscoveredRelayModel(id) {
+		return /^model-relay:(codex|grok-cli|cursor-cli):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)
+			|| /^model-relay:local-asr:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)
+			|| /^local-asr(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?$/.test(id);
+	}
+
+	function relayBackendFromModel(id) {
+		var match = String(id || '').match(/^model-relay:([^:]+):/);
+		return match ? match[1] : (String(id || '').indexOf('local-asr') === 0 ? 'local-asr' : '');
+	}
+
+	function discoverAiBridgeModels(models) {
+		models = removeUndiscoveredRelayModels(models);
+		return getLocalCodexConfig().then(function (cfg) {
+			var bridge = getLocalCodexBridge(cfg, false);
+			if (!bridge.token) return models;
+			var headers = { 'Content-Type': 'application/json', 'X-Alorbach-Bridge-Token': bridge.token };
+			return Promise.all([
+				localCodexFetch(bridge.bridgeUrl + '/v1/relay/models', { method: 'GET', headers: headers }),
+				localCodexFetch(bridge.bridgeUrl + '/v1/relay/capabilities', { method: 'GET', headers: headers })
+			]).then(function (responses) {
+				if (!responses[0].ok || !responses[1].ok) return models;
+				return Promise.all(responses.map(localCodexReadJson)).then(function (payloads) {
+					var modelPayload = payloads[0] || {};
+					var capabilities = payloads[1] || {};
+					var ready = {};
+					var backends = capabilities.backends || capabilities.backend_status || [];
+					if (Array.isArray(backends)) {
+						backends.forEach(function (backend) {
+							if (backend && (backend.id || backend.name)) ready[backend.id || backend.name] = backend.ready === true || backend.available === true;
+						});
+					} else if (backends && typeof backends === 'object') {
+						Object.keys(backends).forEach(function (id) {
+							var state = backends[id];
+							ready[id] = state === true || (state && (state.ready === true || state.available === true));
+						});
+					}
+					var relayIds = (modelPayload.models && modelPayload.models.relay) || [];
+					var audioIds = (modelPayload.models && modelPayload.models.audio) || [];
+					var ids = relayIds.concat(audioIds).filter(function (id, index, all) { return all.indexOf(id) === index; });
+					ids.forEach(function (entry) {
+						var id = String(entry && typeof entry === 'object' ? entry.id || '' : entry || '');
+						var backend = relayBackendFromModel(id);
+						if (!isSupportedDiscoveredRelayModel(id) || ready[backend] !== true) return;
+						var label = id;
+						if (id.indexOf('model-relay:grok-cli:') === 0) label = 'Grok CLI - ' + id.split(':').pop() + (/:video$/.test(id) ? ' (experimental)' : '');
+						if (id.indexOf('model-relay:cursor-cli:') === 0) label = 'Cursor Agent - ' + id.split(':').pop();
+						if (id.indexOf('model-relay:codex:') === 0) label = 'Codex CLI - ' + id.split(':').pop();
+						if (backend === 'local-asr') label = 'Local ASR - ' + id.split(':').pop();
+						addDiscoveredModel(models, relayModelType(id), id, label);
+					});
+					return models;
+				});
+			});
+		});
 	}
 
 	function updateCostEstimate(container, type, params, costEl) {
@@ -348,7 +493,7 @@
 		helper = document.createElement('div');
 		helper.className = 'alorbach-local-codex-status is-hidden';
 		helper.setAttribute('aria-live', 'polite');
-		helper.innerHTML = '<span class="alorbach-local-codex-dot" aria-hidden="true"></span><span class="alorbach-local-codex-copy"><strong class="alorbach-local-codex-title">Codex Bridge</strong><span class="alorbach-local-codex-detail">Checking bridge status...</span></span><button type="button" class="button alorbach-local-codex-reconnect">Reconnect</button>';
+		helper.innerHTML = '<span class="alorbach-local-codex-dot" aria-hidden="true"></span><span class="alorbach-local-codex-copy"><strong class="alorbach-local-codex-title">AI Model Relay</strong><span class="alorbach-local-codex-detail">Checking relay status...</span></span><button type="button" class="button alorbach-local-codex-reconnect">Reconnect</button>';
 		if (actionRow && actionRow.parentNode) {
 			actionRow.parentNode.insertBefore(helper, actionRow);
 		} else {
@@ -360,7 +505,7 @@
 	function setLocalCodexStatus(container, state, title, detail) {
 		var helper = getLocalCodexStatusHelper(container);
 		helper.className = 'alorbach-local-codex-status is-' + state;
-		helper.querySelector('.alorbach-local-codex-title').textContent = title || 'Codex Bridge';
+		helper.querySelector('.alorbach-local-codex-title').textContent = title || 'AI Model Relay';
 		helper.querySelector('.alorbach-local-codex-detail').textContent = detail || '';
 		return helper;
 	}
@@ -378,20 +523,20 @@
 			return Promise.resolve(null);
 		}
 
-		setLocalCodexStatus(container, 'checking', 'Codex Bridge', 'Checking bridge status...');
+		setLocalCodexStatus(container, 'checking', 'AI Model Relay', 'Checking relay status...');
 		return getLocalCodexConfig().then(function (cfg) {
 			return getLocalCodexStatus(cfg);
 		}).then(function (status) {
 			if (status.state === 'connected') {
-				setLocalCodexStatus(container, 'connected', 'Codex Bridge connected', 'Local bridge is reachable and this browser has a pairing token.');
+				setLocalCodexStatus(container, 'connected', 'AI Model Relay connected', 'Local relay is reachable and this browser has a pairing token.');
 			} else if (status.state === 'unpaired') {
-				setLocalCodexStatus(container, 'unpaired', 'Codex Bridge pairing needed', status.message);
+				setLocalCodexStatus(container, 'unpaired', 'AI Model Relay pairing needed', status.message);
 			} else {
-				setLocalCodexStatus(container, 'offline', 'Codex Bridge not reachable', status.message);
+				setLocalCodexStatus(container, 'offline', 'AI Model Relay not reachable', status.message);
 			}
 			return status;
 		}).catch(function (err) {
-			setLocalCodexStatus(container, 'offline', 'Codex Bridge unavailable', getLocalCodexErrorMessage(err, 'Local Codex configuration is unavailable.'));
+			setLocalCodexStatus(container, 'offline', 'AI Model Relay unavailable', getLocalCodexErrorMessage(err, 'AI Model Relay configuration is unavailable.'));
 			return null;
 		});
 	}
@@ -411,15 +556,15 @@
 					return;
 				}
 				reconnectBtn.disabled = true;
-				setLocalCodexStatus(container, 'checking', 'Reconnecting Codex Bridge', 'Checking the tray app and refreshing this origin pairing...');
+				setLocalCodexStatus(container, 'checking', 'Reconnecting AI Model Relay', 'Checking the tray app and refreshing this origin pairing...');
 				getLocalCodexConfig().then(function (cfg) {
 					return ensureLocalCodexPairing(cfg, { forcePairing: true });
 				}).then(function () {
-					setLocalCodexStatus(container, 'connected', 'Codex Bridge connected', 'Pairing token refreshed for this WordPress origin.');
+					setLocalCodexStatus(container, 'connected', 'AI Model Relay connected', 'Pairing token refreshed for this WordPress origin.');
 				}).catch(function (err) {
-					var msg = getLocalCodexErrorMessage(err, 'Could not reconnect to Codex Bridge.');
+					var msg = getLocalCodexErrorMessage(err, 'Could not reconnect to AI Model Relay.');
 					var state = isLocalCodexPairingError(err) ? 'unpaired' : 'offline';
-					setLocalCodexStatus(container, state, state === 'unpaired' ? 'Codex Bridge pairing needed' : 'Codex Bridge not reachable', msg);
+					setLocalCodexStatus(container, state, state === 'unpaired' ? 'AI Model Relay pairing needed' : 'AI Model Relay not reachable', msg);
 				}).finally(function () {
 					reconnectBtn.disabled = false;
 				});
@@ -624,7 +769,7 @@
 				getBalance(container);
 			}).catch(function (err) {
 				handleError(err, container);
-				if (err && err.localCodex) {
+				if (err && err.localCodex && isLocalCodexBridgeReachabilityError(err)) {
 					refreshLocalCodexStatus(container, currentChatModel());
 				}
 			}).finally(function () {
@@ -651,6 +796,7 @@
 		var qualityWrap = container.querySelector('.alorbach-demo-quality-wrap');
 
 		var modelSelect = container.querySelector('.alorbach-demo-model-select');
+		var referenceInput = container.querySelector('.alorbach-demo-image-reference');
 		var modelWrap = container.querySelector('.alorbach-demo-model-wrap');
 		var progressCard = container.querySelector('.alorbach-demo-progress-card');
 		var progressTitle = container.querySelector('.alorbach-demo-progress-title');
@@ -1171,18 +1317,21 @@
 			if (modelWrap && modelWrap.style.display !== 'none') body.model = model;
 			if (qualityWrap && qualityWrap.style.display !== 'none') body.quality = quality;
 
-			if (model === 'codex-local:image') {
+			if (isLocalCodexModel(model)) {
 				body.model = model;
 				body.n = 1;
 				beginEstimatedProgress();
-				localCodexExecute('image', body).then(function (data) {
+				var referencePromise = referenceInput && referenceInput.files && referenceInput.files[0]
+					? readFileDataUrl(referenceInput.files[0]).then(function (dataUrl) { body.reference_images = [dataUrl]; })
+					: Promise.resolve();
+				referencePromise.then(function () { return localCodexExecute('image', body); }).then(function (data) {
 					setProgress(100, 'completed', 'estimated', true);
 					renderFinalImages(data.data || [], prompt);
 					renderUsage(data);
 					getBalance(container);
 				}).catch(function (err) {
 					handleError(err, container);
-					if (err && err.localCodex) {
+					if (err && err.localCodex && isLocalCodexBridgeReachabilityError(err)) {
 						refreshLocalCodexStatus(container, currentImageModel());
 					}
 				}).finally(function () {
@@ -1389,13 +1538,14 @@
 				readDuration(selectedFile, function (d) {
 					var body = { audio_base64: b64, duration_seconds: d || 1, model: model };
 					if (prompt) body.prompt = prompt;
-					apiFetch('/transcribe', {
+					var request = isLocalCodexModel(model) ? localCodexExecute('transcribe', body) : apiFetch('/transcribe', {
 						method: 'POST',
 						body: body,
 					}).then(function (r) {
 						if (!r.ok) return r.json().then(function (d) { throw d; });
 						return r.json();
-					}).then(function (data) {
+					});
+					request.then(function (data) {
 						if (resultEl) resultEl.textContent = data.text || '';
 						var usageEl = container.querySelector('.alorbach-demo-usage');
 						if (usageEl) {
@@ -1433,6 +1583,7 @@
 		var durationSelect = container.querySelector('.alorbach-demo-duration-select');
 		var genBtn = container.querySelector('.alorbach-demo-generate');
 		var resultEl = container.querySelector('.alorbach-demo-videos');
+		var referenceInput = container.querySelector('.alorbach-demo-video-reference');
 
 		// sora-2 supports 720p only; sora-2-pro supports all
 		function getSizeOptionsForModel(model) {
@@ -1528,17 +1679,30 @@
 			var usageEl = container.querySelector('.alorbach-demo-usage');
 			if (usageEl) { usageEl.textContent = ''; usageEl.style.display = 'none'; }
 
-			apiFetch('/video', {
+			var body = { prompt: prompt, model: model, size: size, duration_seconds: duration };
+			var referencePromise = referenceInput && referenceInput.files && referenceInput.files[0]
+				? readFileDataUrl(referenceInput.files[0]).then(function (dataUrl) { body.input_reference = dataUrl; })
+				: Promise.resolve();
+			referencePromise.then(function () {
+				if (isLocalCodexModel(model)) return localCodexExecute('video', body);
+				return apiFetch('/video', {
 				method: 'POST',
-				body: { prompt: prompt, model: model, size: size, duration_seconds: duration },
+				body: body,
 			}).then(function (r) {
 				if (!r.ok) return r.json().then(function (d) { throw d; });
 				return r.json();
+			});
 			}).then(function (data) {
 				if (resultEl && data.data && data.data.length) {
 					var baseName = (prompt || 'video').replace(/[^a-zA-Z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'video';
 					data.data.forEach(function (item, idx) {
 						var url = item.url || '';
+						if (!url && item.b64_video) {
+							var binary = window.atob(item.b64_video);
+							var bytes = new Uint8Array(binary.length);
+							for (var byteIndex = 0; byteIndex < binary.length; byteIndex++) bytes[byteIndex] = binary.charCodeAt(byteIndex);
+							url = window.URL.createObjectURL(new Blob([bytes], { type: item.mime_type || 'video/mp4' }));
+						}
 						if (url) {
 							var itemWrap = document.createElement('div');
 							itemWrap.className = 'alorbach-demo-video-item';

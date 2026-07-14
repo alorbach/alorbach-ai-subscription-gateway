@@ -31,14 +31,23 @@ class API_Validator {
 		if ( ! $prov ) {
 			return array( 'success' => false, 'message' => __( 'Unknown provider.', 'alorbach-ai-gateway' ) );
 		}
+		if ( in_array( $provider, array( 'ai_bridge', 'codex_local' ), true ) ) {
+			if ( class_exists( AI_Bridge::class ) && AI_Bridge::is_enabled() ) {
+				return array(
+					'success' => true,
+					'message' => __( 'AI Model Relay is enabled and runs through the browser tray app. No stored API key is required.', 'alorbach-ai-gateway' ),
+				);
+			}
+			return array(
+				'success' => false,
+				'message' => __( 'AI Model Relay is disabled for this site.', 'alorbach-ai-gateway' ),
+			);
+		}
 		$creds = ! empty( $entry_id )
 			? API_Keys_Helper::get_credentials_for_entry( $entry_id )
 			: API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
-			$message = ( 'codex_local' === $provider )
-				? __( 'Local Codex requests must be executed through the browser tray bridge.', 'alorbach-ai-gateway' )
-				: __( 'API key not configured for this provider.', 'alorbach-ai-gateway' );
-			return array( 'success' => false, 'message' => $message );
+			return array( 'success' => false, 'message' => __( 'API key not configured for this provider.', 'alorbach-ai-gateway' ) );
 		}
 		return $prov->verify_key( $creds );
 	}

@@ -366,7 +366,7 @@ Used by the plugin admin and developer tooling.
 
 #### `POST /admin/verify-api-key`
 
-Validates provider access for server-side providers. User-owned Local Codex runs through browser-mediated local jobs instead of this endpoint.
+Validates provider access for server-side providers. User-owned AI Model Relay runs through browser-mediated local jobs instead of this endpoint.
 
 Request fields:
 
@@ -492,7 +492,7 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - typical use cases: image generation, preview frames, downloadable final artwork
-- main providers: OpenAI, Local Codex tray bridge, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- main providers: OpenAI, AI Model Relay, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - supports both synchronous and async job flows
 - imported Hugging Face and Hugging Face Spaces image models may appear in `/me/models` when configured
 
@@ -520,29 +520,32 @@ Codex models are a specialized text-model path for coding and agent-style respon
 
 Do not treat Codex as an image, audio, or video category. From an integration perspective it belongs under text-generation workflows.
 
-### Local Codex Tray Bridge
+### AI Model Relay
 
-Local Codex lets a logged-in user run supported Gateway requests through their own Codex CLI session.
+AI Model Relay lets a logged-in user run supported Gateway requests through their own Codex CLI, Cursor Agent, Grok CLI, or Local ASR installation.
 
-- provider path: `Local Codex`
-- authentication: Codex CLI login in the user's local Windows account, plus a per-origin tray pairing token
-- text model IDs: `codex-local:<model-id>`, with `codex-local:auto` as the default local model
-- image model ID: `codex-local:image`
-- request behavior: WordPress creates a signed local job, browser calls the paired tray app on localhost, and browser completes or fails the WordPress job with the bridge result
-- cost behavior: upstream provider cost is recorded as `0`; optional site fees can be configured in UC
+- canonical provider key: `ai_bridge`; compatibility provider key: `codex_local`
+- authentication: provider login in the user's local account plus a per-origin browser pairing token
+- text IDs: `model-relay:codex:*`, `model-relay:cursor-cli:*`, and `model-relay:grok-cli:*`
+- media IDs: `model-relay:codex:image`, `model-relay:grok-cli:image`, and experimental `model-relay:grok-cli:video`
+- audio IDs: `model-relay:local-asr:*` and `local-asr:*`
+- compatibility IDs: `codex-local:auto`, `codex-local:image`, and `codex-local:audio:*`
+- cost behavior: upstream provider cost is recorded as `0`; optional capability fees can be configured in UC
 
-Local Codex does not use the stored Codex OAuth token and does not require a WordPress-stored API key. The tray app is distributed as a Windows installer and portable ZIP from the standalone Local Codex Bridge releases.
+The integration does not use a stored WordPress API key. WordPress signs jobs and remains authoritative for capabilities and model allowlists. Dynamic IDs are accepted only for the supported backend namespace and matching capability. Restricted legacy plans do not receive relay access unless an exact relay ID or capability-scoped `model-relay:*` wildcard is configured.
 
-The tray app source, issue tracking, and Windows release assets live at <https://github.com/alorbach/codex-local-bridge>. This plugin repository owns only the WordPress-side signed local job flow and integration metadata.
+The integration config contains both `ai_bridge` and its `local_codex` alias. Successful results contain both `ai_bridge: true` and `local_codex: true`.
 
-### Local Codex REST Flow
+### AI Model Relay REST Flow
 
-1. Read `GET /local-codex/config`.
-2. Detect the tray app with `GET http://127.0.0.1:8765/v1/status`.
-3. Pair with `POST /v1/pair` using the code displayed in the tray menu.
-4. Create a WordPress job with `POST /local-codex/jobs`.
-5. Send the returned `payload`, `job_token`, `request_hash`, and `request_id` to `/v1/chat` or `/v1/images` on the tray app.
-6. Complete the WordPress job with `POST /local-codex/jobs/<job_id>/complete`, or record failure with `POST /local-codex/jobs/<job_id>/fail`.
+1. Read `GET /ai-bridge/config` (legacy alias: `GET /local-codex/config`).
+2. Detect and pair the tray app through `/v1/status` and `/v1/pair`, then fetch `/v1/relay/models` and capability/backend readiness metadata.
+3. Create a WordPress job with `POST /ai-bridge/jobs`.
+4. For `model-relay:*` and `local-asr:*`, send the signed job to `/v1/relay/jobs/chat`, `/v1/relay/jobs/images`, `/v1/relay/jobs/videos`, or `/v1/relay/jobs/transcribe`.
+5. For `codex-local:*`, retain the legacy `/v1/chat`, `/v1/images`, and `/v1/transcribe` tray routes so older installations remain usable.
+6. Complete with `POST /ai-bridge/jobs/<job_id>/complete`, or fail with `POST /ai-bridge/jobs/<job_id>/fail`. Every `/local-codex/*` WordPress route remains an equivalent compatibility alias.
+
+Chat results use OpenAI-compatible `choices` and usage. Image results contain `b64_json`; transcription requires word timing; video results contain validated `b64_video` and MIME data and should be rendered through a browser Blob URL.
 
 ---
 

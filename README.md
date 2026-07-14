@@ -12,7 +12,7 @@ A precise credit-based AI API billing layer for WordPress. Bridges fixed-price s
 - **BPE tokenization** via [tiktoken](https://github.com/yethee/tiktoken-php) for pre-flight cost estimation
 - **Post-flight reconciliation** with actual token counts from the API response
 - **Immutable SQL ledger** - every credit and deduction is written as an append-only row
-- **Multi-provider support** - OpenAI, Local Codex tray bridge, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
+- **Multi-provider support** - OpenAI, AI Model Relay, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
 - **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
 - **WooCommerce Subscriptions** - auto-credit on renewal, failed payment handling with retry scheduler
 - **Stripe webhook** support
@@ -110,7 +110,7 @@ Used for chat-style generation via `/chat`.
 Used for image generation via `/images` or the async image-job endpoints.
 
 - Typical use cases: image generation, preview frames, downloadable final artwork
-- Main providers: OpenAI, Local Codex tray bridge, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
+- Main providers: OpenAI, AI Model Relay, Azure OpenAI, Google, Hugging Face, Hugging Face Spaces
 - Hugging Face Spaces support is currently manual-entry based and image-only
 - Demo surface: `[alorbach_demo_image]`
 - Supports both:
@@ -148,22 +148,23 @@ Codex models are a specialized text-model path for coding and agent-style respon
   - Codex is still a text model category from an integration point of view
   - it is documented separately because provider authentication and request handling differ from standard text models
 
-### Local Codex Tray Bridge
+### AI Model Relay
 
-Local Codex is a browser-mediated workflow for users who want site AI features to spend their own local Codex/ChatGPT allowance.
+AI Model Relay is a browser-mediated workflow for users who want site AI features to run through provider CLIs and speech models installed on their own computer.
 
-- Typical use cases: user-owned chat and image generation through the Codex CLI installed on the visitor's Windows account
-- Provider path: `Local Codex`
-- Model IDs: `codex-local:auto` for chat and `codex-local:image` for image generation
-- Request behavior: WordPress creates a signed one-time job, the browser sends it to the paired tray app at `http://127.0.0.1:8765`, then the browser posts the normalized result back to WordPress
+- Supported backends: Codex CLI chat/images, Cursor Agent chat, Grok CLI chat/images/experimental video, and Local ASR transcription
+- Canonical provider key: `ai_bridge`; the legacy `codex_local` key remains available
+- Canonical model IDs: `model-relay:codex:*`, `model-relay:cursor-cli:*`, `model-relay:grok-cli:*`, `model-relay:local-asr:*`, and `local-asr:*`
+- Compatibility model IDs: `codex-local:auto`, `codex-local:image`, and `codex-local:audio:*`
+- Request behavior: WordPress creates a signed one-time job, the browser sends it to the paired tray app at `http://127.0.0.1:8765`, then posts the normalized result back to WordPress
+- Plan policy: an empty allowlist permits all configured models for an enabled capability; `model-relay:*` permits relay models only within that capability
 - Notes:
   - enable it in **AI Gateway -> Settings -> Providers / Import**
-  - install the Windows tray companion from <https://github.com/alorbach/codex-local-bridge/releases>
-  - run `codex login` in the same Windows user account before pairing
-  - WordPress still enforces user login, plan access, quotas, rate limits, and optional Gateway fees
-  - the tray app binds to localhost only and pairs per WordPress origin
+  - install and pair the AI Model Relay Windows tray companion
+  - WordPress remains authoritative for login, plan access, quotas, rate limits, optional fees, and audit records
+  - Grok Imagine video is experimental and may use an image reference
 
-The tray companion is developed and released separately at <https://github.com/alorbach/codex-local-bridge>. This plugin only owns the WordPress-side signed job flow, model metadata, quotas, and audit records.
+The companion is developed and released separately. This plugin owns only the WordPress-side signed job flow, model metadata, quotas, compatibility aliases, and audit records.
 
 ### Capability Discovery
 
@@ -395,7 +396,7 @@ git push origin v1.0.7
 ```
 
 The CI workflow builds a clean plugin ZIP and publishes a GitHub Release with auto-generated changelog notes.
-Local Codex desktop bridge releases are published separately at <https://github.com/alorbach/codex-local-bridge/releases>.
+AI Model Relay desktop releases are published separately from the WordPress plugin.
 
 ---
 

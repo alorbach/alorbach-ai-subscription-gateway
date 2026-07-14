@@ -62,7 +62,7 @@ class Admin_Demo_Defaults {
 		if ( empty( $models ) ) {
 			$models = array( 'gpt-4.1-mini' => 'gpt-4.1-mini' );
 		}
-		$models = array_merge( $models, \Alorbach\AIGateway\Local_Codex_Bridge::get_text_models() );
+		$models = array_merge( $models, \Alorbach\AIGateway\AI_Bridge::get_text_models() );
 		asort( $models );
 		return $models;
 	}
@@ -138,7 +138,7 @@ class Admin_Demo_Defaults {
 		if ( empty( $models ) ) {
 			$models = array( 'dall-e-3' => 'dall-e-3', 'gpt-image-1.5' => 'gpt-image-1.5' );
 		}
-		$models = array_merge( $models, \Alorbach\AIGateway\Local_Codex_Bridge::get_image_models() );
+		$models = array_merge( $models, \Alorbach\AIGateway\AI_Bridge::get_image_models() );
 		asort( $models );
 		return $models;
 	}
@@ -149,7 +149,10 @@ class Admin_Demo_Defaults {
 	 * @return array<string,string> Model key => display label.
 	 */
 	public static function get_video_models() {
-		return self::get_entry_scoped_models( 'alorbach_video_models', 'alorbach_video_costs', array( 'sora-2' ), 'video' );
+		$models = self::get_entry_scoped_models( 'alorbach_video_models', 'alorbach_video_costs', array( 'sora-2' ), 'video' );
+		$models = array_merge( $models, \Alorbach\AIGateway\AI_Bridge::get_video_models() );
+		asort( $models );
+		return $models;
 	}
 
 	/**
@@ -158,7 +161,12 @@ class Admin_Demo_Defaults {
 	 * @return array Model IDs.
 	 */
 	public static function get_audio_models() {
-		return self::get_sorted_option_keys( 'alorbach_audio_costs', array( 'whisper-1', 'azure-speech' ) );
+		$models = self::get_sorted_option_keys( 'alorbach_audio_costs', array( 'whisper-1', 'azure-speech' ) );
+		if ( class_exists( '\Alorbach\AIGateway\AI_Bridge' ) ) {
+			$models = array_values( array_unique( array_merge( $models, array_keys( \Alorbach\AIGateway\AI_Bridge::get_audio_models() ) ) ) );
+			sort( $models );
+		}
+		return $models;
 	}
 
 	/**

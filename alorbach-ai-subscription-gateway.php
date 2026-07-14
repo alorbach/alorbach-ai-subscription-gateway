@@ -27,6 +27,7 @@ require_once ALORBACH_PLUGIN_DIR . 'vendor/autoload.php';
 // Explicitly load Provider classes (in case autoload classmap is stale).
 require_once ALORBACH_PLUGIN_DIR . 'admin/class-admin-image-queue.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-api-keys-helper.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-ai-bridge.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-local-codex-bridge.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-cli-image-jobs.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-jobs.php';
@@ -41,6 +42,7 @@ require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Hugging_Face_Spaces_Provi
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/GitHub_Models_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-codex-oauth.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Codex_Provider.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/AI_Bridge_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Codex_Local_Provider.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Registry.php';
 

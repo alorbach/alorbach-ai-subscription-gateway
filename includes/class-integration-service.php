@@ -298,6 +298,18 @@ class Integration_Service {
 		$qualities     = array( 'low', 'medium', 'high' );
 		$video_sizes   = array( '1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024' );
 		$video_lengths = array( '4', '8', '12' );
+		$ai_bridge = array(
+			'enabled'          => AI_Bridge::is_enabled(),
+			'product_name'     => 'AI Model Relay',
+			'bridge_url'       => (string) AI_Bridge::get_setting( 'bridge_url', 'http://127.0.0.1:8765' ),
+			'origin'           => self::site_origin(),
+			'text_prefix'      => AI_Bridge::MODEL_TEXT_PREFIX,
+			'image_model'      => AI_Bridge::MODEL_IMAGE,
+			'audio_model'      => AI_Bridge::MODEL_AUDIO,
+			'relay_prefix'     => AI_Bridge::RELAY_MODEL_PREFIX,
+			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
+			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
+		);
 
 		$config = array(
 			'defaults'          => array(
@@ -320,13 +332,8 @@ class Integration_Service {
 			),
 			'plan_capabilities' => self::get_default_capabilities( true ),
 			'billing_urls'      => self::get_billing_urls(),
-			'local_codex'       => array(
-				'enabled'    => Local_Codex_Bridge::is_enabled(),
-				'bridge_url' => (string) get_option( 'alorbach_local_codex_bridge_url', 'http://127.0.0.1:8765' ),
-				'origin'     => self::site_origin(),
-				'text_prefix' => Local_Codex_Bridge::MODEL_TEXT_PREFIX,
-				'image_model' => Local_Codex_Bridge::MODEL_IMAGE,
-			),
+			'ai_bridge'        => $ai_bridge,
+			'local_codex'      => $ai_bridge,
 		);
 
 		$user_id = null !== $user_id ? (int) $user_id : ( is_user_logged_in() ? (int) get_current_user_id() : 0 );
@@ -754,6 +761,13 @@ class Integration_Service {
 
 		// Exact matches (compound keys stored after the gateway-scoped rollout).
 		$result = array_values( array_intersect( $available_models, $allowed ) );
+		if ( in_array( 'model-relay:*', $allowed, true ) ) {
+			foreach ( $available_models as $available_key ) {
+				if ( 0 === strpos( (string) $available_key, 'model-relay:' ) && ! in_array( $available_key, $result, true ) ) {
+					$result[] = $available_key;
+				}
+			}
+		}
 
 		// Backward compat: also include available compound keys whose plain-model portion
 		// matches a legacy plain-name entry in $allowed.
@@ -913,7 +927,13 @@ class Integration_Service {
 				array_unique(
 					array_filter(
 						array_map( 'sanitize_text_field', $rows ),
-						function ( $model ) use ( $catalog_for_cap ) {
+						function ( $model ) use ( $catalog_for_cap, $capability ) {
+							if ( 'model-relay:*' === $model ) {
+								return true;
+							}
+							if ( class_exists( AI_Bridge::class ) && AI_Bridge::is_supported_model_for_capability( $model, $capability ) ) {
+								return true;
+							}
 							// Exact match (compound key or same plain name stored in catalog).
 							if ( in_array( $model, $catalog_for_cap, true ) ) {
 								return true;
@@ -1069,6 +1089,9 @@ class Integration_Service {
 
 		// Exact match (compound key or same plain name stored in plan).
 		if ( in_array( $model, $allowed_models, true ) ) {
+			return true;
+		}
+		if ( 0 === strpos( $model, 'model-relay:' ) && in_array( 'model-relay:*', $allowed_models, true ) ) {
 			return true;
 		}
 
