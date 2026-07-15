@@ -345,105 +345,17 @@
 
 	function getModels(container) {
 		return apiFetch('/me/models').then(function (r) { return r.json(); }).then(function (models) {
-			return discoverAiBridgeModels(models).catch(function () { return models; });
+			return discoverAiBridgeModels(models);
 		});
-	}
-
-	function addDiscoveredModel(models, type, id, label) {
-		var parent = models[type] || {};
-		var section = type === 'image' ? (parent.model || {}) : parent;
-		section.options = Array.isArray(section.options) ? section.options : [];
-		section.labels = section.labels || {};
-		if (section.options.indexOf(id) === -1) section.options.push(id);
-		section.labels[id] = label || id;
-		if (type === 'image') {
-			parent.model = section;
-			models[type] = parent;
-		} else {
-			models[type] = section;
-		}
-	}
-
-	function removeUndiscoveredRelayModels(models) {
-		['text', 'image', 'audio', 'video'].forEach(function (type) {
-			var parent = models[type] || {};
-			var section = type === 'image' ? (parent.model || {}) : parent;
-			section.options = (section.options || []).filter(function (id) {
-				id = String(id || '');
-				return id.indexOf('model-relay:') !== 0 && id !== 'local-asr' && id.indexOf('local-asr:') !== 0;
-			});
-			if (type === 'image') {
-				parent.model = section;
-				models[type] = parent;
-			} else {
-				models[type] = section;
-			}
-		});
-		return models;
-	}
-
-	function relayModelType(id) {
-		if (id === 'local-asr' || id.indexOf('local-asr:') === 0 || id.indexOf('model-relay:local-asr:') === 0) return 'audio';
-		if (/:image$/.test(id)) return 'image';
-		if (/:video$/.test(id)) return 'video';
-		return 'text';
-	}
-
-	function isSupportedDiscoveredRelayModel(id) {
-		return /^model-relay:(codex|grok-cli|cursor-cli):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)
-			|| /^model-relay:local-asr:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)
-			|| /^local-asr(?::[A-Za-z0-9][A-Za-z0-9._-]{0,127})?$/.test(id);
-	}
-
-	function relayBackendFromModel(id) {
-		var match = String(id || '').match(/^model-relay:([^:]+):/);
-		return match ? match[1] : (String(id || '').indexOf('local-asr') === 0 ? 'local-asr' : '');
 	}
 
 	function discoverAiBridgeModels(models) {
-		models = removeUndiscoveredRelayModels(models);
-		return getLocalCodexConfig().then(function (cfg) {
-			var bridge = getLocalCodexBridge(cfg, false);
-			if (!bridge.token) return models;
-			var headers = { 'Content-Type': 'application/json', 'X-Alorbach-Bridge-Token': bridge.token };
-			return Promise.all([
-				localCodexFetch(bridge.bridgeUrl + '/v1/relay/models', { method: 'GET', headers: headers }),
-				localCodexFetch(bridge.bridgeUrl + '/v1/relay/capabilities', { method: 'GET', headers: headers })
-			]).then(function (responses) {
-				if (!responses[0].ok || !responses[1].ok) return models;
-				return Promise.all(responses.map(localCodexReadJson)).then(function (payloads) {
-					var modelPayload = payloads[0] || {};
-					var capabilities = payloads[1] || {};
-					var ready = {};
-					var backends = capabilities.backends || capabilities.backend_status || [];
-					if (Array.isArray(backends)) {
-						backends.forEach(function (backend) {
-							if (backend && (backend.id || backend.name)) ready[backend.id || backend.name] = backend.ready === true || backend.available === true;
-						});
-					} else if (backends && typeof backends === 'object') {
-						Object.keys(backends).forEach(function (id) {
-							var state = backends[id];
-							ready[id] = state === true || (state && (state.ready === true || state.available === true));
-						});
-					}
-					var relayIds = (modelPayload.models && modelPayload.models.relay) || [];
-					var audioIds = (modelPayload.models && modelPayload.models.audio) || [];
-					var ids = relayIds.concat(audioIds).filter(function (id, index, all) { return all.indexOf(id) === index; });
-					ids.forEach(function (entry) {
-						var id = String(entry && typeof entry === 'object' ? entry.id || '' : entry || '');
-						var backend = relayBackendFromModel(id);
-						if (!isSupportedDiscoveredRelayModel(id) || ready[backend] !== true) return;
-						var label = id;
-						if (id.indexOf('model-relay:grok-cli:') === 0) label = 'Grok CLI - ' + id.split(':').pop() + (/:video$/.test(id) ? ' (experimental)' : '');
-						if (id.indexOf('model-relay:cursor-cli:') === 0) label = 'Cursor Agent - ' + id.split(':').pop();
-						if (id.indexOf('model-relay:codex:') === 0) label = 'Codex CLI - ' + id.split(':').pop();
-						if (backend === 'local-asr') label = 'Local ASR - ' + id.split(':').pop();
-						addDiscoveredModel(models, relayModelType(id), id, label);
-					});
-					return models;
-				});
-			});
-		});
+		var discovery = window.alorbachAiModelRelay;
+		if (!discovery) return Promise.reject(new Error('AI Model Relay discovery is unavailable.'));
+		return discovery.discoverModels(models, {
+			configUrl: buildApiUrl('/ai-bridge/config'),
+			wpHeaders: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce }
+		}).then(function (result) { return result.models; });
 	}
 
 	function updateCostEstimate(container, type, params, costEl) {

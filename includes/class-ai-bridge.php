@@ -409,19 +409,19 @@ class AI_Bridge {
 	public static function is_supported_model_for_capability( $model, $capability ) {
 		$model = (string) $model;
 		if ( 'audio' === $capability ) {
-			return self::is_allowed_audio_model( $model );
+			return self::is_allowed_audio_model( $model ) || self::matches_relay_model( $model );
 		}
 		if ( 'image' === $capability ) {
-			return self::MODEL_IMAGE === $model || self::matches_relay_model( $model, array( 'codex' => array( 'image' ), 'grok-cli' => array( 'image' ) ) );
+			return self::MODEL_IMAGE === $model || self::matches_relay_model( $model );
 		}
 		if ( 'video' === $capability ) {
-			return self::matches_relay_model( $model, array( 'grok-cli' => array( 'video' ) ) );
+			return self::matches_relay_model( $model );
 		}
 		if ( 'chat' === $capability ) {
 			if ( 0 === strpos( $model, self::MODEL_TEXT_PREFIX ) && self::MODEL_IMAGE !== $model && 0 !== strpos( $model, self::MODEL_AUDIO_PREFIX ) ) {
 				return self::is_safe_model_slug( substr( $model, strlen( self::MODEL_TEXT_PREFIX ) ) );
 			}
-			return self::matches_relay_model( $model, array( 'codex' => true, 'grok-cli' => true, 'cursor-cli' => true ) );
+			return self::matches_relay_model( $model );
 		}
 		return false;
 	}
@@ -430,14 +430,8 @@ class AI_Bridge {
 		return is_string( $slug ) && 1 === preg_match( '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $slug );
 	}
 
-	private static function matches_relay_model( $model, $backends ) {
-		if ( 1 !== preg_match( '/^model-relay:([a-z0-9-]+):([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/', (string) $model, $matches ) ) {
-			return false;
-		}
-		if ( ! array_key_exists( $matches[1], $backends ) ) {
-			return false;
-		}
-		return true === $backends[ $matches[1] ] || in_array( $matches[2], $backends[ $matches[1] ], true );
+	private static function matches_relay_model( $model ) {
+		return 1 === preg_match( '/^model-relay:[a-z0-9][a-z0-9-]{0,63}:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', (string) $model );
 	}
 
 	/**
@@ -537,7 +531,7 @@ class AI_Bridge {
 	private static function validate_chat_payload( $payload ) {
 		$model = isset( $payload['model'] ) ? (string) $payload['model'] : '';
 		if ( ! self::is_supported_model_for_capability( $model, 'chat' ) ) {
-			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay chat requires a supported Codex, Grok CLI, or Cursor Agent model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay chat requires a safely formed relay model ID.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		$messages = isset( $payload['messages'] ) && is_array( $payload['messages'] ) ? $payload['messages'] : array();
 		if ( empty( $messages ) ) {
@@ -564,7 +558,7 @@ class AI_Bridge {
 		$prompt = isset( $payload['prompt'] ) ? trim( (string) $payload['prompt'] ) : '';
 		$model  = isset( $payload['model'] ) ? (string) $payload['model'] : self::MODEL_IMAGE;
 		if ( ! self::is_supported_model_for_capability( $model, 'image' ) ) {
-			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay images require a supported Codex or Grok Imagine model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay images require a safely formed relay model ID.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		if ( '' === $prompt ) {
 			return new \WP_Error( 'invalid_prompt', __( 'Prompt is required.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
@@ -577,8 +571,8 @@ class AI_Bridge {
 				return new \WP_Error( 'invalid_reference_image', __( 'AI Model Relay images accept up to four reference images.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 			}
 			foreach ( $payload['reference_images'] as $reference ) {
-				if ( ! self::is_image_data_url( $reference ) || strlen( $reference ) > 16777216 ) {
-					return new \WP_Error( 'invalid_reference_image', __( 'Image references must be PNG, JPEG, or WebP data URLs.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+				if ( ! self::is_image_reference( $reference ) ) {
+					return new \WP_Error( 'invalid_reference_image', __( 'Image references must be PNG, JPEG, or WebP data URLs or base64 image objects.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 				}
 			}
 		}
@@ -595,7 +589,7 @@ class AI_Bridge {
 		$model  = isset( $payload['model'] ) ? (string) $payload['model'] : '';
 		$prompt = isset( $payload['prompt'] ) ? trim( (string) $payload['prompt'] ) : '';
 		if ( ! self::is_supported_model_for_capability( $model, 'video' ) ) {
-			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay video requires the experimental Grok Imagine video model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay video requires a safely formed relay model ID.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		if ( '' === $prompt ) {
 			return new \WP_Error( 'invalid_prompt', __( 'Prompt is required.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
@@ -603,10 +597,25 @@ class AI_Bridge {
 		if ( strlen( $prompt ) > 32768 ) {
 			return new \WP_Error( 'invalid_prompt', __( 'Prompt exceeds the AI Model Relay limit.', 'alorbach-ai-gateway' ), array( 'status' => 413 ) );
 		}
-		if ( ! empty( $payload['input_reference'] ) && ( ! self::is_image_data_url( $payload['input_reference'] ) || strlen( $payload['input_reference'] ) > 16777216 ) ) {
-			return new \WP_Error( 'invalid_reference_image', __( 'Video reference must be a PNG, JPEG, or WebP data URL.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		if ( ! empty( $payload['input_reference'] ) && ! self::is_image_reference( $payload['input_reference'] ) ) {
+			return new \WP_Error( 'invalid_reference_image', __( 'Video reference must be a PNG, JPEG, or WebP data URL or base64 image object.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		return true;
+	}
+
+	private static function is_image_reference( $value ) {
+		if ( is_string( $value ) ) {
+			return strlen( $value ) <= 16777216 && self::is_image_data_url( $value );
+		}
+		if ( ! is_array( $value ) ) {
+			return false;
+		}
+		$mime    = strtolower( trim( (string) ( $value['mime_type'] ?? '' ) ) );
+		$encoded = preg_replace( '/\s+/', '', (string) ( $value['b64_json'] ?? '' ) );
+		return in_array( $mime, array( 'image/png', 'image/jpeg', 'image/jpg', 'image/webp' ), true )
+			&& '' !== $encoded
+			&& strlen( $encoded ) <= 16777216
+			&& false !== base64_decode( $encoded, true );
 	}
 
 	private static function is_image_data_url( $value ) {
@@ -622,7 +631,7 @@ class AI_Bridge {
 	private static function validate_transcribe_payload( $payload ) {
 		$model = isset( $payload['model'] ) ? (string) $payload['model'] : self::MODEL_AUDIO;
 		if ( ! self::is_allowed_audio_model( $model ) ) {
-			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay transcription requires a supported Local ASR model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			return new \WP_Error( 'invalid_local_codex_model', __( 'AI Model Relay transcription requires a safely formed relay or Local ASR model ID.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		$audio_base64 = isset( $payload['audio_base64'] ) ? (string) $payload['audio_base64'] : '';
 		if ( '' === $audio_base64 ) {

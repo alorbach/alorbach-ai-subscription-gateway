@@ -27,6 +27,7 @@ class API_Keys_Helper {
 
 		if ( isset( $raw['entries'] ) && is_array( $raw['entries'] ) ) {
 			$normalized = self::normalize_entries( $raw['entries'] );
+			$normalized = self::migrate_legacy_localcodex_entry( $normalized );
 			// Persist generated IDs for entries that had empty id.
 			$needs_save = false;
 			foreach ( $raw['entries'] as $e ) {
@@ -51,6 +52,31 @@ class API_Keys_Helper {
 			self::save_entries( $entries );
 		}
 		return self::normalize_entries( $entries );
+	}
+
+	/**
+	 * Migrate the old browser-bridge entry to the credential-free AI Model Relay.
+	 * Direct Codex OAuth entries remain unchanged unless named exactly localcodex.
+	 *
+	 * @param array<int, array> $entries Normalized entries.
+	 * @return array<int, array>
+	 */
+	private static function migrate_legacy_localcodex_entry( $entries ) {
+		$changed = false;
+		foreach ( $entries as &$entry ) {
+			$name = strtolower( trim( (string) ( $entry['name'] ?? '' ) ) );
+			if ( 'codex' !== ( $entry['type'] ?? '' ) || 'localcodex' !== $name ) {
+				continue;
+			}
+			$entry['type']    = 'ai_bridge';
+			$entry['api_key'] = '';
+			$changed          = true;
+		}
+		unset( $entry );
+		if ( $changed ) {
+			update_option( 'alorbach_api_keys', array( 'entries' => $entries ), false );
+		}
+		return $entries;
 	}
 
 	/**
@@ -110,7 +136,7 @@ class API_Keys_Helper {
 		foreach ( $entries as $entry ) {
 			if ( ( $entry['type'] ?? '' ) === $type && ! empty( $entry['enabled'] ) ) {
 				// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces can be public.
-				if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$result[] = $entry;
@@ -161,7 +187,7 @@ class API_Keys_Helper {
 		}
 		$type = (string) ( $entry['type'] ?? '' );
 		// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces may be public.
-		if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+		if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		return self::entry_to_credentials( $entry );
@@ -176,7 +202,7 @@ class API_Keys_Helper {
 	private static function entry_to_credentials( $entry ) {
 		$type = (string) ( $entry['type'] ?? '' );
 		// Codex uses OAuth, browser-local Codex has no API key, and Hugging Face Spaces may be public.
-		if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+		if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 			return null;
 		}
 		$creds = array( 'api_key' => $entry['api_key'] ?? '' );

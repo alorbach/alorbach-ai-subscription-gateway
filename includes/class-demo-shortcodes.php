@@ -262,11 +262,14 @@ class Demo_Shortcodes {
 	public static function enqueue_assets() {
 		$url = ALORBACH_PLUGIN_URL;
 		$css_path = ALORBACH_PLUGIN_DIR . 'assets/css/demo-pages.css';
+		$relay_path = ALORBACH_PLUGIN_DIR . 'assets/js/ai-model-relay-discovery.js';
 		$js_path  = ALORBACH_PLUGIN_DIR . 'assets/js/demo-pages.js';
 		$css_ver  = file_exists( $css_path ) ? (string) filemtime( $css_path ) : ALORBACH_VERSION;
+		$relay_ver = file_exists( $relay_path ) ? (string) filemtime( $relay_path ) : ALORBACH_VERSION;
 		$js_ver   = file_exists( $js_path ) ? (string) filemtime( $js_path ) : ALORBACH_VERSION;
 		wp_enqueue_style( 'alorbach-demo-pages', $url . 'assets/css/demo-pages.css', array(), $css_ver );
-		wp_enqueue_script( 'alorbach-demo-pages', $url . 'assets/js/demo-pages.js', array(), $js_ver, true );
+		wp_enqueue_script( 'alorbach-ai-model-relay-discovery', $url . 'assets/js/ai-model-relay-discovery.js', array(), $relay_ver, true );
+		wp_enqueue_script( 'alorbach-demo-pages', $url . 'assets/js/demo-pages.js', array( 'alorbach-ai-model-relay-discovery' ), $js_ver, true );
 		wp_localize_script( 'alorbach-demo-pages', 'alorbachDemo', array(
 			'restUrl'              => rest_url( 'alorbach/v1' ),
 			'nonce'                => wp_create_nonce( 'wp_rest' ),

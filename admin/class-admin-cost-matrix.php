@@ -367,14 +367,14 @@ class Admin_Cost_Matrix {
 		$models_by_entry = array();
 		$models_array    = isset( $cost_matrix['models'] ) && is_array( $cost_matrix['models'] ) ? $cost_matrix['models'] : array();
 		$entries         = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
-		$type_labels     = array( 'openai' => 'OpenAI', 'codex_local' => 'Local Codex', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
+		$type_labels     = array( 'openai' => 'OpenAI', 'ai_bridge' => 'AI Model Relay', 'codex_local' => 'Local Codex (legacy)', 'azure' => 'Azure OpenAI / Foundry', 'google' => 'Google (Gemini)', 'huggingface' => 'Hugging Face', 'huggingface_spaces' => 'Hugging Face Spaces', 'github_models' => 'GitHub Models', 'codex' => 'OpenAI Codex (ChatGPT)' );
 		$import_entry_choices = array();
 		foreach ( $entries as $entry ) {
 			if ( empty( $entry['enabled'] ) ) {
 				continue;
 			}
 			$type = $entry['type'] ?? '';
-			if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+			if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( 'azure' === $type && empty( $entry['endpoint'] ) ) {
@@ -421,7 +421,11 @@ class Admin_Cost_Matrix {
 		$rest_reset        = rest_url( 'alorbach/v1/admin/reset-models' );
 		$rest_save_google_whitelist = rest_url( 'alorbach/v1/admin/save-google-whitelist' );
 		$nonce             = wp_create_nonce( 'wp_rest' );
+		$relay_discovery_path = ALORBACH_PLUGIN_DIR . 'assets/js/ai-model-relay-discovery.js';
+		$relay_discovery_ver = file_exists( $relay_discovery_path ) ? (string) filemtime( $relay_discovery_path ) : ALORBACH_VERSION;
+		$relay_discovery_url = add_query_arg( 'ver', $relay_discovery_ver, ALORBACH_PLUGIN_URL . 'assets/js/ai-model-relay-discovery.js' );
 		?>
+		<script src="<?php echo esc_url( $relay_discovery_url ); ?>"></script>
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Models', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description">
@@ -962,6 +966,40 @@ class Admin_Cost_Matrix {
 				function setLoading(inc) {
 					loadingCount += inc;
 					document.body.classList.toggle('alorbach-admin-loading', loadingCount > 0);
+				}
+
+				function hydrateAiModelRelayEntries(data) {
+					var relayEntries = (data.entries || []).filter(function(entry) { return (entry.type || '') === 'ai_bridge'; });
+					if (!relayEntries.length) return Promise.resolve(data);
+					if (!window.alorbachAiModelRelay) {
+						return Promise.reject(new Error('AI Model Relay discovery is unavailable.'));
+					}
+					return window.alorbachAiModelRelay.discover({
+						configUrl: <?php echo wp_json_encode( rest_url( 'alorbach/v1/ai-bridge/config' ) ); ?>,
+						wpHeaders: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce }
+					}).then(function(result) {
+						relayEntries.forEach(function(relayEntry) {
+							relayEntry.text = [];
+							relayEntry.image = [];
+							relayEntry.video = [];
+							relayEntry.audio = [];
+							(result.items || []).forEach(function(item) {
+								var type = item.type || 'text';
+								if (!relayEntry[type]) return;
+								relayEntry[type].push({
+									id: item.id,
+									provider: 'ai_bridge',
+									type: type,
+									capabilities: item.capabilities || [],
+									label: item.label || item.id
+								});
+							});
+						});
+						if (!(result.items || []).length) {
+							throw new Error('AI Model Relay returned no models from ready backends.');
+						}
+						return data;
+					});
 				}
 
 				function setResult(el, success, msg) {
@@ -1515,6 +1553,9 @@ class Admin_Cost_Matrix {
 						setLoading(1);
 						fetch(restFetch, { method: 'POST', headers: headers, body: JSON.stringify({ entry_ids: selectedEntryIds }) })
 							.then(function(r) { return r.json(); })
+							.then(function(data) {
+								return hydrateAiModelRelayEntries(data);
+							})
 							.then(function(data) {
 								var entries = Array.isArray(data.entries) ? data.entries : [];
 								var hasModels = entries.some(function(entry) {

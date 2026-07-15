@@ -123,6 +123,7 @@ try {
 	$old_ai_bridge_enabled = get_option( 'alorbach_ai_bridge_enabled', '__alorbach_missing__' );
 	$old_ai_bridge_audio_fee_uc = get_option( 'alorbach_ai_bridge_audio_fee_uc', '__alorbach_missing__' );
 	$old_plans = get_option( 'alorbach_plans', '__alorbach_missing__' );
+	$old_api_keys = get_option( 'alorbach_api_keys', '__alorbach_missing__' );
 	try {
 		$local_codex_verify_run_id = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : uniqid( 'local-codex-audio-', true );
 		\Alorbach\AIGateway\AI_Bridge::update_setting( 'enabled', true );
@@ -141,6 +142,25 @@ try {
 		}
 		unset( $test_plan );
 		update_option( 'alorbach_plans', $test_plans, false );
+		$migration_probe = array(
+			array( 'id' => 'verify-localcodex', 'type' => 'codex', 'name' => 'localcodex', 'api_key' => 'legacy-secret', 'enabled' => false ),
+			array( 'id' => 'verify-codex-oauth', 'type' => 'codex', 'name' => 'ChatGPT OAuth', 'api_key' => '', 'enabled' => true ),
+			array( 'id' => 'verify-openai-localcodex', 'type' => 'openai', 'name' => 'localcodex', 'api_key' => 'openai-secret', 'enabled' => true ),
+		);
+		update_option( 'alorbach_api_keys', array( 'entries' => $migration_probe ), false );
+		$migrated_entries = \Alorbach\AIGateway\API_Keys_Helper::get_entries();
+		$migrated_by_id = array();
+		foreach ( $migrated_entries as $migrated_entry ) {
+			$migrated_by_id[ $migrated_entry['id'] ] = $migrated_entry;
+		}
+		alorbach_require( 'ai_bridge' === ( $migrated_by_id['verify-localcodex']['type'] ?? '' ) && empty( $migrated_by_id['verify-localcodex']['api_key'] ) && empty( $migrated_by_id['verify-localcodex']['enabled'] ), 'Only the legacy codex entry named localcodex must migrate to credential-free ai_bridge while preserving id and enabled state.' );
+		alorbach_require( 'codex' === ( $migrated_by_id['verify-codex-oauth']['type'] ?? '' ), 'Named Codex OAuth entries must remain direct codex providers.' );
+		alorbach_require( 'openai' === ( $migrated_by_id['verify-openai-localcodex']['type'] ?? '' ), 'Unrelated providers named localcodex must remain unchanged.' );
+		if ( '__alorbach_missing__' === $old_api_keys ) {
+			delete_option( 'alorbach_api_keys' );
+		} else {
+			update_option( 'alorbach_api_keys', $old_api_keys, false );
+		}
 		$local_codex_verify = \Alorbach\AIGateway\API_Validator::verify_key( 'codex_local' );
 		$ai_bridge_verify = \Alorbach\AIGateway\API_Validator::verify_key( 'ai_bridge' );
 		alorbach_require( ! empty( $local_codex_verify['success'] ) && false !== strpos( (string) ( $local_codex_verify['message'] ?? '' ), 'browser tray app' ), 'Legacy Local Codex validation must pass when AI Model Relay is enabled without a stored API key.' );
@@ -168,7 +188,7 @@ try {
 		alorbach_require( 200 !== rest_do_request( $relay_chat_complete )->get_status(), 'A completed relay job must reject duplicate completion.' );
 
 		$relay_image_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
-		alorbach_set_json_body( $relay_image_create, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:grok-cli:image', 'prompt' => 'Grok image contract ' . $local_codex_verify_run_id, 'reference_images' => array( 'data:image/png;base64,' . base64_encode( 'reference' ) ) ) ) );
+		alorbach_set_json_body( $relay_image_create, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:grok-cli:image', 'prompt' => 'Grok image contract ' . $local_codex_verify_run_id, 'reference_images' => array( 'data:image/png;base64,' . base64_encode( 'reference' ), array( 'b64_json' => base64_encode( 'structured reference' ), 'mime_type' => 'image/png', 'label' => 'identity' ) ) ) ) );
 		$relay_image_response = rest_do_request( $relay_image_create );
 		$relay_image_data = $relay_image_response->get_data();
 		alorbach_require( 200 === $relay_image_response->get_status(), 'Canonical AI Bridge jobs must sign Grok reference-image requests.' );
@@ -183,12 +203,17 @@ try {
 		alorbach_require( 400 === $cross_capability_response->get_status() && 'invalid_local_codex_model' === ( $cross_capability_response->get_data()['code'] ?? '' ), 'Dynamic relay models must not cross capability boundaries.' );
 
 		$malformed_relay_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
-		alorbach_set_json_body( $malformed_relay_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:custom:unsafe', 'messages' => array( array( 'role' => 'user', 'content' => 'Reject custom backend' ) ) ) ) );
+		alorbach_set_json_body( $malformed_relay_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:custom:unsafe/model', 'messages' => array( array( 'role' => 'user', 'content' => 'Reject malformed model id' ) ) ) ) );
 		$malformed_relay_response = rest_do_request( $malformed_relay_create );
-		alorbach_require( 400 === $malformed_relay_response->get_status(), 'Unadvertised custom relay backends must be rejected.' );
+		alorbach_require( 400 === $malformed_relay_response->get_status(), 'Malformed dynamic relay model IDs must be rejected.' );
+
+		$future_relay_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $future_relay_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:future-backend:model.1', 'messages' => array( array( 'role' => 'user', 'content' => 'Allow future relay backend' ) ) ) ) );
+		$future_relay_response = rest_do_request( $future_relay_create );
+		alorbach_require( 200 === $future_relay_response->get_status(), 'Safely formed dynamic relay IDs must be accepted for the paired relay to enforce capability support.' );
 
 		$video_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
-		alorbach_set_json_body( $video_create, array( 'type' => 'video', 'payload' => array( 'model' => 'model-relay:grok-cli:video', 'prompt' => 'Experimental relay video ' . $local_codex_verify_run_id, 'input_reference' => 'data:image/png;base64,' . base64_encode( 'reference' ) ) ) );
+		alorbach_set_json_body( $video_create, array( 'type' => 'video', 'payload' => array( 'model' => 'model-relay:grok-cli:video', 'prompt' => 'Experimental relay video ' . $local_codex_verify_run_id, 'input_reference' => array( 'b64_json' => base64_encode( 'reference' ), 'mime_type' => 'image/png' ) ) ) );
 		$video_create_response = rest_do_request( $video_create );
 		$video_create_data = $video_create_response->get_data();
 		alorbach_require( 200 === $video_create_response->get_status(), 'Canonical AI Bridge jobs must sign Grok experimental video requests.' );
@@ -334,6 +359,11 @@ try {
 			delete_option( 'alorbach_plans' );
 		} else {
 			update_option( 'alorbach_plans', $old_plans, false );
+		}
+		if ( '__alorbach_missing__' === $old_api_keys ) {
+			delete_option( 'alorbach_api_keys' );
+		} else {
+			update_option( 'alorbach_api_keys', $old_api_keys, false );
 		}
 	}
 

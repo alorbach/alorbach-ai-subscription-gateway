@@ -19,7 +19,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
 	 * Manages the multi-entry API key list for all supported providers
 	 * (OpenAI, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces,
-	 * GitHub Models, Codex OAuth).
+	 * GitHub Models, AI Model Relay, Codex OAuth).
  * Each entry can be enabled/disabled independently and supports an
  * optional display name for identification.
  *
@@ -40,6 +40,7 @@ class Admin_API_Keys {
 		'huggingface'   => 'Hugging Face',
 		'huggingface_spaces' => 'Hugging Face Spaces',
 		'github_models' => 'GitHub Models',
+		'ai_bridge'     => 'AI Model Relay',
 		'codex'         => 'OpenAI Codex (OAuth)',
 	);
 
@@ -63,7 +64,7 @@ class Admin_API_Keys {
 			$raw     = isset( $_POST['entries'] ) && is_array( $_POST['entries'] ) ? $_POST['entries'] : array();
 			foreach ( $raw as $e ) {
 				$type = isset( $e['type'] ) ? sanitize_text_field( $e['type'] ) : '';
-				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'codex' ), true ) ) {
+				if ( ! in_array( $type, array( 'openai', 'azure', 'google', 'huggingface', 'huggingface_spaces', 'github_models', 'ai_bridge', 'codex' ), true ) ) {
 					continue;
 				}
 				$entry = array(
@@ -104,8 +105,8 @@ class Admin_API_Keys {
 					}
 					$entry['free_pass_through'] = ! empty( $e['free_pass_through'] );
 				}
-				if ( $type === 'codex' ) {
-					// Auth is via OAuth; no API key stored in the entry.
+				if ( in_array( $type, array( 'ai_bridge', 'codex' ), true ) ) {
+					// AI Model Relay and Codex OAuth do not store an API key in the entry.
 					$entry['api_key']           = '';
 					$entry['free_pass_through'] = ! empty( $e['free_pass_through'] );
 				}
@@ -192,14 +193,19 @@ class Admin_API_Keys {
 			.alorbach-api-keys .azure-speech-extra-fields { display: none; margin-top: 6px; gap: 6px; }
 			.alorbach-api-keys tr[data-type="azure"] .azure-speech-extra-fields { display: grid; }
 			.alorbach-api-keys tr[data-type="codex"] .entry-endpoint,
-			.alorbach-api-keys tr[data-type="codex"] .entry-org { display: none; }
+			.alorbach-api-keys tr[data-type="codex"] .entry-org,
+			.alorbach-api-keys tr[data-type="ai_bridge"] .entry-endpoint,
+			.alorbach-api-keys tr[data-type="ai_bridge"] .entry-org { display: none; }
 			.alorbach-api-keys .spaces-extra-fields { display: none; margin-top: 6px; }
 			.alorbach-api-keys tr[data-type="huggingface_spaces"] .spaces-extra-fields { display: grid; gap: 6px; }
 			.alorbach-api-keys .spaces-extra-fields select,
 			.alorbach-api-keys .spaces-extra-fields input { width: 100%; }
 			.alorbach-api-keys tr[data-type="codex"] .input-with-actions { display: none; }
+			.alorbach-api-keys tr[data-type="ai_bridge"] .input-with-actions { display: none; }
 			.alorbach-api-keys .codex-inline-ui { display: none; }
 			.alorbach-api-keys tr[data-type="codex"] .codex-inline-ui { display: block; }
+			.alorbach-api-keys .ai-bridge-inline-ui { display: none; font-size: 12px; max-width: 540px; }
+			.alorbach-api-keys tr[data-type="ai_bridge"] .ai-bridge-inline-ui { display: block; }
 			.alorbach-api-keys .codex-image-inline-ui { display: none; font-size: 12px; max-width: 540px; }
 			.alorbach-api-keys .codex-inline-ui { font-size: 12px; max-width: 540px; }
 			.alorbach-api-keys .codex-inline-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -284,7 +290,7 @@ class Admin_API_Keys {
 				if (typeSel) {
 					typeSel.addEventListener('change', function() {
 						row.setAttribute('data-type', this.value);
-						if (this.value === 'codex') {
+						if (this.value === 'codex' || this.value === 'ai_bridge') {
 							row.querySelectorAll('input[name*="[api_key]"]').forEach(function(input) {
 								input.value = '';
 							});
@@ -526,6 +532,7 @@ class Admin_API_Keys {
 		$space_id = $entry['space_id'] ?? '';
 		$request_mode = $entry['request_mode'] ?? 'custom_http';
 		$schema_preset = $entry['schema_preset'] ?? '';
+		$credentialless = in_array( $type, array( 'ai_bridge', 'codex' ), true );
 		$endpoint_placeholder = ( $type === 'huggingface' )
 			? 'https://router.huggingface.co/v1'
 			: ( $type === 'huggingface_spaces' ? 'https://owner-space.hf.space/generate' : 'https://xxx.services.ai.azure.com' );
@@ -545,11 +552,15 @@ class Admin_API_Keys {
 			<td class="entry-name">
 				<input type="text" name="entries[<?php echo esc_attr( $index ); ?>][name]" value="<?php echo esc_attr( $name ); ?>" placeholder="<?php esc_attr_e( 'Optional', 'alorbach-ai-gateway' ); ?>" class="regular-text" />
 			</td>
-			<td class="entry-key"<?php if ( $type === 'codex' ) echo ' colspan="3"'; ?>>
+			<td class="entry-key"<?php if ( $credentialless ) echo ' colspan="3"'; ?>>
 				<div class="input-with-actions">
 					<input type="password" id="<?php echo esc_attr( $key_id ); ?>" name="entries[<?php echo esc_attr( $index ); ?>][api_key]" value="<?php echo esc_attr( $api_key ); ?>" class="regular-text" autocomplete="off" />
 					<button type="button" class="button alorbach-toggle-pw" data-target="<?php echo esc_attr( $key_id ); ?>"><?php esc_html_e( 'Show', 'alorbach-ai-gateway' ); ?></button>
 					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
+				</div>
+				<div class="ai-bridge-inline-ui" style="margin-top:0;">
+					<p style="margin:0 0 6px;"><?php esc_html_e( 'Uses the paired administrator browser\'s AI Model Relay. No API key or endpoint is stored here.', 'alorbach-ai-gateway' ); ?></p>
+					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test relay', 'alorbach-ai-gateway' ); ?></button>
 				</div>
 				<?php if ( $type === 'codex' ) : ?>
 				<?php
@@ -594,7 +605,7 @@ class Admin_API_Keys {
 				<?php endif; ?>
 				<span class="alorbach-test-result"></span>
 			</td>
-			<?php if ( $type !== 'codex' ) : ?>
+			<?php if ( ! $credentialless ) : ?>
 			<td class="entry-endpoint">
 				<input type="url" name="entries[<?php echo esc_attr( $index ); ?>][endpoint]" value="<?php echo esc_attr( $endpoint ); ?>" placeholder="<?php echo esc_attr( $endpoint_placeholder ); ?>" class="large-text" />
 				<div class="azure-speech-extra-fields">

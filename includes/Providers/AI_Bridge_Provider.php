@@ -64,40 +64,9 @@ class AI_Bridge_Provider extends Provider_Base {
 	}
 
 	public function fetch_models( $credentials ) {
-		$provider = $this->get_type();
-		$models = array(
-			array(
-				'id'           => 'codex-local:auto',
-				'provider'     => $provider,
-				'type'         => 'text',
-				'capabilities' => array( 'reasoning' ),
-			),
-			array(
-				'id'           => AI_Bridge::MODEL_IMAGE,
-				'provider'     => $provider,
-				'type'         => 'image',
-				'capabilities' => array( 'text_to_image' ),
-			),
-			array(
-				'id'           => AI_Bridge::MODEL_AUDIO,
-				'provider'     => $provider,
-				'type'         => 'audio',
-				'capabilities' => array( 'audio_to_text' ),
-			),
-		);
-		foreach ( array( 'text' => AI_Bridge::get_text_models(), 'image' => AI_Bridge::get_image_models(), 'audio' => AI_Bridge::get_audio_models(), 'video' => AI_Bridge::get_video_models() ) as $type => $catalog ) {
-			foreach ( $catalog as $id => $label ) {
-				if ( in_array( $id, array( 'codex-local:auto', AI_Bridge::MODEL_IMAGE, AI_Bridge::MODEL_AUDIO ), true ) ) {
-					continue;
-				}
-				$models[] = array(
-					'id'           => (string) $id,
-					'provider'     => $provider,
-					'type'         => $type,
-					'capabilities' => array( 'text' === $type ? 'reasoning' : ( 'image' === $type ? 'text_to_image' : ( 'audio' === $type ? 'audio_to_text' : 'text_to_video' ) ) ),
-				);
-			}
-		}
-		return $models;
+		// The paired browser owns the relay connection and live catalog. The
+		// admin importer hydrates this entry from /v1/relay/models instead of
+		// exposing a server-side or hardcoded fallback catalog.
+		return array();
 	}
 }

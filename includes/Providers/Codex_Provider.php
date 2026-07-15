@@ -123,8 +123,7 @@ class Codex_Provider extends Provider_Base {
 	 * Fetch available Codex models dynamically from the ChatGPT backend API.
 	 *
 	 * Tries GET /backend-api/codex/models first (Codex-specific endpoint).
-	 * Falls back to a hardcoded list when the API is unreachable or returns no
-	 * usable models.
+	 * Returns an error when the API is unreachable or returns no usable models.
 	 *
 	 * {@inheritdoc}
 	 */
@@ -135,7 +134,7 @@ class Codex_Provider extends Provider_Base {
 
 		$token = Codex_OAuth::get_valid_access_token();
 		if ( is_wp_error( $token ) ) {
-			return self::fallback_models();
+			return $token;
 		}
 
 		$account_id = Codex_OAuth::get_account_id();
@@ -187,36 +186,7 @@ class Codex_Provider extends Provider_Base {
 			}
 		}
 
-		// Codex-specific endpoint unavailable – use hardcoded fallback.
-		return self::fallback_models();
-	}
-
-	/**
-	 * Hardcoded fallback model list used when the backend API is unreachable.
-	 *
-	 * @return array
-	 */
-	private static function fallback_models() {
-		$model_ids = array(
-			'gpt-5.4-mini',
-			'gpt-5.3-codex',
-			'gpt-5.3-codex-spark',
-			'gpt-5.2-codex',
-			'gpt-5.1-codex',
-			'gpt-5.1-codex-mini',
-			'gpt-5.1-codex-max',
-		);
-
-		$items = array();
-		foreach ( $model_ids as $id ) {
-			$items[] = array(
-				'id'           => $id,
-				'provider'     => 'codex',
-				'type'         => 'text',
-				'capabilities' => array( 'reasoning' ),
-			);
-		}
-
-		return $items;
+		// Codex-specific endpoint unavailable: expose the failure instead of a stale catalog.
+		return new \WP_Error( 'models_unavailable', __( 'Codex models could not be loaded from ChatGPT. No fallback catalog is available.', 'alorbach-ai-gateway' ) );
 	}
 }

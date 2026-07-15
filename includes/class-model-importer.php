@@ -167,7 +167,8 @@ class Model_Importer {
 		$entry_filter = self::normalize_entry_id_filter( $entry_ids );
 		$type_labels = array(
 			'openai'        => 'OpenAI',
-			'codex_local'   => 'Local Codex',
+			'ai_bridge'     => 'AI Model Relay',
+			'codex_local'   => 'Local Codex (legacy)',
 			'azure'         => 'Azure OpenAI / Foundry',
 			'google'        => 'Google (Gemini)',
 			'huggingface'   => 'Hugging Face',
@@ -186,7 +187,7 @@ class Model_Importer {
 			}
 			$type = $entry['type'] ?? '';
 			// Codex authenticates via OAuth, browser-local Codex has no API key, and Hugging Face Spaces can be public.
-			if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+			if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 				continue;
 			}
 			if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
@@ -199,7 +200,7 @@ class Model_Importer {
 			if ( ! $prov ) {
 				continue;
 			}
-			$creds = in_array( $type, array( 'codex', 'codex_local' ), true )
+			$creds = in_array( $type, array( 'ai_bridge', 'codex', 'codex_local' ), true )
 				? array()
 				: array( 'api_key' => $entry['api_key'] );
 			if ( ! empty( $entry['endpoint'] ) ) {
@@ -460,15 +461,30 @@ class Model_Importer {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
-				if ( ! in_array( $type, array( 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				$entry_id = $entry['id'] ?? '';
 				if ( empty( $entry_id ) || ! isset( $selected_entries[ $entry_id ] ) ) {
 					continue;
 				}
-				$sel = $selected_entries[ $entry_id ];
+				$sel = is_array( $selected_entries[ $entry_id ] ) ? $selected_entries[ $entry_id ] : array();
 				$type = $entry['type'] ?? '';
+				if ( 'ai_bridge' === $type ) {
+					$capability_map = array( 'text' => 'chat', 'image' => 'image', 'video' => 'video', 'audio' => 'audio' );
+					foreach ( $capability_map as $selection_type => $capability ) {
+						$selected_models = isset( $sel[ $selection_type ] ) && is_array( $sel[ $selection_type ] ) ? $sel[ $selection_type ] : array();
+						$sel[ $selection_type ] = array_values( array_filter( $selected_models, function ( $selected_model ) use ( $capability, $selection_type, &$result ) {
+							$selected_model = is_string( $selected_model ) ? $selected_model : (string) $selected_model;
+							if ( AI_Bridge::is_supported_model_for_capability( $selected_model, $capability ) ) {
+								return true;
+							}
+							$result['errors'][] = sprintf( __( 'AI Model Relay rejected malformed %1$s model ID: %2$s', 'alorbach-ai-gateway' ), $selection_type, $selected_model );
+							return false;
+						} ) );
+					}
+					$selected_entries[ $entry_id ] = $sel;
+				}
 				$text_ids = isset( $sel['text'] ) && is_array( $sel['text'] ) ? $sel['text'] : array();
 				foreach ( $text_ids as $model ) {
 					$model = is_string( $model ) ? $model : (string) $model;
@@ -499,7 +515,7 @@ class Model_Importer {
 					continue;
 				}
 				$type = $entry['type'] ?? '';
-				if ( ! in_array( $type, array( 'codex', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
+				if ( ! in_array( $type, array( 'ai_bridge', 'codex', 'codex_local', 'huggingface_spaces' ), true ) && empty( $entry['api_key'] ) ) {
 					continue;
 				}
 				if ( $type === 'azure' && empty( $entry['endpoint'] ) ) {
@@ -512,7 +528,7 @@ class Model_Importer {
 				if ( ! $prov ) {
 					continue;
 				}
-				$creds = in_array( $type, array( 'codex', 'codex_local' ), true )
+				$creds = in_array( $type, array( 'ai_bridge', 'codex', 'codex_local' ), true )
 					? array()
 					: array( 'api_key' => $entry['api_key'] );
 				if ( ! empty( $entry['endpoint'] ) ) {
