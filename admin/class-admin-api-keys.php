@@ -122,7 +122,11 @@ class Admin_API_Keys {
 
 		$entries  = API_Keys_Helper::get_entries();
 		$rest_url = rest_url( 'alorbach/v1/admin/verify-api-key' );
+		$relay_config_url = rest_url( 'alorbach/v1/ai-bridge/config' );
 		$nonce    = wp_create_nonce( 'wp_rest' );
+		$relay_discovery_path = ALORBACH_PLUGIN_DIR . 'assets/js/ai-model-relay-discovery.js';
+		$relay_discovery_ver = file_exists( $relay_discovery_path ) ? (string) filemtime( $relay_discovery_path ) : ALORBACH_VERSION;
+		$relay_discovery_url = add_query_arg( 'ver', $relay_discovery_ver, ALORBACH_PLUGIN_URL . 'assets/js/ai-model-relay-discovery.js' );
 		?>
 		<div class="wrap alorbach-api-keys">
 			<h1><?php esc_html_e( 'API Keys', 'alorbach-ai-gateway' ); ?></h1>
@@ -247,9 +251,11 @@ class Admin_API_Keys {
 				.alorbach-api-keys .entry-free { display: flex !important; align-items: center; }
 			}
 			</style>
+		<script src="<?php echo esc_url( $relay_discovery_url ); ?>"></script>
 		<script>
 		(function() {
 			var restUrl = <?php echo wp_json_encode( $rest_url ); ?>;
+			var relayConfigUrl = <?php echo wp_json_encode( $relay_config_url ); ?>;
 			var nonce = <?php echo wp_json_encode( $nonce ); ?>;
 			var okText = <?php echo wp_json_encode( __( 'OK', 'alorbach-ai-gateway' ) ); ?>;
 			var errText = <?php echo wp_json_encode( __( 'Error', 'alorbach-ai-gateway' ) ); ?>;
@@ -330,6 +336,33 @@ class Admin_API_Keys {
 						}).catch(function(err) {
 							resultEl.textContent = err.message || errText;
 							resultEl.style.color = 'red';
+						});
+					});
+				});
+				row.querySelectorAll('.alorbach-pair-relay').forEach(function(pairBtn) {
+					pairBtn.addEventListener('click', function() {
+						var resultEl = row.querySelector('.alorbach-relay-pair-status');
+						if (!window.alorbachAiModelRelay || !window.alorbachAiModelRelay.pairFromConfig) {
+							resultEl.textContent = 'AI Model Relay pairing is unavailable.';
+							resultEl.style.color = 'red';
+							return;
+						}
+						var pairingCode = window.prompt('<?php echo esc_js( __( 'Enter the pairing code shown in the AI Model Relay tray app.', 'alorbach-ai-gateway' ) ); ?>');
+						if (pairingCode === null) return;
+						pairBtn.disabled = true;
+						resultEl.textContent = '<?php echo esc_js( __( 'Pairing...', 'alorbach-ai-gateway' ) ); ?>';
+						resultEl.style.color = '';
+						window.alorbachAiModelRelay.pairFromConfig({
+							configUrl: relayConfigUrl,
+							wpHeaders: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce }
+						}, pairingCode).then(function() {
+							resultEl.textContent = '<?php echo esc_js( __( 'Paired with this browser.', 'alorbach-ai-gateway' ) ); ?>';
+							resultEl.style.color = 'green';
+						}).catch(function(error) {
+							resultEl.textContent = error.message || errText;
+							resultEl.style.color = 'red';
+						}).finally(function() {
+							pairBtn.disabled = false;
 						});
 					});
 				});
@@ -560,7 +593,9 @@ class Admin_API_Keys {
 				</div>
 				<div class="ai-bridge-inline-ui" style="margin-top:0;">
 					<p style="margin:0 0 6px;"><?php esc_html_e( 'Uses the paired administrator browser\'s AI Model Relay. No API key or endpoint is stored here.', 'alorbach-ai-gateway' ); ?></p>
+					<button type="button" class="button button-primary alorbach-pair-relay"><?php esc_html_e( 'Pair AI Model Relay', 'alorbach-ai-gateway' ); ?></button>
 					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test relay', 'alorbach-ai-gateway' ); ?></button>
+					<span class="alorbach-relay-pair-status" aria-live="polite"></span>
 				</div>
 				<?php if ( $type === 'codex' ) : ?>
 				<?php

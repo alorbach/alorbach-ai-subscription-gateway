@@ -442,7 +442,7 @@ class Admin_Cost_Matrix {
 					<h2 id="alorbach_import_modal_title"><?php esc_html_e( 'Select models to import', 'alorbach-ai-gateway' ); ?></h2>
 					<p id="alorbach_import_modal_errors" class="notice notice-error" style="display:none;"></p>
 					<div id="alorbach_import_account_filters_step" class="alorbach-import-entry-step">
-						<p class="description"><?php esc_html_e( 'Choose which enabled API keys to query before fetching models.', 'alorbach-ai-gateway' ); ?></p>
+						<p class="description"><?php esc_html_e( 'Choose which enabled providers to query before fetching models.', 'alorbach-ai-gateway' ); ?></p>
 						<div id="alorbach_import_account_filters"></div>
 					</div>
 					<nav id="alorbach_import_tab_nav" class="alorbach-import-tabs" role="tablist"></nav>
@@ -976,7 +976,10 @@ class Admin_Cost_Matrix {
 					}
 					return window.alorbachAiModelRelay.discover({
 						configUrl: <?php echo wp_json_encode( rest_url( 'alorbach/v1/ai-bridge/config' ) ); ?>,
-						wpHeaders: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce }
+						wpHeaders: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+						requestPairing: function() {
+							return window.prompt('<?php echo esc_js( __( 'Enter the pairing code shown in the AI Model Relay tray app.', 'alorbach-ai-gateway' ) ); ?>');
+						}
 					}).then(function(result) {
 						relayEntries.forEach(function(relayEntry) {
 							relayEntry.text = [];

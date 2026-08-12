@@ -294,6 +294,8 @@ class Integration_Service {
 		$image_models  = $admin::get_image_models();
 		$image_sizes   = $admin::get_image_sizes();
 		$audio_models  = $admin::get_audio_models();
+		$relay_models  = AI_Bridge::get_integration_model_capabilities();
+		$music_analysis_models = array_values( array_filter( array_values( $audio_models ), static fn( $model ) => 0 === strpos( (string) $model, 'gpt-audio' ) ) );
 		$video_models  = $admin::get_video_models();
 		$qualities     = array( 'low', 'medium', 'high' );
 		$video_sizes   = array( '1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024' );
@@ -307,8 +309,8 @@ class Integration_Service {
 			'image_model'      => AI_Bridge::MODEL_IMAGE,
 			'audio_model'      => AI_Bridge::MODEL_AUDIO,
 			'relay_prefix'     => AI_Bridge::RELAY_MODEL_PREFIX,
-			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
-			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
+			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'receipt' => '/ai-bridge/jobs/{job_id}/receipt', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
+			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'receipt' => '/local-codex/jobs/{job_id}/receipt', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
 		);
 
 		$config = array(
@@ -318,14 +320,17 @@ class Integration_Service {
 				'image_size'    => $settings_admin::get_default_image_size( $image_sizes ),
 				'image_quality' => get_option( 'alorbach_image_default_quality', 'medium' ),
 				'audio_model'   => $settings_admin::get_default_audio_model( $audio_models ),
+				'music_analysis_model' => $music_analysis_models[0] ?? '',
 				'video_model'   => $settings_admin::get_default_video_model( $video_models ),
 			),
 			'capabilities'      => array(
 				'chat_models'     => array_keys( $text_models ),
 				'image_models'    => array_keys( $image_models ),
+				'models'          => $relay_models,
 				'image_sizes'     => array_values( $image_sizes ),
 				'image_qualities' => $qualities,
 				'audio_models'    => array_values( $audio_models ),
+				'music_analysis_models' => $music_analysis_models,
 				'video_models'    => array_keys( $video_models ),
 				'video_sizes'     => $video_sizes,
 				'video_durations' => $video_lengths,
@@ -999,6 +1004,14 @@ class Integration_Service {
 		$config['defaults']['image_model'] = self::pick_allowed_default( $config['defaults']['image_model'] ?? '', $config['capabilities']['image_models'] );
 		$config['defaults']['audio_model'] = self::pick_allowed_default( $config['defaults']['audio_model'] ?? '', $config['capabilities']['audio_models'] );
 		$config['defaults']['video_model'] = self::pick_allowed_default( $config['defaults']['video_model'] ?? '', $config['capabilities']['video_models'] );
+		$config['capabilities']['models'] = array_values(
+			array_filter(
+				is_array( $config['capabilities']['models'] ?? null ) ? $config['capabilities']['models'] : array(),
+				static function ( $model ) use ( $config ) {
+					return is_array( $model ) && in_array( (string) ( $model['gateway_model_key'] ?? '' ), $config['capabilities']['image_models'], true );
+				}
+			)
+		);
 
 		if ( empty( $capability_map['image'] ) ) {
 			$config['defaults']['image_model']         = '';

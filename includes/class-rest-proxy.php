@@ -60,7 +60,7 @@ class REST_Proxy {
 	 * Transient-based per-user rate limiter. Limits are read from plugin settings.
 	 *
 	 * @param int    $user_id  WordPress user ID.
-	 * @param string $endpoint Short endpoint key: chat, images, transcribe, video.
+	 * @param string $endpoint Short endpoint key: chat, images, transcribe, music_analysis, video.
 	 * @return \WP_Error|null WP_Error (HTTP 429) when limit exceeded, null when allowed.
 	 */
 	private static function check_rate_limit( $user_id, $endpoint ) {
@@ -74,6 +74,7 @@ class REST_Proxy {
 			'chat'       => array( 'alorbach_rate_limit_chat', 100 ),
 			'images'     => array( 'alorbach_rate_limit_images', 30 ),
 			'transcribe' => array( 'alorbach_rate_limit_transcribe', 30 ),
+			'music_analysis' => array( 'alorbach_rate_limit_music_analysis', 10 ),
 			'video'      => array( 'alorbach_rate_limit_video', 10 ),
 		);
 		list( $option_key, $default ) = isset( $option_map[ $endpoint ] ) ? $option_map[ $endpoint ] : array( '', 60 );
@@ -415,6 +416,17 @@ class REST_Proxy {
 				'prompt'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'language'         => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
 				'locale'           => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/music-analysis', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'music_analysis_handler' ),
+			'permission_callback' => function () { return is_user_logged_in(); },
+			'args'                => array(
+				'sources' => array( 'required' => true ),
+				'model' => array( 'required' => false, 'sanitize_callback' => 'sanitize_text_field' ),
+				'prompt' => array( 'required' => false, 'sanitize_callback' => 'sanitize_textarea_field' ),
 			),
 		) );
 
@@ -1608,6 +1620,77 @@ class REST_Proxy {
 			'request_signature' => $request_signature,
 			'deduction_applied' => true,
 		) );
+		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Listen to a main mix and optional stems with an audio-understanding model.
+	 * Audio is written only to per-request temporary files and is never included
+	 * in debug records, responses, or ledger metadata.
+	 */
+	public static function music_analysis_handler( $request ) {
+		$user_id = get_current_user_id();
+		if ( $rate_error = self::check_rate_limit( $user_id, 'music_analysis' ) ) { return $rate_error; }
+		if ( $quota_error = self::check_monthly_quota( $user_id ) ) { return $quota_error; }
+		$sources = $request->get_param( 'sources' );
+		$sources = is_array( $sources ) ? array_values( $sources ) : array();
+		if ( ! $sources || count( $sources ) > 3 ) {
+			return new \WP_Error( 'invalid_music_sources', __( 'Music analysis requires a main mix and accepts at most two optional stems.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		$model = sanitize_text_field( (string) ( $request->get_param( 'model' ) ?: '' ) );
+		if ( '' === $model ) {
+			$config = Integration_Service::get_integration_config( $user_id );
+			$model = (string) ( $config['defaults']['music_analysis_model'] ?? '' );
+		}
+		if ( 0 !== strpos( $model, 'gpt-audio' ) ) {
+			return new \WP_Error( 'music_analysis_model_unavailable', __( 'Full Song Analysis needs a configured audio-understanding model (for example a gpt-audio model). It cannot use a transcription-only model.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+		if ( $plan_error = self::enforce_user_plan_access( $user_id, 'audio', $model ) ) { return $plan_error; }
+		$prompt = trim( (string) $request->get_param( 'prompt' ) );
+		$normalized = array(); $total_duration = 0; $signature_sources = array();
+		foreach ( $sources as $source ) {
+			$source = is_array( $source ) ? $source : array();
+			$role = sanitize_key( (string) ( $source['role'] ?? '' ) );
+			if ( ! in_array( $role, array( 'main', 'vocals', 'instrumental' ), true ) || isset( $normalized[ $role ] ) ) {
+				return new \WP_Error( 'invalid_music_source_role', __( 'Music-analysis source roles must be unique main, vocals, or instrumental values.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			}
+			$b64 = isset( $source['audio_base64'] ) && is_string( $source['audio_base64'] ) ? preg_replace( '/\s+/', '', $source['audio_base64'] ) : '';
+			if ( '' === $b64 || strlen( $b64 ) > 67108864 ) { return new \WP_Error( 'audio_too_large', __( 'Each music-analysis audio source must be 48 MB or less.', 'alorbach-ai-gateway' ), array( 'status' => 413 ) ); }
+			$bytes = base64_decode( $b64, true );
+			if ( false === $bytes || '' === $bytes ) { return new \WP_Error( 'invalid_audio', __( 'Invalid base64 audio.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) ); }
+			$duration = max( 0, absint( $source['duration_seconds'] ?? 0 ) );
+			if ( $duration <= 0 ) { return new \WP_Error( 'invalid_duration', __( 'Music-analysis sources require duration_seconds.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) ); }
+			$normalized[ $role ] = array( 'bytes' => $bytes, 'format' => sanitize_key( (string) ( $source['audio_format'] ?? '' ) ), 'duration' => $duration );
+			$total_duration += $duration;
+			$signature_sources[] = array( $role, hash( 'sha256', $bytes ), $duration );
+		}
+		if ( empty( $normalized['main'] ) ) { return new \WP_Error( 'main_music_source_required', __( 'Full Song Analysis requires a main mix.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) ); }
+		$time_bucket = (int) ( time() / 300 );
+		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, 'music_analysis', $signature_sources, $model, $prompt, $time_bucket ) ) );
+		if ( Ledger::signature_exists( $request_signature ) ) { return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) ); }
+		$api_cost = Cost_Matrix::get_audio_cost( $total_duration, $model );
+		$cost = Cost_Matrix::apply_user_cost( $api_cost, $model );
+		if ( Ledger::get_balance( $user_id ) < $cost ) { return self::insufficient_credits_error( $user_id, 'audio', array( 'model' => $model, 'duration' => $total_duration, 'required_uc' => $cost, 'available_uc' => Ledger::get_balance( $user_id ) ) ); }
+		if ( ! function_exists( 'wp_tempnam' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		$started = time(); $results = array();
+		foreach ( $normalized as $role => $source ) {
+			$tmp = wp_tempnam( 'alorbach-music-analysis-' );
+			if ( ! $tmp || false === file_put_contents( $tmp, $source['bytes'] ) ) { if ( $tmp ) { wp_delete_file( $tmp ); } return new \WP_Error( 'upload_error', __( 'Could not prepare temporary audio for analysis.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) ); }
+			unset( $source['bytes'] );
+			$result = API_Client::transcribe( $tmp, $model, trim( $prompt . "\n\nYou are analyzing the " . $role . " source." ), $source['format'] ?: null );
+			wp_delete_file( $tmp );
+			if ( is_wp_error( $result ) ) {
+				Image_Jobs::record_debug_job( 'audio', $user_id, array( 'started_at' => $started, 'finished_at' => time(), 'endpoint' => 'music-analysis', 'model' => $model, 'source_roles' => array_keys( $normalized ), 'duration_seconds' => $total_duration, 'error' => $result, 'request_signature' => $request_signature ) );
+				return $result;
+			}
+			$results[ $role ] = array( 'text' => sanitize_textarea_field( (string) ( $result['text'] ?? '' ) ), 'duration_seconds' => $source['duration'] );
+		}
+		Ledger::insert_transaction( $user_id, 'audio_deduction', $model, -$cost, null, null, null, $request_signature, $api_cost );
+		do_action( 'alorbach_after_deduction', $user_id, 'audio', $model, $cost, $api_cost );
+		$response = array( 'model' => $model, 'source_results' => $results, 'duration_seconds' => $total_duration, 'cost_uc' => $cost, 'cost_credits' => User_Display::uc_to_credits( $cost ), 'cost_usd' => User_Display::uc_to_usd( $cost ) );
+		Image_Jobs::record_debug_job( 'audio', $user_id, array( 'started_at' => $started, 'finished_at' => time(), 'endpoint' => 'music-analysis', 'model' => $model, 'source_roles' => array_keys( $normalized ), 'duration_seconds' => $total_duration, 'cost_uc' => $cost, 'api_cost_uc' => $api_cost, 'request_signature' => $request_signature, 'deduction_applied' => true ) );
 		return rest_ensure_response( $response );
 	}
 

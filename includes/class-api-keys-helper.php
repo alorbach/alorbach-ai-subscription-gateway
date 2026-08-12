@@ -28,6 +28,9 @@ class API_Keys_Helper {
 		if ( isset( $raw['entries'] ) && is_array( $raw['entries'] ) ) {
 			$normalized = self::normalize_entries( $raw['entries'] );
 			$normalized = self::migrate_legacy_localcodex_entry( $normalized );
+			$entry_count_before_relay = count( $normalized );
+			$normalized = self::ensure_ai_model_relay_entry( $normalized );
+			$relay_entry_added = count( $normalized ) > $entry_count_before_relay;
 			// Persist generated IDs for entries that had empty id.
 			$needs_save = false;
 			foreach ( $raw['entries'] as $e ) {
@@ -40,7 +43,7 @@ class API_Keys_Helper {
 					break;
 				}
 			}
-			if ( $needs_save ) {
+			if ( $needs_save || $relay_entry_added ) {
 				self::save_entries( $normalized );
 			}
 			return $normalized;
@@ -48,10 +51,39 @@ class API_Keys_Helper {
 
 		// Migrate from legacy format.
 		$entries = self::migrate_from_legacy( $raw );
+		$entries = self::ensure_ai_model_relay_entry( $entries );
 		if ( ! empty( $entries ) ) {
 			self::save_entries( $entries );
 		}
 		return self::normalize_entries( $entries );
+	}
+
+	/**
+	 * Ensure the credential-free AI Model Relay is available wherever provider
+	 * entries are selected, including the model-import flow.
+	 *
+	 * @param array<int, array> $entries Normalized provider entries.
+	 * @return array<int, array>
+	 */
+	private static function ensure_ai_model_relay_entry( $entries ) {
+		if ( ! class_exists( AI_Bridge::class ) || ! AI_Bridge::is_enabled() ) {
+			return $entries;
+		}
+
+		foreach ( $entries as $entry ) {
+			if ( 'ai_bridge' === ( $entry['type'] ?? '' ) ) {
+				return $entries;
+			}
+		}
+
+		$entries[] = array(
+			'id'      => 'ai-model-relay',
+			'type'    => 'ai_bridge',
+			'api_key' => '',
+			'enabled' => true,
+		);
+
+		return $entries;
 	}
 
 	/**

@@ -88,6 +88,9 @@ class AI_Bridge {
 			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/complete', array(
 				'methods' => 'POST', 'callback' => array( __CLASS__, 'complete_job_handler' ), 'permission_callback' => $permission,
 			) );
+			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/receipt', array(
+				'methods' => 'GET', 'callback' => array( __CLASS__, 'receipt_handler' ), 'permission_callback' => $permission,
+			) );
 			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/fail', array(
 				'methods' => 'POST', 'callback' => array( __CLASS__, 'fail_job_handler' ), 'permission_callback' => $permission,
 			) );
@@ -120,12 +123,14 @@ class AI_Bridge {
 					'config'   => '/ai-bridge/config',
 					'jobs'     => '/ai-bridge/jobs',
 					'complete' => '/ai-bridge/jobs/{job_id}/complete',
+					'receipt'  => '/ai-bridge/jobs/{job_id}/receipt',
 					'fail'     => '/ai-bridge/jobs/{job_id}/fail',
 				),
 				'legacy_routes'  => array(
 					'config'   => '/local-codex/config',
 					'jobs'     => '/local-codex/jobs',
 					'complete' => '/local-codex/jobs/{job_id}/complete',
+					'receipt'  => '/local-codex/jobs/{job_id}/receipt',
 					'fail'     => '/local-codex/jobs/{job_id}/fail',
 				),
 				'model_policy'   => array(
@@ -282,9 +287,34 @@ class AI_Bridge {
 		$response['ai_bridge']    = true;
 		$response['local_codex']  = true;
 
+		set_transient( self::receipt_key( (string) $job['job_id'] ), self::completion_receipt( $job, $response ), self::JOB_TTL );
 		delete_transient( self::job_key( (string) $job['job_id'] ) );
 
 		return rest_ensure_response( $response );
+	}
+
+	/**
+	 * Read a completed, redacted relay receipt for the current user.
+	 *
+	 * The receipt deliberately omits provider envelopes and binary result data.
+	 * A downstream product may compare its independently uploaded private bytes
+	 * to this manifest, but cannot use this endpoint to obtain image bytes.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function receipt_handler( $request ) {
+		$job_id  = sanitize_text_field( (string) $request->get_param( 'job_id' ) );
+		$receipt = get_transient( self::receipt_key( $job_id ) );
+		if ( ! is_array( $receipt ) ) {
+			return new \WP_Error( 'local_codex_receipt_not_found', __( 'AI Model Relay completion receipt was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+		if ( (int) ( $receipt['user_id'] ?? 0 ) !== get_current_user_id() ) {
+			return new \WP_Error( 'local_codex_wrong_user', __( 'AI Model Relay job belongs to another user.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
+		}
+
+		unset( $receipt['user_id'] );
+		return rest_ensure_response( $receipt );
 	}
 
 	/**
@@ -339,6 +369,47 @@ class AI_Bridge {
 			self::MODEL_IMAGE                  => __( 'Codex Image (legacy)', 'alorbach-ai-gateway' ),
 			'model-relay:codex:image'          => __( 'Codex Image', 'alorbach-ai-gateway' ),
 			'model-relay:grok-cli:image'       => __( 'Grok Imagine', 'alorbach-ai-gateway' ),
+		);
+	}
+
+	/**
+	 * Publish the versioned contract for image models executed by the paired
+	 * browser relay. This is capability evidence owned by the Gateway/Relay
+	 * integration; downstream products must not infer it from a model ID.
+	 *
+	 * The browser still has to establish an origin-scoped pairing before it can
+	 * execute a signed job. The contract intentionally says nothing about
+	 * cancellation, streaming progress, or previews because the relay does not
+	 * implement those provider controls.
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	public static function get_integration_model_capabilities() {
+		if ( ! self::is_enabled() ) {
+			return array();
+		}
+
+		return array(
+			array(
+				'gateway_model_key'             => 'model-relay:codex:image',
+				'transport'                     => 'async_image',
+				'eligible'                      => true,
+				'supported_languages'           => array( 'de-DE', 'en-US' ),
+				'operation_kinds'               => array( 'text_to_image', 'image_edit' ),
+				'image_capabilities_evidenced'  => true,
+				'requires_browser_pairing'      => true,
+				'image_capabilities'            => array(
+					'async_jobs'              => true,
+					'provider_progress'       => false,
+					'preview_images'          => false,
+					'reference_images'        => true,
+					'provider_cancel'         => false,
+					'candidate_count_max'     => 1,
+					'supported_sizes'         => array( '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840' ),
+					'supported_qualities'     => array( 'low', 'medium', 'high' ),
+					'supported_output_formats' => array( 'image/png', 'image/jpeg', 'image/webp' ),
+				),
+			),
 		);
 	}
 
@@ -408,22 +479,50 @@ class AI_Bridge {
 	 */
 	public static function is_supported_model_for_capability( $model, $capability ) {
 		$model = (string) $model;
+		if ( self::matches_relay_model( $model ) ) {
+			$known_capability = self::known_relay_model_capability( $model );
+			return '' === $known_capability || $capability === $known_capability;
+		}
 		if ( 'audio' === $capability ) {
-			return self::is_allowed_audio_model( $model ) || self::matches_relay_model( $model );
+			return self::is_allowed_audio_model( $model );
 		}
 		if ( 'image' === $capability ) {
-			return self::MODEL_IMAGE === $model || self::matches_relay_model( $model );
+			return self::MODEL_IMAGE === $model;
 		}
 		if ( 'video' === $capability ) {
-			return self::matches_relay_model( $model );
+			return false;
 		}
 		if ( 'chat' === $capability ) {
 			if ( 0 === strpos( $model, self::MODEL_TEXT_PREFIX ) && self::MODEL_IMAGE !== $model && 0 !== strpos( $model, self::MODEL_AUDIO_PREFIX ) ) {
 				return self::is_safe_model_slug( substr( $model, strlen( self::MODEL_TEXT_PREFIX ) ) );
 			}
-			return self::matches_relay_model( $model );
+			return false;
 		}
 		return false;
+	}
+
+	/**
+	 * Resolve a capability from the stable relay model suffixes we publish.
+	 * Unknown, safely formed IDs remain deferred to the paired relay so future
+	 * backends can be introduced without a Gateway release.
+	 *
+	 * @param string $model Relay model ID.
+	 * @return string Empty when the capability is not encoded in the ID.
+	 */
+	private static function known_relay_model_capability( $model ) {
+		if ( 0 === strpos( $model, 'model-relay:local-asr:' ) ) {
+			return 'audio';
+		}
+		if ( ':image' === substr( $model, -6 ) ) {
+			return 'image';
+		}
+		if ( ':video' === substr( $model, -6 ) ) {
+			return 'video';
+		}
+		if ( ':auto' === substr( $model, -5 ) ) {
+			return 'chat';
+		}
+		return '';
 	}
 
 	private static function is_safe_model_slug( $slug ) {
@@ -566,6 +665,10 @@ class AI_Bridge {
 		if ( strlen( $prompt ) > 32768 ) {
 			return new \WP_Error( 'invalid_prompt', __( 'Prompt exceeds the AI Model Relay limit.', 'alorbach-ai-gateway' ), array( 'status' => 413 ) );
 		}
+		$model_contract = self::image_model_contract( $model );
+		if ( null !== $model_contract && ! self::image_options_are_supported( $payload, $model_contract ) ) {
+			return new \WP_Error( 'invalid_local_codex_image_options', __( 'The requested image size, quality, format, or candidate count is not supported by the AI Model Relay model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
 		if ( ! empty( $payload['reference_images'] ) ) {
 			if ( ! is_array( $payload['reference_images'] ) || count( $payload['reference_images'] ) > 4 ) {
 				return new \WP_Error( 'invalid_reference_image', __( 'AI Model Relay images accept up to four reference images.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
@@ -577,6 +680,30 @@ class AI_Bridge {
 			}
 		}
 		return true;
+	}
+
+	/** @return array<string,mixed>|null */
+	private static function image_model_contract( $model ) {
+		foreach ( self::get_integration_model_capabilities() as $contract ) {
+			if ( is_array( $contract ) && $model === ( $contract['gateway_model_key'] ?? null ) ) {
+				return $contract;
+			}
+		}
+		return null;
+	}
+
+	/** @param array<string,mixed> $payload @param array<string,mixed> $contract */
+	private static function image_options_are_supported( $payload, $contract ) {
+		$capabilities = isset( $contract['image_capabilities'] ) && is_array( $contract['image_capabilities'] ) ? $contract['image_capabilities'] : array();
+		$size         = (string) ( $payload['size'] ?? '1024x1024' );
+		$quality      = (string) ( $payload['quality'] ?? 'medium' );
+		$format       = (string) ( $payload['output_format'] ?? 'image/png' );
+		$count        = isset( $payload['candidate_count'] ) ? (int) $payload['candidate_count'] : 1;
+		return in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true )
+			&& in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true )
+			&& in_array( $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true )
+			&& $count >= 1
+			&& $count <= (int) ( $capabilities['candidate_count_max'] ?? 0 );
 	}
 
 	/**
@@ -706,9 +833,11 @@ class AI_Bridge {
 		if ( empty( $response['data'] ) || ! is_array( $response['data'] ) ) {
 			return new \WP_Error( 'invalid_local_codex_result', __( 'AI Model Relay image result was not valid.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
+		$requires_mime = null !== self::image_model_contract( (string) ( $job['model'] ?? '' ) );
 		foreach ( $response['data'] as $image ) {
 			$encoded = is_array( $image ) && isset( $image['b64_json'] ) ? preg_replace( '/\s+/', '', (string) $image['b64_json'] ) : '';
-			if ( '' === $encoded || false === base64_decode( $encoded, true ) ) {
+			$mime    = is_array( $image ) ? strtolower( trim( (string) ( $image['mime_type'] ?? '' ) ) ) : '';
+			if ( '' === $encoded || false === base64_decode( $encoded, true ) || ( $requires_mime && ! in_array( $mime, array( 'image/png', 'image/jpeg', 'image/webp' ), true ) ) ) {
 				return new \WP_Error( 'invalid_local_codex_result', __( 'AI Model Relay image result did not contain valid base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 			}
 		}
@@ -781,6 +910,63 @@ class AI_Bridge {
 	 */
 	private static function job_key( $job_id ) {
 		return 'alorbach_local_codex_job_' . sanitize_key( (string) $job_id );
+	}
+
+	/**
+	 * Transient key for a redacted completed-job receipt.
+	 *
+	 * @param string $job_id Job identifier.
+	 * @return string
+	 */
+	private static function receipt_key( $job_id ) {
+		return 'alorbach_local_codex_receipt_' . sanitize_key( (string) $job_id );
+	}
+
+	/**
+	 * Build the minimal receipt a downstream product may trust for result
+	 * integrity. It never retains raw result bytes or a relay authentication
+	 * token; image records hold only the independently checkable byte manifest.
+	 *
+	 * @param array $job Signed relay job.
+	 * @param array $response Normalized completion response.
+	 * @return array<string,mixed>
+	 */
+	private static function completion_receipt( $job, $response ) {
+		$receipt = array(
+			'job_id'       => (string) $job['job_id'],
+			'user_id'      => (int) $job['user_id'],
+			'request_hash' => (string) $job['request_hash'],
+			'type'         => (string) $job['type'],
+			'model'        => (string) $job['model'],
+			'status'       => 'completed',
+			'completed_at' => gmdate( 'c' ),
+			'cost_uc'      => (int) $job['fee_uc'],
+			'result_manifest' => array(),
+		);
+
+		if ( 'image' !== (string) $job['type'] ) {
+			return $receipt;
+		}
+
+		$data = isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array();
+		foreach ( $data as $index => $image ) {
+			if ( ! is_array( $image ) ) {
+				continue;
+			}
+			$encoded = preg_replace( '/\s+/', '', (string) ( $image['b64_json'] ?? '' ) );
+			$bytes   = false !== $encoded ? base64_decode( $encoded, true ) : false;
+			if ( false === $bytes ) {
+				continue;
+			}
+			$receipt['result_manifest'][] = array(
+				'index'      => (int) $index,
+				'mime_type'  => strtolower( trim( (string) ( $image['mime_type'] ?? '' ) ) ),
+				'byte_size'  => strlen( $bytes ),
+				'sha256'     => hash( 'sha256', $bytes ),
+			);
+		}
+
+		return $receipt;
 	}
 
 	/**

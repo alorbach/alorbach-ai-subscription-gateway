@@ -100,6 +100,12 @@ try {
 	$models  = alorbach_verify_request( '/alorbach/v1/me/models' );
 
 	alorbach_require_keys( $config, array( 'defaults', 'capabilities', 'plan_capabilities', 'billing_urls' ), '/integration/config' );
+	alorbach_require( array_key_exists( 'music_analysis_model', $config['defaults'] ), '/integration/config must expose a music-analysis model default, including an empty setup-required value.' );
+	alorbach_require_array_key( $config['capabilities'], 'music_analysis_models', '/integration/config capabilities' );
+	$music_analysis_routes = rest_get_server()->get_routes();
+	alorbach_require( isset( $music_analysis_routes['/alorbach/v1/music-analysis'] ), 'Gateway must register the authenticated music-analysis REST route.' );
+	$rest_proxy_source = file_get_contents( dirname( __DIR__ ) . '/includes/class-rest-proxy.php' );
+	alorbach_require( false !== strpos( $rest_proxy_source, "function_exists( 'wp_tempnam' )" ) && false !== strpos( $rest_proxy_source, "require_once ABSPATH . 'wp-admin/includes/file.php';" ), 'Music analysis must load the WordPress file helper before creating temporary audio files.' );
 	alorbach_require_keys( $plans, array( 'plans' ), '/integration/plans' );
 	alorbach_require_keys( $account, array( 'user_id', 'balance', 'usage_month', 'billing_urls', 'active_plan' ), '/integration/account' );
 	alorbach_require_keys( $models, array( 'text', 'image', 'audio', 'video' ), '/me/models' );
@@ -170,11 +176,22 @@ try {
 		alorbach_require( 'codex-local:audio' === ( $local_codex_config['local_codex']['audio_model'] ?? '' ), '/integration/config must expose the Local Codex audio model id.' );
 		alorbach_require( in_array( 'codex-local:audio', $local_codex_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose codex-local:audio in the audio catalog.' );
 		alorbach_require( in_array( 'codex-local:audio:whisper-large-v3', $local_codex_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose Local Whisper submodels in the audio catalog.' );
+		$relay_image_capabilities = array_values( array_filter( $local_codex_config['capabilities']['models'] ?? array(), static fn( $model ) => is_array( $model ) && 'model-relay:codex:image' === ( $model['gateway_model_key'] ?? '' ) ) );
+		alorbach_require( 1 === count( $relay_image_capabilities ) && ! empty( $relay_image_capabilities[0]['image_capabilities_evidenced'] ) && true === ( $relay_image_capabilities[0]['requires_browser_pairing'] ?? null ) && 'async_image' === ( $relay_image_capabilities[0]['transport'] ?? '' ), '/integration/config must expose explicit, browser-paired Codex image capability evidence.' );
+		alorbach_require( array( 'text_to_image', 'image_edit' ) === ( $relay_image_capabilities[0]['operation_kinds'] ?? array() ) && in_array( 'image/webp', $relay_image_capabilities[0]['image_capabilities']['supported_output_formats'] ?? array(), true ), 'Codex image capability evidence must publish generic operation kinds and supported output formats.' );
 
 		$ai_bridge_config = alorbach_verify_request( '/alorbach/v1/ai-bridge/config' );
 		$legacy_bridge_config = alorbach_verify_request( '/alorbach/v1/local-codex/config' );
 		alorbach_require( 'AI Model Relay' === ( $ai_bridge_config['product_name'] ?? '' ) && ( $ai_bridge_config['bridge_url'] ?? '' ) === ( $legacy_bridge_config['bridge_url'] ?? null ), 'Canonical and legacy bridge config routes must expose equivalent settings.' );
 		alorbach_require( 'model-relay:*' === ( $ai_bridge_config['model_policy']['relay_wildcard'] ?? '' ), 'AI Bridge config must expose the capability-scoped relay wildcard policy.' );
+		alorbach_require( '/ai-bridge/jobs/{job_id}/receipt' === ( $ai_bridge_config['canonical_routes']['receipt'] ?? '' ) && '/local-codex/jobs/{job_id}/receipt' === ( $legacy_bridge_config['legacy_routes']['receipt'] ?? '' ), 'Canonical and legacy AI Bridge config must expose the owner-bound completion receipt route.' );
+		$bridge_routes = rest_get_server()->get_routes();
+		alorbach_require( isset( $bridge_routes['/alorbach/v1/ai-bridge/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/receipt'] ) && isset( $bridge_routes['/alorbach/v1/local-codex/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/receipt'] ), 'Both AI Bridge receipt routes must be registered without dispatching a relay job.' );
+		$receipt_builder = new ReflectionMethod( \Alorbach\AIGateway\AI_Bridge::class, 'completion_receipt' );
+		$receipt_bytes = "\x89PNG\r\n\x1a\nreceipt-contract";
+		$receipt = $receipt_builder->invoke( null, array( 'job_id' => 'receipt-fixture', 'user_id' => 1, 'request_hash' => str_repeat( 'a', 64 ), 'type' => 'image', 'model' => 'model-relay:codex:image', 'fee_uc' => 0 ), array( 'data' => array( array( 'b64_json' => base64_encode( $receipt_bytes ), 'mime_type' => 'image/png' ) ) ) );
+		alorbach_require( is_array( $receipt ) && hash( 'sha256', $receipt_bytes ) === ( $receipt['result_manifest'][0]['sha256'] ?? '' ) && 'image/png' === ( $receipt['result_manifest'][0]['mime_type'] ?? '' ), 'A receipt manifest must bind image MIME and bytes without dispatching or charging a relay job.' );
+		alorbach_require( ! array_key_exists( 'job_token', $receipt ) && ! array_key_exists( 'payload', $receipt ) && ! array_key_exists( 'b64_json', $receipt ), 'A completion receipt must omit relay tokens, signed payloads, and image bytes.' );
 
 		$relay_chat_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
 		alorbach_set_json_body( $relay_chat_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:cursor-cli:auto', 'messages' => array( array( 'role' => 'user', 'content' => 'Relay contract ' . $local_codex_verify_run_id ) ) ) ) );
