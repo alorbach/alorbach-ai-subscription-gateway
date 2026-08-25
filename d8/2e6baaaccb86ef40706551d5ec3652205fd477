@@ -1,0 +1,42 @@
+bin/verify-rest-contracts.php
+  s_283fd6cff5aacb::t_b21bd8f08cb109 188,190,208-218
+  s_161f758cd95dc5::t_c15675640cdc0c 219
+includes/class-ai-bridge.php
+  s_283fd6cff5aacb::t_f0e2caa4f7ea33 826
+  s_283fd6cff5aacb::t_290a77aaa41f13 352,354
+  s_283fd6cff5aacb::t_8b6d79fd8a498a 97-99,131,139,348-351,353,355-361,806,825
+  s_283fd6cff5aacb::t_266732bebb6466 148
+  s_3525781c2f32b4::t_bb6d68b3f72205 827
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d82e6baaaccb86ef40706551d5ec3652205fd477",
+  "prompts": {},
+  "sessions": {
+    "s_161f758cd95dc5": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a03835-6e1a-7671-b06b-c27ff63fa33f",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_3525781c2f32b4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a037a9-269b-7ce1-8ec4-2dd27ed94576",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
