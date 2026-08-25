@@ -185,8 +185,9 @@ try {
 		alorbach_require( 'AI Model Relay' === ( $ai_bridge_config['product_name'] ?? '' ) && ( $ai_bridge_config['bridge_url'] ?? '' ) === ( $legacy_bridge_config['bridge_url'] ?? null ), 'Canonical and legacy bridge config routes must expose equivalent settings.' );
 		alorbach_require( 'model-relay:*' === ( $ai_bridge_config['model_policy']['relay_wildcard'] ?? '' ), 'AI Bridge config must expose the capability-scoped relay wildcard policy.' );
 		alorbach_require( '/ai-bridge/jobs/{job_id}/receipt' === ( $ai_bridge_config['canonical_routes']['receipt'] ?? '' ) && '/local-codex/jobs/{job_id}/receipt' === ( $legacy_bridge_config['legacy_routes']['receipt'] ?? '' ), 'Canonical and legacy AI Bridge config must expose the owner-bound completion receipt route.' );
+		alorbach_require( true === ( $ai_bridge_config['supports_cancel'] ?? null ) && '/ai-bridge/jobs/{job_id}/cancel' === ( $ai_bridge_config['canonical_routes']['cancel'] ?? '' ) && '/local-codex/jobs/{job_id}/cancel' === ( $legacy_bridge_config['legacy_routes']['cancel'] ?? '' ), 'Canonical and legacy AI Bridge config must expose signed pre-execution cancellation.' );
 		$bridge_routes = rest_get_server()->get_routes();
-		alorbach_require( isset( $bridge_routes['/alorbach/v1/ai-bridge/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/receipt'] ) && isset( $bridge_routes['/alorbach/v1/local-codex/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/receipt'] ), 'Both AI Bridge receipt routes must be registered without dispatching a relay job.' );
+		alorbach_require( isset( $bridge_routes['/alorbach/v1/ai-bridge/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/receipt'] ) && isset( $bridge_routes['/alorbach/v1/local-codex/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/receipt'] ) && isset( $bridge_routes['/alorbach/v1/ai-bridge/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/cancel'] ) && isset( $bridge_routes['/alorbach/v1/local-codex/jobs/(?P<job_id>[a-zA-Z0-9\\-]+)/cancel'] ), 'Both AI Bridge receipt and cancellation routes must be registered without dispatching a relay job.' );
 		$receipt_builder = new ReflectionMethod( \Alorbach\AIGateway\AI_Bridge::class, 'completion_receipt' );
 		$receipt_bytes = "\x89PNG\r\n\x1a\nreceipt-contract";
 		$receipt = $receipt_builder->invoke( null, array( 'job_id' => 'receipt-fixture', 'user_id' => 1, 'request_hash' => str_repeat( 'a', 64 ), 'type' => 'image', 'model' => 'model-relay:codex:image', 'fee_uc' => 0 ), array( 'data' => array( array( 'b64_json' => base64_encode( $receipt_bytes ), 'mime_type' => 'image/png' ) ) ) );
@@ -203,6 +204,18 @@ try {
 		$relay_chat_complete_response = rest_do_request( $relay_chat_complete );
 		alorbach_require( 200 === $relay_chat_complete_response->get_status() && 'Cursor relay reply' === ( $relay_chat_complete_response->get_data()['choices'][0]['message']['content'] ?? '' ) && ! empty( $relay_chat_complete_response->get_data()['ai_bridge'] ), 'Relay chat completion must preserve OpenAI-compatible choices and usage.' );
 		alorbach_require( 200 !== rest_do_request( $relay_chat_complete )->get_status(), 'A completed relay job must reject duplicate completion.' );
+
+		$relay_cancel_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $relay_cancel_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:cursor-cli:auto', 'messages' => array( array( 'role' => 'user', 'content' => 'Relay cancellation ' . $local_codex_verify_run_id ) ) ) ) );
+		$relay_cancel_data = rest_do_request( $relay_cancel_create )->get_data();
+		$relay_cancel = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $relay_cancel_data['job_id'] ?? '' ) ) . '/cancel' );
+		alorbach_set_json_body( $relay_cancel, array( 'job_token' => (string) ( $relay_cancel_data['job_token'] ?? '' ), 'request_hash' => (string) ( $relay_cancel_data['request_hash'] ?? '' ) ) );
+		$relay_cancel_response = rest_do_request( $relay_cancel );
+		$relay_cancel_replay = rest_do_request( $relay_cancel );
+		alorbach_require( 200 === $relay_cancel_response->get_status() && 'cancelled' === ( $relay_cancel_response->get_data()['status'] ?? '' ) && 200 === $relay_cancel_replay->get_status(), 'A signed Relay cancellation is idempotent before execution and can be safely retried after a lost response.' );
+		$relay_cancel_complete = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $relay_cancel_data['job_id'] ?? '' ) ) . '/complete' );
+		alorbach_set_json_body( $relay_cancel_complete, array( 'job_token' => (string) ( $relay_cancel_data['job_token'] ?? '' ), 'request_hash' => (string) ( $relay_cancel_data['request_hash'] ?? '' ), 'result' => array( 'response' => array( 'choices' => array( array( 'message' => array( 'role' => 'assistant', 'content' => 'must not complete' ) ) ) ) ) ) );
+		alorbach_require( 409 === rest_do_request( $relay_cancel_complete )->get_status(), 'A cancelled Relay job cannot later complete or charge the account.' );
 
 		$relay_image_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
 		alorbach_set_json_body( $relay_image_create, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:grok-cli:image', 'prompt' => 'Grok image contract ' . $local_codex_verify_run_id, 'reference_images' => array( 'data:image/png;base64,' . base64_encode( 'reference' ), array( 'b64_json' => base64_encode( 'structured reference' ), 'mime_type' => 'image/png', 'label' => 'identity' ) ) ) ) );

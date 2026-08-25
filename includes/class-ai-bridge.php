@@ -94,6 +94,9 @@ class AI_Bridge {
 			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/fail', array(
 				'methods' => 'POST', 'callback' => array( __CLASS__, 'fail_job_handler' ), 'permission_callback' => $permission,
 			) );
+			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/cancel', array(
+				'methods' => 'POST', 'callback' => array( __CLASS__, 'cancel_job_handler' ), 'permission_callback' => $permission,
+			) );
 		}
 	}
 
@@ -125,6 +128,7 @@ class AI_Bridge {
 					'complete' => '/ai-bridge/jobs/{job_id}/complete',
 					'receipt'  => '/ai-bridge/jobs/{job_id}/receipt',
 					'fail'     => '/ai-bridge/jobs/{job_id}/fail',
+					'cancel'   => '/ai-bridge/jobs/{job_id}/cancel',
 				),
 				'legacy_routes'  => array(
 					'config'   => '/local-codex/config',
@@ -132,6 +136,7 @@ class AI_Bridge {
 					'complete' => '/local-codex/jobs/{job_id}/complete',
 					'receipt'  => '/local-codex/jobs/{job_id}/receipt',
 					'fail'     => '/local-codex/jobs/{job_id}/fail',
+					'cancel'   => '/local-codex/jobs/{job_id}/cancel',
 				),
 				'model_policy'   => array(
 					'capabilities'    => isset( $plan['capabilities'] ) ? $plan['capabilities'] : array(),
@@ -140,6 +145,7 @@ class AI_Bridge {
 					'relay_wildcard'  => 'model-relay:*',
 				),
 				'job_ttl_seconds' => self::JOB_TTL,
+				'supports_cancel' => true,
 			)
 		);
 	}
@@ -337,6 +343,20 @@ class AI_Bridge {
 		delete_transient( 'alorbach_local_codex_hash_' . (string) $job['request_hash'] );
 
 		return rest_ensure_response( array( 'success' => true ) );
+	}
+
+	/** Cancel a signed job before the browser Relay starts provider execution. */
+	public static function cancel_job_handler( $request ) {
+		$params = $request->get_json_params();
+		$params = is_array( $params ) ? $params : array();
+		$job = self::load_authorized_job( $request, $params, array( 'created', 'cancelled' ) );
+		if ( is_wp_error( $job ) ) return $job;
+		if ( 'cancelled' === (string) ( $job['status'] ?? '' ) ) return rest_ensure_response( array( 'success' => true, 'status' => 'cancelled', 'job_id' => (string) $job['job_id'] ) );
+		$job['status'] = 'cancelled';
+		$job['cancelled_at'] = time();
+		set_transient( self::job_key( (string) $job['job_id'] ), $job, self::JOB_TTL );
+		delete_transient( 'alorbach_local_codex_hash_' . (string) $job['request_hash'] );
+		return rest_ensure_response( array( 'success' => true, 'status' => 'cancelled', 'job_id' => (string) $job['job_id'] ) );
 	}
 
 	/**
@@ -783,7 +803,7 @@ class AI_Bridge {
 	 * @param array            $params JSON params.
 	 * @return array|\WP_Error
 	 */
-	private static function load_authorized_job( $request, $params ) {
+	private static function load_authorized_job( $request, $params, $allowed_statuses = array( 'created' ) ) {
 		$job_id = sanitize_text_field( (string) $request->get_param( 'job_id' ) );
 		$job    = get_transient( self::job_key( $job_id ) );
 		if ( ! is_array( $job ) ) {
@@ -801,6 +821,9 @@ class AI_Bridge {
 		}
 		if ( Ledger::signature_exists( (string) $job['request_hash'] ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+		if ( ! in_array( (string) ( $job['status'] ?? '' ), $allowed_statuses, true ) ) {
+			return new \WP_Error( 'local_codex_job_not_active', __( 'This AI Model Relay job is no longer active.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 		return $job;
 	}
