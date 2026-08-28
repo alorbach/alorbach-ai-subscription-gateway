@@ -1,0 +1,35 @@
+includes/class-rest-proxy.php
+  s_283fd6cff5aacb::t_11f03dbebfdd6b 1017-1027,1168-1172,1186-1195,1199-1201,1223,1233-1238
+  s_283fd6cff5aacb::t_990debe2480aef 360-361
+DEVELOPER-GUIDE.md
+  s_283fd6cff5aacb::t_990debe2480aef 322-342
+bin/verify-direct-azure-capabilities.php
+  s_283fd6cff5aacb::t_990debe2480aef 1-68
+includes/class-integration-service.php
+  s_283fd6cff5aacb::t_c10eb42524fc52 40-58,317,349,374-486
+  s_ddd522c58ab887::t_8e38a642f788e9 487
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "ea597060209ba9daff035bc565218aba0c90424e",
+  "prompts": {},
+  "sessions": {
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_ddd522c58ab887": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3691c1b1-92e2-466b-a5fb-1836cee996c2",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
