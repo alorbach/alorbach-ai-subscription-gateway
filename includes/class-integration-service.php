@@ -38,6 +38,25 @@ class Integration_Service {
 	const USER_PLAN_OVERRIDE_META_KEY = 'alorbach_manual_plan_slug';
 
 	/**
+	 * Verified initial Direct-Azure GPT-Image-2 capability profile.
+	 *
+	 * These are discrete, billable provider sizes rather than arbitrary bounds.
+	 * A configured entry becomes eligible only when every listed size and quality
+	 * is present in the Gateway price matrix and its exact Azure entry can make an
+	 * authenticated image request. "auto" is intentionally not a pixel preset.
+	 *
+	 * @var array<string,array<int,string>|int|string>
+	 */
+	const DIRECT_AZURE_GPT_IMAGE_2_CAPABILITIES = array(
+		'size_mode'                => 'preset',
+		'supported_sizes'          => array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840' ),
+		'supported_qualities'      => array( 'low', 'medium', 'high' ),
+		'supported_output_formats' => array( 'image/png', 'image/jpeg' ),
+		'supported_aspect_ratios'  => array( '1:1', '2:3', '3:2', '16:9', '9:16' ),
+		'candidate_count_max'      => 1,
+	);
+
+	/**
 	 * Default plans in normalized format.
 	 *
 	 * @return array
@@ -295,6 +314,7 @@ class Integration_Service {
 		$image_sizes   = $admin::get_image_sizes();
 		$audio_models  = $admin::get_audio_models();
 		$relay_models  = AI_Bridge::get_integration_model_capabilities();
+		$direct_image_models = self::get_direct_image_model_capabilities( $image_models );
 		$music_analysis_models = array_values( array_filter( array_values( $audio_models ), static fn( $model ) => 0 === strpos( (string) $model, 'gpt-audio' ) ) );
 		$video_models  = $admin::get_video_models();
 		$qualities     = array( 'low', 'medium', 'high' );
@@ -326,7 +346,7 @@ class Integration_Service {
 			'capabilities'      => array(
 				'chat_models'     => array_keys( $text_models ),
 				'image_models'    => array_keys( $image_models ),
-				'models'          => $relay_models,
+				'models'          => array_merge( $relay_models, $direct_image_models ),
 				'image_sizes'     => array_values( $image_sizes ),
 				'image_qualities' => $qualities,
 				'audio_models'    => array_values( $audio_models ),
@@ -349,6 +369,120 @@ class Integration_Service {
 		}
 
 		return apply_filters( 'alorbach_integration_config', $config );
+	}
+
+	/**
+	 * Validate one Direct-Azure image request against the current, plan-filtered
+	 * canonical contract. Non-Direct models return null so their existing
+	 * transport-specific validation remains unchanged.
+	 *
+	 * @param int    $user_id Current user ID.
+	 * @param string $model Gateway compound model key.
+	 * @param string $size Provider size.
+	 * @param string $quality Requested quality.
+	 * @param string $output_format Canonical or MIME output format.
+	 * @param int    $candidate_count Requested image count.
+	 * @return array<string,mixed>|null|\WP_Error
+	 */
+	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count ) {
+		$model  = sanitize_text_field( (string) $model );
+		$parsed = Cost_Matrix::parse_model_key( $model );
+		if ( 'gpt-image-2' !== strtolower( (string) $parsed['model'] ) || '' === (string) $parsed['entry_id'] || 'azure' !== API_Client::get_provider_for_model( $model ) ) {
+			return null;
+		}
+
+		$config = self::get_integration_config( (int) $user_id );
+		$contract = null;
+		foreach ( (array) ( $config['capabilities']['models'] ?? array() ) as $candidate ) {
+			if ( is_array( $candidate ) && $model === (string) ( $candidate['gateway_model_key'] ?? '' ) ) {
+				$contract = $candidate;
+				break;
+			}
+		}
+		if ( ! is_array( $contract ) || empty( $contract['eligible'] ) || empty( $contract['direct_dispatch_evidenced'] ) || empty( $contract['image_capabilities_evidenced'] ) ) {
+			return new \WP_Error( 'direct_image_model_unavailable', __( 'The selected direct image model is not currently available.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+
+		$capabilities = is_array( $contract['image_capabilities'] ?? null ) ? $contract['image_capabilities'] : array();
+		$size         = sanitize_text_field( (string) $size );
+		$quality      = sanitize_key( (string) $quality );
+		$format       = self::normalize_direct_image_output_format( $output_format );
+		$candidate_count = max( 1, (int) $candidate_count );
+		if ( ! in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true ) || ! in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true ) || '' === $format || ! in_array( 'image/' . $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true ) || $candidate_count > (int) ( $capabilities['candidate_count_max'] ?? 0 ) ) {
+			return new \WP_Error( 'direct_image_options_unsupported', __( 'The selected direct image options are not supported by the AI Gateway.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+
+		return array(
+			'model'           => $model,
+			'size'            => $size,
+			'quality'         => $quality,
+			'output_format'   => $format,
+			'candidate_count' => $candidate_count,
+		);
+	}
+
+	/**
+	 * Build safe, model-scoped Direct Azure contracts without returning entry
+	 * credentials, endpoints, price matrix internals, or provider policy.
+	 *
+	 * @param array<string,string> $image_models Configured image catalog.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function get_direct_image_model_capabilities( $image_models ) {
+		$contracts = array();
+		$image_models = is_array( $image_models ) ? $image_models : array();
+		$matrix = get_option( 'alorbach_image_model_costs', array() );
+		$matrix = is_array( $matrix ) ? $matrix : array();
+		foreach ( $image_models as $gateway_model_key => $label ) {
+			$gateway_model_key = sanitize_text_field( (string) $gateway_model_key );
+			$parsed = Cost_Matrix::parse_model_key( $gateway_model_key );
+			if ( 'gpt-image-2' !== strtolower( (string) $parsed['model'] ) || '' === (string) $parsed['entry_id'] || 'azure' !== API_Client::get_provider_for_model( $gateway_model_key ) ) {
+				continue;
+			}
+			$entry = API_Keys_Helper::get_entry_by_id( (string) $parsed['entry_id'] );
+			$credentials = API_Keys_Helper::get_credentials_for_entry( (string) $parsed['entry_id'] );
+			$has_dispatch = is_array( $entry ) && ! empty( $entry['enabled'] ) && 'azure' === (string) ( $entry['type'] ?? '' ) && is_array( $credentials ) && '' !== trim( (string) ( $credentials['api_key'] ?? '' ) ) && '' !== trim( (string) ( $credentials['endpoint'] ?? '' ) );
+			$capabilities = self::DIRECT_AZURE_GPT_IMAGE_2_CAPABILITIES;
+			$has_complete_prices = self::has_complete_direct_azure_image_pricing( (string) $parsed['model'], $matrix, $capabilities );
+			$evidenced = $has_dispatch && $has_complete_prices;
+			$contracts[] = array(
+				'gateway_model_key'             => $gateway_model_key,
+				'label'                         => sanitize_text_field( (string) $label ),
+				'transport'                     => 'direct_image',
+				'eligible'                      => $evidenced,
+				'direct_dispatch_evidenced'     => $has_dispatch,
+				'image_capabilities_evidenced'  => $has_complete_prices,
+				'image_capabilities'            => $evidenced ? $capabilities : array(),
+			);
+		}
+		return $contracts;
+	}
+
+	/**
+	 * A capability may advertise only combinations with a positive non-billable
+	 * price for every exposed discrete size and quality.
+	 *
+	 * @param string $model Plain provider model name.
+	 * @param array  $matrix Stored image cost matrix.
+	 * @param array  $capabilities Candidate safe capability profile.
+	 * @return bool
+	 */
+	private static function has_complete_direct_azure_image_pricing( $model, $matrix, $capabilities ) {
+		$prices = is_array( $matrix[ $model ] ?? null ) ? $matrix[ $model ] : array();
+		foreach ( (array) ( $capabilities['supported_qualities'] ?? array() ) as $quality ) {
+			foreach ( (array) ( $capabilities['supported_sizes'] ?? array() ) as $size ) {
+				if ( (int) ( $prices[ $quality ][ $size ] ?? 0 ) <= 0 ) return false;
+			}
+		}
+		return true;
+	}
+
+	/** Normalize Direct request format inputs to the Azure request vocabulary. */
+	private static function normalize_direct_image_output_format( $output_format ) {
+		$format = strtolower( trim( (string) $output_format ) );
+		if ( in_array( $format, array( 'png', 'image/png' ), true ) ) return 'png';
+		if ( in_array( $format, array( 'jpeg', 'jpg', 'image/jpeg', 'image/jpg' ), true ) ) return 'jpeg';
+		return '';
 	}
 
 	/**

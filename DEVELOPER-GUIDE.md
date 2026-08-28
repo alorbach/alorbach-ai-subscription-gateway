@@ -319,6 +319,27 @@ When the caller is logged in, the payload is filtered to the user's active plan 
 
 If the logged-in user is on `basic` with a positive balance, the payload exposes the full configured catalog so the frontend can spend those credits without being artificially restricted.
 
+Direct, server-dispatched image models are published in both `capabilities.image_models` and `capabilities.models`. A direct model contract is eligible only while its exact configured entry is enabled, dispatch credentials are present, and every exposed size/quality pair has a positive Gateway price. It has this shape:
+
+```json
+{
+  "gateway_model_key": "<entry-id>::gpt-image-2",
+  "transport": "direct_image",
+  "eligible": true,
+  "direct_dispatch_evidenced": true,
+  "image_capabilities_evidenced": true,
+  "image_capabilities": {
+    "size_mode": "preset",
+    "supported_sizes": ["1024x1024"],
+    "supported_qualities": ["low", "medium", "high"],
+    "supported_output_formats": ["image/png", "image/jpeg"],
+    "candidate_count_max": 1
+  }
+}
+```
+
+For the configured Azure `gpt-image-2` entry, use only the advertised discrete sizes; `auto` is not a pixel preset. `POST /images` validates `size`, `quality`, `output_format`, and `n` against this contract before provider dispatch. It accepts an optional `client_request_id` (maximum 128 characters), uses it for Gateway-side duplicate detection, and echoes it in a successful response so downstream job records can retain the correlation without exposing credentials.
+
 ### `GET /integration/plans`
 
 Canonical integration plan catalog.
