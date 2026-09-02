@@ -183,6 +183,9 @@ class Image_Jobs {
 		$size            = isset( $args['size'] ) ? sanitize_text_field( $args['size'] ) : '1024x1024';
 		$model           = isset( $args['model'] ) && $args['model'] ? sanitize_text_field( $args['model'] ) : get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality         = isset( $args['quality'] ) && $args['quality'] ? sanitize_text_field( $args['quality'] ) : get_option( 'alorbach_image_default_quality', 'medium' );
+		$output_format   = isset( $args['output_format'] ) && $args['output_format'] ? sanitize_text_field( $args['output_format'] ) : get_option( 'alorbach_image_default_output_format', 'png' );
+		$aspect_ratio    = isset( $args['aspect_ratio'] ) ? sanitize_text_field( $args['aspect_ratio'] ) : '';
+		$provider_options = isset( $args['provider_options'] ) && is_array( $args['provider_options'] ) ? $args['provider_options'] : array();
 		$n               = isset( $args['n'] ) ? max( 1, min( 10, (int) $args['n'] ) ) : 1;
 		$reference_images = self::normalize_reference_images(
 			isset( $args['reference_images'] ) && is_array( $args['reference_images'] ) ? $args['reference_images'] : array()
@@ -244,6 +247,9 @@ class Image_Jobs {
 			'size'               => $size,
 			'n'                  => $n,
 			'quality'            => $quality,
+			'output_format'      => $output_format,
+			'aspect_ratio'       => $aspect_ratio,
+			'provider_options'   => $provider_options,
 			'model'              => $model,
 			'preview_count'      => 0,
 			'final_count'        => 0,
@@ -252,7 +258,7 @@ class Image_Jobs {
 			'cost_credits'       => User_Display::uc_to_credits( $cost ),
 			'cost_usd'           => User_Display::uc_to_usd( $cost ),
 			'api_cost_uc'        => $api_cost,
-			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $n, md5( wp_json_encode( $reference_images ) ), time() ) ) ),
+			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $output_format, $aspect_ratio, $provider_options, $n, md5( wp_json_encode( $reference_images ) ), time() ) ) ),
 			'deduction_applied'  => false,
 			'error'              => '',
 			'revised_prompt'     => '',
@@ -679,7 +685,7 @@ class Image_Jobs {
 				$job['n'],
 				$job['model'],
 				$job['quality'],
-				null,
+				$job['output_format'] ?? null,
 				function ( $event ) use ( &$job, $on_update ) {
 					if ( empty( $event['type'] ) || empty( $event['images'] ) || ! is_array( $event['images'] ) ) {
 						return;
@@ -724,7 +730,11 @@ class Image_Jobs {
 						}
 					}
 				},
-				$provider_reference_images
+				$provider_reference_images,
+				array(
+					'aspect_ratio'    => $job['aspect_ratio'] ?? '',
+					'provider_options' => $job['provider_options'] ?? array(),
+				)
 			);
 		} else {
 			self::append_job_log( $job_id, array( 'event' => 'api_call', 'msg' => 'Calling images() (non-streaming mode).' ) );
@@ -734,8 +744,12 @@ class Image_Jobs {
 				$job['n'],
 				$job['model'],
 				$job['quality'],
-				null,
-				$provider_reference_images
+				$job['output_format'] ?? null,
+				$provider_reference_images,
+				array(
+					'aspect_ratio'    => $job['aspect_ratio'] ?? '',
+					'provider_options' => $job['provider_options'] ?? array(),
+				)
 			);
 		}
 

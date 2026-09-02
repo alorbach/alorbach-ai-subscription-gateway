@@ -172,6 +172,8 @@ try {
 		alorbach_require( ! empty( $local_codex_verify['success'] ) && false !== strpos( (string) ( $local_codex_verify['message'] ?? '' ), 'browser tray app' ), 'Legacy Local Codex validation must pass when AI Model Relay is enabled without a stored API key.' );
 		alorbach_require( ! empty( $ai_bridge_verify['success'] ), 'The canonical AI Bridge provider must be registered and enabled.' );
 		$local_codex_config = \Alorbach\AIGateway\Integration_Service::get_integration_config( 0 );
+		alorbach_require( 1 === (int) ( $local_codex_config['ai_bridge']['image_capability_contract_version'] ?? 0 ) && '1.0.10' === (string) ( $local_codex_config['ai_bridge']['minimum_relay_version'] ?? '' ), '/integration/config must publish the explicit Relay image capability contract marker and minimum version.' );
+		alorbach_require( isset( $local_codex_config['capabilities']['image_model_capabilities']['model-relay:antigravity-cli:image'] ) && array( 'image_size' ) === array_keys( $local_codex_config['capabilities']['image_model_capabilities']['model-relay:antigravity-cli:image']['provider_options'] ?? array() ), '/integration/config must publish keyed, model-specific Relay image capabilities.' );
 		alorbach_require( isset( $local_codex_config['ai_bridge'] ) && $local_codex_config['ai_bridge'] === $local_codex_config['local_codex'], '/integration/config must expose identical ai_bridge and local_codex compatibility objects.' );
 		alorbach_require( 'codex-local:audio' === ( $local_codex_config['local_codex']['audio_model'] ?? '' ), '/integration/config must expose the Local Codex audio model id.' );
 		alorbach_require( in_array( 'codex-local:audio', $local_codex_config['capabilities']['audio_models'] ?? array(), true ), '/integration/config must expose codex-local:audio in the audio catalog.' );
@@ -179,6 +181,23 @@ try {
 		$relay_image_capabilities = array_values( array_filter( $local_codex_config['capabilities']['models'] ?? array(), static fn( $model ) => is_array( $model ) && 'model-relay:codex:image' === ( $model['gateway_model_key'] ?? '' ) ) );
 		alorbach_require( 1 === count( $relay_image_capabilities ) && ! empty( $relay_image_capabilities[0]['image_capabilities_evidenced'] ) && true === ( $relay_image_capabilities[0]['requires_browser_pairing'] ?? null ) && 'async_image' === ( $relay_image_capabilities[0]['transport'] ?? '' ), '/integration/config must expose explicit, browser-paired Codex image capability evidence.' );
 		alorbach_require( array( 'text_to_image', 'image_edit' ) === ( $relay_image_capabilities[0]['operation_kinds'] ?? array() ) && in_array( 'image/webp', $relay_image_capabilities[0]['image_capabilities']['supported_output_formats'] ?? array(), true ), 'Codex image capability evidence must publish generic operation kinds and supported output formats.' );
+		alorbach_require( 1 === (int) ( $relay_image_capabilities[0]['image_capabilities']['contract_version'] ?? 0 ) && array( 'size' ) === array_keys( $relay_image_capabilities[0]['image_capabilities']['provider_options'] ?? array() ), 'Codex image capability evidence must use the Relay-native size provider key and explicit contract version.' );
+		$expected_relay_image_ids = array( 'model-relay:codex:image', 'model-relay:grok-cli:image', 'model-relay:xai:imagine-image', 'model-relay:antigravity-cli:image' );
+		$relay_image_catalog = array_values( array_filter( $local_codex_config['capabilities']['models'] ?? array(), static fn( $model ) => is_array( $model ) && in_array( (string) ( $model['gateway_model_key'] ?? '' ), $expected_relay_image_ids, true ) ) );
+		$relay_image_by_id = array();
+		foreach ( $relay_image_catalog as $relay_image_contract ) $relay_image_by_id[ $relay_image_contract['gateway_model_key'] ] = $relay_image_contract;
+		alorbach_require( count( $expected_relay_image_ids ) === count( $relay_image_by_id ), '/integration/config must expose all configured Relay image providers.' );
+		foreach ( $expected_relay_image_ids as $relay_image_id ) {
+			$contract = $relay_image_by_id[ $relay_image_id ] ?? array();
+			alorbach_require( ! empty( $contract['image_capabilities_evidenced'] ) && true === ( $contract['requires_browser_pairing'] ?? null ) && isset( $contract['image_capabilities']['supported_aspect_ratios'], $contract['image_capabilities']['resolution_options'], $contract['image_capabilities']['supported_output_formats'], $contract['image_capabilities']['provider_options'] ), 'Every Relay image provider must publish the complete sanitized capability schema.' );
+			alorbach_require( false === stripos( wp_json_encode( $contract ), 'api_key' ) && false === stripos( wp_json_encode( $contract ), 'diagnostic' ), 'Relay image capability records must not expose credentials or readiness diagnostics.' );
+		}
+		alorbach_require( 'native' === ( $relay_image_by_id['model-relay:grok-cli:image']['image_capabilities']['aspect_ratio_delivery'] ?? '' ) && 'guidance' === ( $relay_image_by_id['model-relay:grok-cli:image']['image_capabilities']['resolution_mode'] ?? '' ), 'Grok image capabilities must distinguish native ratio support from guidance-only resolution.' );
+		alorbach_require( true === ( $relay_image_by_id['model-relay:xai:imagine-image']['cloud_upload'] ?? false ) && 'native_scale' === ( $relay_image_by_id['model-relay:xai:imagine-image']['image_capabilities']['resolution_mode'] ?? '' ), 'xAI image capabilities must advertise explicit cloud upload and native resolution semantics.' );
+		alorbach_require( 3 === (int) ( $relay_image_by_id['model-relay:xai:imagine-image']['image_capabilities']['candidate_count_max'] ?? 0 ), 'xAI image capabilities must advertise the supported three-candidate maximum.' );
+		alorbach_require( array( 'image_size' ) === array_keys( $relay_image_by_id['model-relay:antigravity-cli:image']['image_capabilities']['provider_options'] ?? array() ) && 'guidance' === ( $relay_image_by_id['model-relay:antigravity-cli:image']['image_capabilities']['resolution_mode'] ?? '' ), 'Antigravity image capabilities must expose its guidance-only image_size option.' );
+		$relay_image_models = \Alorbach\AIGateway\AI_Bridge::get_image_models();
+		foreach ( $expected_relay_image_ids as $relay_image_id ) alorbach_require( isset( $relay_image_models[ $relay_image_id ] ), 'The Gateway image model catalog must include every Relay image provider ID.' );
 
 		$ai_bridge_config = alorbach_verify_request( '/alorbach/v1/ai-bridge/config' );
 		$legacy_bridge_config = alorbach_verify_request( '/alorbach/v1/local-codex/config' );
@@ -222,8 +241,21 @@ try {
 		$relay_image_response = rest_do_request( $relay_image_create );
 		$relay_image_data = $relay_image_response->get_data();
 		alorbach_require( 200 === $relay_image_response->get_status(), 'Canonical AI Bridge jobs must sign Grok reference-image requests.' );
+		$relay_xai_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $relay_xai_create, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:xai:imagine-image', 'prompt' => 'xAI image contract ' . $local_codex_verify_run_id, 'aspect_ratio' => '21:9', 'provider_options' => array( 'resolution' => '2k' ), 'quality' => 'medium', 'output_format' => 'image/png', 'candidate_count' => 1, 'cloud_upload_confirmed' => true ) ) );
+		$relay_xai_response = rest_do_request( $relay_xai_create );
+		$relay_xai_data = $relay_xai_response->get_data();
+		alorbach_require( 200 === $relay_xai_response->get_status() && '2k' === ( $relay_xai_data['payload']['provider_options']['resolution'] ?? '' ) && true === ( $relay_xai_data['payload']['cloud_upload_confirmed'] ?? false ), 'xAI image options and explicit cloud consent must be preserved in the signed payload.' );
+		$relay_xai_blocked = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $relay_xai_blocked, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:xai:imagine-image', 'prompt' => 'xAI consent gate ' . $local_codex_verify_run_id, 'provider_options' => array( 'resolution' => '1k' ), 'quality' => 'low', 'output_format' => 'image/png' ) ) );
+		$relay_xai_blocked_response = rest_do_request( $relay_xai_blocked );
+		alorbach_require( 400 === $relay_xai_blocked_response->get_status(), 'xAI image jobs must fail closed when cloud upload consent is missing.' );
+		$relay_antigravity_invalid = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+		alorbach_set_json_body( $relay_antigravity_invalid, array( 'type' => 'image', 'payload' => array( 'model' => 'model-relay:antigravity-cli:image', 'prompt' => 'Antigravity option gate ' . $local_codex_verify_run_id, 'quality' => 'medium', 'provider_options' => array( 'image_size' => '4K' ), 'output_format' => 'image/png' ) ) );
+		$relay_antigravity_invalid_response = rest_do_request( $relay_antigravity_invalid );
+		alorbach_require( 400 === $relay_antigravity_invalid_response->get_status(), 'Antigravity image jobs must reject unsupported quality instead of silently substituting a provider default.' );
 		$relay_image_complete = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $relay_image_data['job_id'] ?? '' ) ) . '/complete' );
-		alorbach_set_json_body( $relay_image_complete, array( 'job_token' => (string) ( $relay_image_data['job_token'] ?? '' ), 'request_hash' => (string) ( $relay_image_data['request_hash'] ?? '' ), 'result' => array( 'response' => array( 'data' => array( array( 'b64_json' => base64_encode( 'image contract' ) ) ) ) ) ) );
+		alorbach_set_json_body( $relay_image_complete, array( 'job_token' => (string) ( $relay_image_data['job_token'] ?? '' ), 'request_hash' => (string) ( $relay_image_data['request_hash'] ?? '' ), 'result' => array( 'response' => array( 'data' => array( array( 'b64_json' => base64_encode( 'image contract' ), 'mime_type' => 'image/png' ) ) ) ) ) );
 		$relay_image_complete_response = rest_do_request( $relay_image_complete );
 		alorbach_require( 200 === $relay_image_complete_response->get_status() && ! empty( $relay_image_complete_response->get_data()['data'][0]['b64_json'] ), 'Relay image completion must preserve validated base64 image entries.' );
 
@@ -253,10 +285,11 @@ try {
 		$video_complete_data = $video_complete_response->get_data();
 		alorbach_require( 200 === $video_complete_response->get_status() && ! empty( $video_complete_data['ai_bridge'] ) && ! empty( $video_complete_data['local_codex'] ) && ! empty( $video_complete_data['experimental'] ) && 'video/mp4' === ( $video_complete_data['data'][0]['mime_type'] ?? '' ), 'Grok video completion must retain experimental metadata and both compatibility markers.' );
 
-		$wildcard_plan = array( 'capabilities' => array( 'chat' => true ), 'allowed_models' => array( 'chat' => array( 'model-relay:*' ) ) );
-		$restricted_plan = array( 'capabilities' => array( 'chat' => true ), 'allowed_models' => array( 'chat' => array( 'codex-local:auto' ) ) );
+		$wildcard_plan = array( 'capabilities' => array( 'chat' => true, 'image' => true ), 'allowed_models' => array( 'chat' => array( 'model-relay:*' ), 'image' => array( 'model-relay:*' ) ) );
+		$restricted_plan = array( 'capabilities' => array( 'chat' => true, 'image' => true ), 'allowed_models' => array( 'chat' => array( 'codex-local:auto' ), 'image' => array( 'model-relay:codex:image' ) ) );
 		alorbach_require( \Alorbach\AIGateway\Integration_Service::plan_allows_capability( $wildcard_plan, 'chat', 'model-relay:grok-cli:auto' ), 'model-relay:* must allow relay models for its capability.' );
 		alorbach_require( ! \Alorbach\AIGateway\Integration_Service::plan_allows_capability( $restricted_plan, 'chat', 'model-relay:grok-cli:auto' ), 'Existing exact Local Codex allowlists must not gain relay access automatically.' );
+		alorbach_require( \Alorbach\AIGateway\Integration_Service::plan_allows_capability( $wildcard_plan, 'image', 'model-relay:xai:imagine-image' ) && ! \Alorbach\AIGateway\Integration_Service::plan_allows_capability( $restricted_plan, 'image', 'model-relay:grok-cli:image' ), 'Relay image wildcard and exact allowlists must remain capability-scoped.' );
 		alorbach_require( 'ai_bridge' === \Alorbach\AIGateway\API_Client::get_provider_for_model( 'model-relay:cursor-cli:auto' ), 'Relay models must resolve to the canonical ai_bridge provider.' );
 
 		$local_audio_create = new WP_REST_Request( 'POST', '/alorbach/v1/local-codex/jobs' );
@@ -401,6 +434,65 @@ try {
 	alorbach_require( $azure_provider instanceof \Alorbach\AIGateway\Providers\Azure_Provider, 'Azure provider must be registered.' );
 	alorbach_require( 'azure' === \Alorbach\AIGateway\API_Client::get_provider_for_model( 'azure-speech' ), 'azure-speech must route through the existing Azure provider.' );
 	alorbach_require( 'azure' === \Alorbach\AIGateway\API_Client::get_provider_for_model( 'speech' ), 'speech alias must route through the existing Azure provider.' );
+	$original_refresh_cost_matrix = get_option( 'alorbach_cost_matrix', '__alorbach_missing__' );
+	$original_refresh_api_keys    = get_option( 'alorbach_api_keys', '__alorbach_missing__' );
+	$original_image_token_rates   = get_option( 'alorbach_azure_gpt_image_2_token_rates', '__alorbach_missing__' );
+	try {
+		\Alorbach\AIGateway\API_Keys_Helper::save_entries(
+			array(
+				array( 'id' => 'verify-refresh-azure', 'type' => 'azure', 'api_key' => 'azure-refresh-key', 'enabled' => true ),
+				array( 'id' => 'verify-refresh-openai', 'type' => 'openai', 'api_key' => 'openai-refresh-key', 'enabled' => true ),
+			)
+		);
+		\Alorbach\AIGateway\Cost_Matrix::save_cost_matrix(
+			array(
+				'default' => array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 ),
+				'models'  => array(
+					array( 'model' => 'gpt-4o', 'entry_id' => 'verify-refresh-azure', 'input' => 1, 'output' => 2, 'cached' => 3 ),
+					array( 'model' => 'unmatched-azure-model', 'entry_id' => 'verify-refresh-azure', 'input' => 4, 'output' => 5, 'cached' => 6 ),
+					array( 'model' => 'gpt-4o', 'entry_id' => 'verify-refresh-openai', 'input' => 7, 'output' => 8, 'cached' => 9 ),
+				),
+			)
+		);
+		$azure_refresh = \Alorbach\AIGateway\Model_Importer::refresh_azure_text_costs(
+			array( 'gpt-4o' => array( 'input' => 123, 'output' => 456, 'cached' => 12 ) )
+		);
+		$refreshed_matrix = \Alorbach\AIGateway\Cost_Matrix::get_cost_matrix();
+		$refreshed_rows = array();
+		foreach ( $refreshed_matrix['models'] as $refreshed_row ) {
+			$refreshed_rows[ ( $refreshed_row['entry_id'] ?? '' ) . '::' . ( $refreshed_row['model'] ?? '' ) ] = $refreshed_row;
+		}
+		alorbach_require( ! empty( $azure_refresh['success'] ) && 1 === (int) $azure_refresh['updated'] && 1 === (int) $azure_refresh['unmatched'], 'Azure price refresh must update matching Azure rows and report unmatched Azure rows.' );
+		alorbach_require( 123 === (int) ( $refreshed_rows['verify-refresh-azure::gpt-4o']['input'] ?? 0 ) && 456 === (int) ( $refreshed_rows['verify-refresh-azure::gpt-4o']['output'] ?? 0 ) && 12 === (int) ( $refreshed_rows['verify-refresh-azure::gpt-4o']['cached'] ?? 0 ), 'Azure price refresh must replace all matching Azure text price components.' );
+		alorbach_require( 4 === (int) ( $refreshed_rows['verify-refresh-azure::unmatched-azure-model']['input'] ?? 0 ) && 5 === (int) ( $refreshed_rows['verify-refresh-azure::unmatched-azure-model']['output'] ?? 0 ) && 6 === (int) ( $refreshed_rows['verify-refresh-azure::unmatched-azure-model']['cached'] ?? 0 ), 'Azure price refresh must preserve unmatched Azure rows.' );
+		alorbach_require( 7 === (int) ( $refreshed_rows['verify-refresh-openai::gpt-4o']['input'] ?? 0 ) && 8 === (int) ( $refreshed_rows['verify-refresh-openai::gpt-4o']['output'] ?? 0 ) && 9 === (int) ( $refreshed_rows['verify-refresh-openai::gpt-4o']['cached'] ?? 0 ), 'Azure price refresh must not modify other providers.' );
+		update_option( 'alorbach_azure_gpt_image_2_token_rates', array( 'text_input' => 5500000, 'image_input' => 8800000, 'image_output' => 33000000 ) );
+		$image_usage_cost = Alorbach\AIGateway\Cost_Matrix::calculate_image_usage_cost(
+			'verify-refresh-azure::gpt-image-2',
+			array(
+				'input_tokens_details' => array( 'text_tokens' => 200, 'image_tokens' => 1000 ),
+				'output_tokens'        => 4000,
+			)
+		);
+		alorbach_require( 141900 === $image_usage_cost, 'Azure GPT-Image-2 billing must use reported text-input, image-input, and image-output tokens.' );
+		alorbach_require( null === Alorbach\AIGateway\Cost_Matrix::calculate_image_usage_cost( 'verify-refresh-openai::gpt-image-2', array( 'output_tokens' => 4000 ) ), 'Usage billing must not apply Azure prices to another provider.' );
+	} finally {
+		if ( '__alorbach_missing__' === $original_refresh_cost_matrix ) {
+			delete_option( 'alorbach_cost_matrix' );
+		} else {
+			update_option( 'alorbach_cost_matrix', $original_refresh_cost_matrix, false );
+		}
+		if ( '__alorbach_missing__' === $original_refresh_api_keys ) {
+			delete_option( 'alorbach_api_keys' );
+		} else {
+			update_option( 'alorbach_api_keys', $original_refresh_api_keys, false );
+		}
+		if ( '__alorbach_missing__' === $original_image_token_rates ) {
+			delete_option( 'alorbach_azure_gpt_image_2_token_rates' );
+		} else {
+			update_option( 'alorbach_azure_gpt_image_2_token_rates', $original_image_token_rates, false );
+		}
+	}
 	$original_api_keys = get_option( 'alorbach_api_keys', array() );
 	\Alorbach\AIGateway\API_Keys_Helper::save_entries(
 		array(

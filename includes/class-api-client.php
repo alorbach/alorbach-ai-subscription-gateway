@@ -88,6 +88,29 @@ class API_Client {
 		);
 	}
 
+	/** Add normalized model-specific image options to a provider request body. */
+	private static function apply_image_request_options( $request, $options = array() ) {
+		if ( ! is_array( $request ) || ! is_array( $options ) || ( empty( $options['aspect_ratio'] ) && empty( $options['provider_options'] ) ) ) {
+			return $request;
+		}
+		$body = isset( $request['body'] ) ? json_decode( (string) $request['body'], true ) : null;
+		if ( ! is_array( $body ) ) {
+			return $request;
+		}
+		if ( ! empty( $options['aspect_ratio'] ) ) {
+			$body['aspect_ratio'] = sanitize_text_field( (string) $options['aspect_ratio'] );
+		}
+		$provider_options = is_array( $options['provider_options'] ?? null ) ? $options['provider_options'] : array();
+		foreach ( $provider_options as $key => $value ) {
+			if ( ! is_string( $key ) || ! preg_match( '/^[a-z][a-z0-9_]{0,63}$/i', $key ) || ! is_scalar( $value ) || '' === trim( (string) $value ) ) {
+				continue;
+			}
+			$body[ $key ] = is_bool( $value ) ? $value : sanitize_text_field( (string) $value );
+		}
+		$request['body'] = wp_json_encode( $body );
+		return $request;
+	}
+
 	/**
 	 * Get the provider to use for a model based on configured API keys.
 	 * GPT models work with OpenAI, Azure, or GitHub Models; uses whichever is configured (priority: openai > azure > github_models).
@@ -717,9 +740,10 @@ class API_Client {
 	 * @param string|null $model     Model ID. Default from options.
 	 * @param string|null $quality   Quality. Default from options.
 	 * @param string|null $output_format Output format. Default from options.
+	 * @param array       $options       Additional normalized image options.
 	 * @return array|WP_Error Response or error.
 	 */
-	public static function images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $reference_images = array() ) {
+	public static function images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $reference_images = array(), $options = array() ) {
 		$n      = min( 10, max( 1, (int) $n ) );
 		$model  = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		// Strip compound key (entry_id::model) — never forward the entry_id prefix to the upstream API.
@@ -745,7 +769,7 @@ class API_Client {
 		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
 			for ( $index = 0; $index < $n; $index++ ) {
-				$request = $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images );
+				$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images ), $options );
 				if ( ! $request || is_wp_error( $request ) ) {
 					return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 				}
@@ -759,7 +783,7 @@ class API_Client {
 			}
 			return $merged;
 		}
-		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images );
+		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images ), $options );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -1153,9 +1177,10 @@ class API_Client {
 	 * @param string|null   $quality       Quality.
 	 * @param string|null   $output_format Output format.
 	 * @param callable|null $on_event      Optional callback receiving event payloads.
+	 * @param array         $options       Additional normalized image options.
 	 * @return array|\WP_Error
 	 */
-	public static function stream_images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $on_event = null, $reference_images = array() ) {
+	public static function stream_images( $prompt, $size = '1024x1024', $n = 1, $model = null, $quality = null, $output_format = null, $on_event = null, $reference_images = array(), $options = array() ) {
 		$n             = min( 10, max( 1, (int) $n ) );
 		$model         = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		// Strip compound key (entry_id::model) — never forward the entry_id prefix to the upstream API.
@@ -1184,7 +1209,7 @@ class API_Client {
 			return new \WP_Error( 'no_api_key', $message );
 		}
 
-		$request = $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images );
+		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images ), $options );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}

@@ -315,6 +315,13 @@ class Integration_Service {
 		$audio_models  = $admin::get_audio_models();
 		$relay_models  = AI_Bridge::get_integration_model_capabilities();
 		$direct_image_models = self::get_direct_image_model_capabilities( $image_models );
+		$image_model_capabilities = array();
+		foreach ( array_merge( $relay_models, $direct_image_models ) as $model_contract ) {
+			if ( ! is_array( $model_contract ) || empty( $model_contract['gateway_model_key'] ) || ! is_array( $model_contract['image_capabilities'] ?? null ) ) {
+				continue;
+			}
+			$image_model_capabilities[ (string) $model_contract['gateway_model_key'] ] = $model_contract['image_capabilities'];
+		}
 		$music_analysis_models = array_values( array_filter( array_values( $audio_models ), static fn( $model ) => 0 === strpos( (string) $model, 'gpt-audio' ) ) );
 		$video_models  = $admin::get_video_models();
 		$qualities     = array( 'low', 'medium', 'high' );
@@ -329,6 +336,8 @@ class Integration_Service {
 			'image_model'      => AI_Bridge::MODEL_IMAGE,
 			'audio_model'      => AI_Bridge::MODEL_AUDIO,
 			'relay_prefix'     => AI_Bridge::RELAY_MODEL_PREFIX,
+			'image_capability_contract_version' => AI_Bridge::IMAGE_CAPABILITY_CONTRACT_VERSION,
+			'minimum_relay_version' => AI_Bridge::MINIMUM_RELAY_VERSION,
 			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'receipt' => '/ai-bridge/jobs/{job_id}/receipt', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
 			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'receipt' => '/local-codex/jobs/{job_id}/receipt', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
 		);
@@ -347,6 +356,7 @@ class Integration_Service {
 				'chat_models'     => array_keys( $text_models ),
 				'image_models'    => array_keys( $image_models ),
 				'models'          => array_merge( $relay_models, $direct_image_models ),
+				'image_model_capabilities' => $image_model_capabilities,
 				'image_sizes'     => array_values( $image_sizes ),
 				'image_qualities' => $qualities,
 				'audio_models'    => array_values( $audio_models ),
@@ -1146,11 +1156,16 @@ class Integration_Service {
 				}
 			)
 		);
+		$config['capabilities']['image_model_capabilities'] = array_intersect_key(
+			is_array( $config['capabilities']['image_model_capabilities'] ?? null ) ? $config['capabilities']['image_model_capabilities'] : array(),
+			array_fill_keys( $config['capabilities']['image_models'], true )
+		);
 
 		if ( empty( $capability_map['image'] ) ) {
 			$config['defaults']['image_model']         = '';
 			$config['capabilities']['image_sizes']     = array();
 			$config['capabilities']['image_qualities'] = array();
+			$config['capabilities']['image_model_capabilities'] = array();
 			$config['defaults']['image_size']          = '';
 			$config['defaults']['image_quality']       = '';
 		}

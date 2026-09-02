@@ -23,6 +23,16 @@ class AI_Bridge {
 	const RELAY_MODEL_PREFIX = 'model-relay:';
 	const LOCAL_ASR_MODEL    = 'local-asr';
 	const LOCAL_ASR_PREFIX   = 'local-asr:';
+	const LOCAL_UPSCALE_PREFIX = 'model-relay:local-upscale:';
+	const LOCAL_UPSCALE_MODELS = array( 'model-relay:local-upscale:swinir-classical-x2', 'model-relay:local-upscale:realesrgan-x2plus' );
+	const RELAY_IMAGE_MODELS = array(
+		'model-relay:codex:image'            => 'Codex Image',
+		'model-relay:grok-cli:image'         => 'Grok Imagine',
+		'model-relay:xai:imagine-image'      => 'xAI Imagine',
+		'model-relay:antigravity-cli:image'  => 'Antigravity Image',
+	);
+	const IMAGE_CAPABILITY_CONTRACT_VERSION = 1;
+	const MINIMUM_RELAY_VERSION = '1.0.10';
 	const JOB_TTL           = 900;
 
 	/**
@@ -111,6 +121,7 @@ class AI_Bridge {
 		}
 
 		$plan = Integration_Service::get_user_active_plan( get_current_user_id() );
+		$integration_config = Integration_Service::get_integration_config( get_current_user_id() );
 		return rest_ensure_response(
 			array(
 				'enabled'        => true,
@@ -121,7 +132,11 @@ class AI_Bridge {
 				'image_model'    => self::MODEL_IMAGE,
 				'audio_model'    => self::MODEL_AUDIO,
 				'audio_models'   => array_keys( self::get_audio_models() ),
+				'local_upscale'  => array( 'enabled' => true, 'models' => self::LOCAL_UPSCALE_MODELS, 'binary_transfer' => true, 'unmetered' => true ),
 				'relay_prefix'   => self::RELAY_MODEL_PREFIX,
+				'image_capability_contract_version' => self::IMAGE_CAPABILITY_CONTRACT_VERSION,
+				'minimum_relay_version' => self::MINIMUM_RELAY_VERSION,
+				'image_model_capabilities' => $integration_config['capabilities']['image_model_capabilities'] ?? array(),
 				'canonical_routes' => array(
 					'config'   => '/ai-bridge/config',
 					'jobs'     => '/ai-bridge/jobs',
@@ -167,8 +182,8 @@ class AI_Bridge {
 		$type    = sanitize_key( (string) ( $params['type'] ?? '' ) );
 		$payload = isset( $params['payload'] ) && is_array( $params['payload'] ) ? $params['payload'] : array();
 
-		if ( ! in_array( $type, array( 'chat', 'image', 'video', 'transcribe' ), true ) ) {
-			return new \WP_Error( 'invalid_local_codex_type', __( 'AI Model Relay jobs must be chat, image, video, or transcribe jobs.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		if ( ! in_array( $type, array( 'chat', 'image', 'video', 'transcribe', 'upscale' ), true ) ) {
+			return new \WP_Error( 'invalid_local_codex_type', __( 'AI Model Relay jobs must be chat, image, video, transcribe, or local upscale jobs.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
 		if ( 'chat' === $type ) {
@@ -177,6 +192,8 @@ class AI_Bridge {
 			$validation = self::validate_image_payload( $payload );
 		} elseif ( 'video' === $type ) {
 			$validation = self::validate_video_payload( $payload );
+		} elseif ( 'upscale' === $type ) {
+			$validation = self::validate_upscale_payload( $payload );
 		} else {
 			$validation = self::validate_transcribe_payload( $payload );
 		}
@@ -184,23 +201,20 @@ class AI_Bridge {
 			return $validation;
 		}
 
-		$capability = self::capability_for_type( $type );
 		$model      = self::model_for_type( $type, $payload );
-		if ( ! Integration_Service::user_can_access_capability( $user_id, $capability, $model ) ) {
+		$capability = self::capability_for_type( $type );
+		if ( 'upscale' !== $type && ! Integration_Service::user_can_access_capability( $user_id, $capability, $model ) ) {
 			return new \WP_Error( 'plan_restriction', __( 'Your plan does not allow this AI Model Relay request.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
 		}
 
-		$rate_error = self::check_rate_limit( $user_id, self::rate_limit_endpoint_for_type( $type ) );
-		if ( $rate_error ) {
-			return $rate_error;
+		if ( 'upscale' !== $type ) {
+			$rate_error = self::check_rate_limit( $user_id, self::rate_limit_endpoint_for_type( $type ) );
+			if ( $rate_error ) return $rate_error;
+			$quota_error = self::check_monthly_quota( $user_id );
+			if ( $quota_error ) return $quota_error;
 		}
 
-		$quota_error = self::check_monthly_quota( $user_id );
-		if ( $quota_error ) {
-			return $quota_error;
-		}
-
-		$fee_uc = self::get_service_fee_uc( $type );
+		$fee_uc = 'upscale' === $type ? 0 : self::get_service_fee_uc( $type );
 		if ( $fee_uc > 0 && Ledger::get_balance( $user_id ) < $fee_uc ) {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
@@ -267,6 +281,8 @@ class AI_Bridge {
 			$response = self::normalize_image_result( $result, $job );
 		} elseif ( 'video' === $job['type'] ) {
 			$response = self::normalize_video_result( $result, $job );
+		} elseif ( 'upscale' === $job['type'] ) {
+			$response = self::normalize_upscale_result( $result, $job );
 		} else {
 			$response = self::normalize_transcribe_result( $result, $job );
 		}
@@ -275,16 +291,8 @@ class AI_Bridge {
 		}
 
 		$usage = isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array();
-		Ledger::insert_transaction(
-			(int) $job['user_id'],
-			self::ledger_type_for_type( (string) $job['type'] ),
-			(string) $job['model'],
-			- (int) $job['fee_uc'],
-			isset( $usage['prompt_tokens'] ) ? (int) $usage['prompt_tokens'] : null,
-			isset( $usage['prompt_tokens_details']['cached_tokens'] ) ? (int) $usage['prompt_tokens_details']['cached_tokens'] : null,
-			isset( $usage['completion_tokens'] ) ? (int) $usage['completion_tokens'] : null,
-			(string) $job['request_hash'],
-			0
+		if ( 'upscale' !== $job['type'] ) Ledger::insert_transaction(
+			(int) $job['user_id'], self::ledger_type_for_type( (string) $job['type'] ), (string) $job['model'], - (int) $job['fee_uc'], isset( $usage['prompt_tokens'] ) ? (int) $usage['prompt_tokens'] : null, isset( $usage['prompt_tokens_details']['cached_tokens'] ) ? (int) $usage['prompt_tokens_details']['cached_tokens'] : null, isset( $usage['completion_tokens'] ) ? (int) $usage['completion_tokens'] : null, (string) $job['request_hash'], 0
 		);
 
 		$response['cost_uc']      = (int) $job['fee_uc'];
@@ -292,6 +300,7 @@ class AI_Bridge {
 		$response['cost_usd']     = User_Display::uc_to_usd( (int) $job['fee_uc'] );
 		$response['ai_bridge']    = true;
 		$response['local_codex']  = true;
+		if ( 'upscale' === $job['type'] ) $response['local_unmetered'] = true;
 
 		set_transient( self::receipt_key( (string) $job['job_id'] ), self::completion_receipt( $job, $response ), self::JOB_TTL );
 		delete_transient( self::job_key( (string) $job['job_id'] ) );
@@ -385,10 +394,9 @@ class AI_Bridge {
 		if ( ! self::is_enabled() ) {
 			return array();
 		}
-		return array(
-			self::MODEL_IMAGE                  => __( 'Codex Image (legacy)', 'alorbach-ai-gateway' ),
-			'model-relay:codex:image'          => __( 'Codex Image', 'alorbach-ai-gateway' ),
-			'model-relay:grok-cli:image'       => __( 'Grok Imagine', 'alorbach-ai-gateway' ),
+		return array_merge(
+			array( self::MODEL_IMAGE => __( 'Codex Image (legacy)', 'alorbach-ai-gateway' ) ),
+			array_map( static fn( $label ) => __( $label, 'alorbach-ai-gateway' ), self::RELAY_IMAGE_MODELS )
 		);
 	}
 
@@ -410,25 +418,59 @@ class AI_Bridge {
 		}
 
 		return array(
-			array(
-				'gateway_model_key'             => 'model-relay:codex:image',
-				'transport'                     => 'async_image',
-				'eligible'                      => true,
-				'supported_languages'           => array( 'de-DE', 'en-US' ),
-				'operation_kinds'               => array( 'text_to_image', 'image_edit' ),
-				'image_capabilities_evidenced'  => true,
-				'requires_browser_pairing'      => true,
-				'image_capabilities'            => array(
-					'async_jobs'              => true,
-					'provider_progress'       => false,
-					'preview_images'          => false,
-					'reference_images'        => true,
-					'provider_cancel'         => false,
-					'candidate_count_max'     => 1,
-					'supported_sizes'         => array( '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840' ),
-					'supported_qualities'     => array( 'low', 'medium', 'high' ),
-					'supported_output_formats' => array( 'image/png', 'image/jpeg', 'image/webp' ),
-				),
+			self::relay_image_contract( 'model-relay:codex:image', 'Codex Image', 'codex-cli', array( 'text_to_image', 'image_edit' ), array( 'guidance' => true, 'native' => false ), array(), array( 'low', 'medium', 'high' ), array( '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840' ), 4, false ),
+			self::relay_image_contract( 'model-relay:grok-cli:image', 'Grok Imagine', 'grok-cli', array( 'text_to_image', 'image_edit' ), array( 'guidance' => true, 'native' => false, 'ratio_native' => true ), array( '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2' ), array(), array( '2k', '1k' ), 4, false ),
+			self::relay_image_contract( 'model-relay:xai:imagine-image', 'xAI Imagine', 'xai-api', array( 'text_to_image', 'image_edit' ), array( 'guidance' => false, 'native' => true ), array( '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2' ), array( 'medium', 'low' ), array( '2k', '1k' ), 3, true, 3 ),
+			self::relay_image_contract( 'model-relay:antigravity-cli:image', 'Antigravity Image', 'antigravity-cli', array( 'text_to_image' ), array( 'guidance' => true, 'native' => false ), array( '1:1', '2:3', '3:2', '4:3', '3:4', '16:9', '9:16', '21:9' ), array(), array( '1K', '2K', '4K' ), 4, false ),
+		);
+	}
+
+	/** Build a safe, provider-neutral Relay image contract for downstream products. */
+	private static function relay_image_contract( $model, $label, $backend, $operation_kinds, $resolution_modes, $ratios, $qualities, $resolution_options, $reference_max, $cloud_upload, $candidate_count_max = 1, $quality_delivery = '' ) {
+		$options = array();
+		$resolution_native = ! empty( $resolution_modes['resolution_native'] ?? $resolution_modes['native'] );
+		$resolution_delivery = $resolution_native ? 'native_scale' : 'guidance';
+		foreach ( array_values( $resolution_options ) as $index => $value ) $options[] = array( 'value' => $value, 'rank' => $index + 1, 'delivery' => $resolution_delivery );
+		$quality_delivery = $quality_delivery ?: ( ! empty( $qualities ) && $resolution_native ? 'native' : 'guidance' );
+		$provider_size_key = 'codex-cli' === $backend ? 'size' : 'resolution';
+		$provider_options = array(
+			$provider_size_key => array( 'type' => 'enum', 'delivery' => $resolution_delivery, 'values' => array_values( $resolution_options ) ),
+		);
+		if ( 'antigravity-cli' === $backend ) {
+			$provider_options['image_size'] = array( 'type' => 'enum', 'delivery' => 'guidance', 'values' => array_values( $resolution_options ) );
+			unset( $provider_options['resolution'] );
+		}
+		return array(
+			'gateway_model_key' => $model,
+			'label' => __( $label, 'alorbach-ai-gateway' ),
+			'provider' => 'model-relay',
+			'backend' => $backend,
+			'transport' => 'async_image',
+			'eligible' => true,
+			'direct_dispatch_evidenced' => false,
+			'image_capabilities_evidenced' => true,
+			'requires_browser_pairing' => true,
+			'supported_languages' => array( 'de-DE', 'en-US' ),
+			'operation_kinds' => $operation_kinds,
+			'cloud_upload' => $cloud_upload,
+			'image_capabilities' => array(
+				'contract_version' => self::IMAGE_CAPABILITY_CONTRACT_VERSION,
+				'async_jobs' => true,
+				'provider_progress' => false,
+				'preview_images' => false,
+				'reference_images' => $reference_max > 0,
+				'reference_images_max' => $reference_max,
+				'provider_cancel' => false,
+				'candidate_count_max' => max( 1, absint( $candidate_count_max ) ),
+				'supported_sizes' => $resolution_options,
+				'resolution_mode' => ! empty( $resolution_modes['native'] ) ? 'native_scale' : 'guidance',
+				'resolution_options' => $options,
+				'supported_qualities' => $qualities,
+				'quality_delivery' => $quality_delivery,
+				'supported_aspect_ratios' => $ratios,
+				'aspect_ratio_delivery' => in_array( $backend, array( 'grok-cli', 'xai-api' ), true ) ? 'native' : ( empty( $ratios ) ? '' : 'guidance' ),
+				'supported_output_formats' => array( 'image/png', 'image/jpeg', 'image/webp' ),
+			'provider_options' => $provider_options,
 			),
 		);
 	}
@@ -499,6 +541,9 @@ class AI_Bridge {
 	 */
 	public static function is_supported_model_for_capability( $model, $capability ) {
 		$model = (string) $model;
+		if ( 'local_upscale' === $capability ) {
+			return in_array( $model, self::LOCAL_UPSCALE_MODELS, true );
+		}
 		if ( self::matches_relay_model( $model ) ) {
 			$known_capability = self::known_relay_model_capability( $model );
 			return '' === $known_capability || $capability === $known_capability;
@@ -530,6 +575,9 @@ class AI_Bridge {
 	 * @return string Empty when the capability is not encoded in the ID.
 	 */
 	private static function known_relay_model_capability( $model ) {
+		if ( 0 === strpos( $model, self::LOCAL_UPSCALE_PREFIX ) ) {
+			return 'local_upscale';
+		}
 		if ( 0 === strpos( $model, 'model-relay:local-asr:' ) ) {
 			return 'audio';
 		}
@@ -560,6 +608,9 @@ class AI_Bridge {
 	 * @return string
 	 */
 	private static function capability_for_type( $type ) {
+		if ( 'upscale' === $type ) {
+			return 'local_upscale';
+		}
 		if ( 'image' === $type ) {
 			return 'image';
 		}
@@ -579,6 +630,9 @@ class AI_Bridge {
 	 * @return string
 	 */
 	private static function rate_limit_endpoint_for_type( $type ) {
+		if ( 'upscale' === $type ) {
+			return 'local_upscale';
+		}
 		if ( 'image' === $type ) {
 			return 'images';
 		}
@@ -598,6 +652,9 @@ class AI_Bridge {
 	 * @return string
 	 */
 	private static function ledger_type_for_type( $type ) {
+		if ( 'upscale' === $type ) {
+			return 'image_deduction';
+		}
 		if ( 'image' === $type ) {
 			return 'image_deduction';
 		}
@@ -690,8 +747,9 @@ class AI_Bridge {
 			return new \WP_Error( 'invalid_local_codex_image_options', __( 'The requested image size, quality, format, or candidate count is not supported by the AI Model Relay model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		if ( ! empty( $payload['reference_images'] ) ) {
-			if ( ! is_array( $payload['reference_images'] ) || count( $payload['reference_images'] ) > 4 ) {
-				return new \WP_Error( 'invalid_reference_image', __( 'AI Model Relay images accept up to four reference images.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+			$reference_max = null !== $model_contract ? (int) ( $model_contract['image_capabilities']['reference_images_max'] ?? 0 ) : 4;
+			if ( ! is_array( $payload['reference_images'] ) || $reference_max < 1 || count( $payload['reference_images'] ) > $reference_max ) {
+				return new \WP_Error( 'invalid_reference_image', __( 'The selected AI Model Relay model does not support this number of reference images.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 			}
 			foreach ( $payload['reference_images'] as $reference ) {
 				if ( ! self::is_image_reference( $reference ) ) {
@@ -699,6 +757,29 @@ class AI_Bridge {
 				}
 			}
 		}
+		return true;
+	}
+
+	/** Validate metadata only; source and result PNG bytes use the paired Relay binary route. */
+	private static function validate_upscale_payload( $payload ) {
+		$model = isset( $payload['model'] ) ? (string) $payload['model'] : '';
+		if ( ! self::is_supported_model_for_capability( $model, 'local_upscale' ) ) return new \WP_Error( 'invalid_local_upscale_model', __( 'Choose a supported local CUDA upscale model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		if ( 2 !== (int) ( $payload['scale'] ?? 0 ) || 'png' !== strtolower( (string) ( $payload['output_format'] ?? '' ) ) ) return new \WP_Error( 'invalid_local_upscale_payload', __( 'Local upscaling requires exactly ×2 PNG output.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		if ( ! is_numeric( $payload['source_asset_id'] ?? null ) || ! wp_is_uuid( (string) ( $payload['source_asset_uuid'] ?? '' ) ) || ! preg_match( '/^[a-f0-9]{64}$/', strtolower( (string) ( $payload['source_checksum'] ?? '' ) ) ) ) return new \WP_Error( 'invalid_local_upscale_source', __( 'Local upscaling requires an immutable source asset manifest.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$source = isset( $payload['source_dimensions'] ) && is_array( $payload['source_dimensions'] ) ? $payload['source_dimensions'] : array();
+		$target = isset( $payload['target_print'] ) && is_array( $payload['target_print'] ) ? $payload['target_print'] : array();
+		$crop = isset( $payload['crop'] ) && is_array( $payload['crop'] ) ? $payload['crop'] : array();
+		$crop_pixels = isset( $payload['crop_pixels'] ) && is_array( $payload['crop_pixels'] ) ? $payload['crop_pixels'] : array();
+		$output = isset( $payload['output_print'] ) && is_array( $payload['output_print'] ) ? $payload['output_print'] : array();
+		$source_width = (int) ( $source['width'] ?? 0 ); $source_height = (int) ( $source['height'] ?? 0 );
+		$target_width = (int) ( $target['width'] ?? 0 ); $target_height = (int) ( $target['height'] ?? 0 ); $dpi = (int) ( $target['dpi'] ?? 0 );
+		if ( $source_width < 1 || $source_height < 1 || $target_width < 1 || $target_height < 1 || $target_width > 12000 || $target_height > 12000 || $dpi < 72 || $dpi > 1200 ) return new \WP_Error( 'invalid_local_upscale_target', __( 'Local upscaling requires valid profile-derived target dimensions and DPI.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$x = isset( $crop['x'] ) ? (float) $crop['x'] : -1; $y = isset( $crop['y'] ) ? (float) $crop['y'] : -1; $width = isset( $crop['width'] ) ? (float) $crop['width'] : 0; $height = isset( $crop['height'] ) ? (float) $crop['height'] : 0;
+		if ( ! rest_sanitize_boolean( $crop['approved_by_user'] ?? false ) || $x < 0 || $y < 0 || $width <= 0 || $height <= 0 || $x + $width > 1.000001 || $y + $height > 1.000001 || abs( ( $source_width * $width ) / ( $source_height * $height ) - ( $target_width / $target_height ) ) > 0.002 ) return new \WP_Error( 'invalid_local_upscale_crop', __( 'Approve an in-bounds crop matching the profile artwork ratio before local upscaling.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$left = (int) ( $crop_pixels['left'] ?? -1 ); $top = (int) ( $crop_pixels['top'] ?? -1 ); $right = (int) ( $crop_pixels['right'] ?? -1 ); $bottom = (int) ( $crop_pixels['bottom'] ?? -1 );
+		$crop_width = (int) ( $crop_pixels['width'] ?? 0 ); $crop_height = (int) ( $crop_pixels['height'] ?? 0 );
+		$output_width = (int) ( $output['width'] ?? 0 ); $output_height = (int) ( $output['height'] ?? 0 );
+		if ( 'retain_native_x2' !== (string) ( $payload['output_policy'] ?? '' ) || $left !== (int) round( $x * $source_width ) || $top !== (int) round( $y * $source_height ) || $right !== (int) round( ( $x + $width ) * $source_width ) || $bottom !== (int) round( ( $y + $height ) * $source_height ) || $left < 0 || $top < 0 || $right <= $left || $bottom <= $top || $right > $source_width || $bottom > $source_height || $crop_width !== $right - $left || $crop_height !== $bottom - $top || $output_width !== $crop_width * 2 || $output_height !== $crop_height * 2 || $output_width < $target_width || $output_height < $target_height ) return new \WP_Error( 'invalid_local_upscale_output_contract', __( 'Local upscaling requires an approved native ×2 output derived from the reviewed crop.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		return true;
 	}
 
@@ -712,18 +793,97 @@ class AI_Bridge {
 		return null;
 	}
 
+	/** Validate a non-billable estimate for a Relay image without exposing secrets. */
+	public static function validate_image_estimate_request( $payload ) {
+		$payload = is_array( $payload ) ? $payload : array();
+		$model = sanitize_text_field( (string) ( $payload['model'] ?? '' ) );
+		$contract = self::image_model_contract( $model );
+		if ( null === $contract ) return null;
+		if ( isset( $payload['provider_options'] ) && is_string( $payload['provider_options'] ) ) {
+			$decoded = json_decode( (string) $payload['provider_options'], true );
+			$payload['provider_options'] = is_array( $decoded ) ? $decoded : array();
+		}
+		$payload['size'] = (string) ( $payload['size'] ?? $payload['provider_size'] ?? '' );
+		$payload['output_format'] = self::normalize_image_estimate_format( $payload['output_format'] ?? 'image/png' );
+		$payload['candidate_count'] = max( 1, (int) ( $payload['candidate_count'] ?? $payload['n'] ?? 1 ) );
+		if ( ! self::image_options_are_supported( $payload, $contract ) ) return new \WP_Error( 'relay_image_options_unsupported', __( 'The selected Relay image options are not supported by this provider.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		return array( 'model' => $model, 'size' => $payload['size'], 'quality' => sanitize_key( (string) ( $payload['quality'] ?? '' ) ), 'output_format' => $payload['output_format'], 'candidate_count' => $payload['candidate_count'], 'provider_options' => is_array( $payload['provider_options'] ?? null ) ? $payload['provider_options'] : array() );
+	}
+
+	private static function normalize_image_estimate_format( $format ) {
+		$format = strtolower( sanitize_key( (string) $format ) );
+		if ( 'png' === $format ) return 'image/png';
+		if ( in_array( $format, array( 'jpg', 'jpeg' ), true ) ) return 'image/jpeg';
+		if ( 'webp' === $format ) return 'image/webp';
+		return sanitize_text_field( (string) $format );
+	}
+
 	/** @param array<string,mixed> $payload @param array<string,mixed> $contract */
 	private static function image_options_are_supported( $payload, $contract ) {
 		$capabilities = isset( $contract['image_capabilities'] ) && is_array( $contract['image_capabilities'] ) ? $contract['image_capabilities'] : array();
-		$size         = (string) ( $payload['size'] ?? '1024x1024' );
-		$quality      = (string) ( $payload['quality'] ?? 'medium' );
+		$provider_options = $payload['provider_options'] ?? array();
+		$size         = (string) ( $payload['size'] ?? $payload['provider_size'] ?? '' );
+		$provider_schema = is_array( $capabilities['provider_options'] ?? null ) ? $capabilities['provider_options'] : array();
+		$declared_provider_values = array();
+		foreach ( array( 'size', 'resolution', 'image_size' ) as $provider_size_key ) {
+			if ( ! array_key_exists( $provider_size_key, $payload ) || '' === (string) $payload[ $provider_size_key ] || 'auto' === strtolower( (string) $payload[ $provider_size_key ] ) ) continue;
+			$value = (string) $payload[ $provider_size_key ];
+			if ( ! isset( $provider_schema[ $provider_size_key ] ) ) {
+				$native_schema_key = array_key_exists( 'resolution', $provider_schema ) ? 'resolution' : ( array_key_exists( 'image_size', $provider_schema ) ? 'image_size' : '' );
+				if ( 'size' !== $provider_size_key || '' === $native_schema_key || '1024x1024' !== $value ) return false;
+				continue;
+			}
+			$allowed_values = array_map( 'strval', (array) ( $provider_schema[ $provider_size_key ]['values'] ?? array() ) );
+			if ( $allowed_values && ! in_array( $value, $allowed_values, true ) ) return false;
+			$declared_provider_values[ $provider_size_key ] = $value;
+		}
+		if ( is_array( $provider_options ) ) {
+			foreach ( array( 'size', 'resolution', 'image_size' ) as $provider_size_key ) {
+				if ( isset( $declared_provider_values[ $provider_size_key ], $provider_options[ $provider_size_key ] ) && (string) $declared_provider_values[ $provider_size_key ] !== (string) $provider_options[ $provider_size_key ] ) return false;
+				if ( '' !== (string) ( $provider_options[ $provider_size_key ] ?? '' ) && ( '' === $size || '1024x1024' === $size ) ) {
+					$size = (string) $provider_options[ $provider_size_key ];
+					break;
+				}
+			}
+		}
+		foreach ( array( 'resolution', 'image_size' ) as $provider_size_key ) {
+			if ( '' !== (string) ( $payload[ $provider_size_key ] ?? '' ) && ( '' === $size || '1024x1024' === $size ) ) {
+				$size = (string) $payload[ $provider_size_key ];
+				break;
+			}
+		}
+		if ( '' === $size ) {
+			$supported_sizes = array_values( (array) ( $capabilities['supported_sizes'] ?? array() ) );
+			$size = (string) ( $supported_sizes[0] ?? '1024x1024' );
+		}
+		$quality      = (string) ( $payload['quality'] ?? '' );
+		$quality_explicit = array_key_exists( 'quality_explicit', $payload ) ? (bool) $payload['quality_explicit'] : array_key_exists( 'quality', $payload );
 		$format       = (string) ( $payload['output_format'] ?? 'image/png' );
 		$count        = isset( $payload['candidate_count'] ) ? (int) $payload['candidate_count'] : 1;
-		return in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true )
-			&& in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true )
+		if ( ! is_array( $provider_options ) || ! self::provider_options_are_supported( $provider_options, $capabilities['provider_options'] ?? array() ) ) return false;
+		$quality_supported = empty( $capabilities['supported_qualities'] ) ? ( ! $quality_explicit || '' === $quality || 'auto' === strtolower( $quality ) ) : ( 'auto' === strtolower( $quality ) || in_array( $quality, (array) $capabilities['supported_qualities'], true ) );
+		$size_supported = empty( $capabilities['supported_sizes'] ) || in_array( $size, (array) $capabilities['supported_sizes'], true );
+		$ratio = (string) ( $payload['aspect_ratio'] ?? '' );
+		$ratio_supported = '' === $ratio || in_array( $ratio, (array) ( $capabilities['supported_aspect_ratios'] ?? array() ), true );
+		$cloud_ok = empty( $contract['cloud_upload'] ) || true === ( $payload['cloud_upload_confirmed'] ?? false ) || ( is_array( $payload['cloud_consent'] ?? null ) && true === ( $payload['cloud_consent']['confirmed'] ?? false ) );
+		return $size_supported
+			&& $quality_supported
 			&& in_array( $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true )
+			&& $ratio_supported
 			&& $count >= 1
-			&& $count <= (int) ( $capabilities['candidate_count_max'] ?? 0 );
+			&& $count <= (int) ( $capabilities['candidate_count_max'] ?? 0 )
+			&& $cloud_ok;
+	}
+
+	/** Validate only the provider option keys and scalar enum values advertised by the contract. */
+	private static function provider_options_are_supported( $options, $schema ) {
+		if ( ! is_array( $options ) || ! is_array( $schema ) ) return empty( $options );
+		foreach ( $options as $key => $value ) {
+			if ( ! is_string( $key ) || ! is_scalar( $value ) || ! isset( $schema[ $key ] ) || ! is_array( $schema[ $key ] ) ) return false;
+			$values = array_map( 'strval', (array) ( $schema[ $key ]['values'] ?? array() ) );
+			if ( $values && ! in_array( (string) $value, $values, true ) ) return false;
+		}
+		return true;
 	}
 
 	/**
@@ -868,6 +1028,20 @@ class AI_Bridge {
 		return $response;
 	}
 
+	/** Normalize a binary-transfer manifest without retaining or forwarding PNG bytes. */
+	private static function normalize_upscale_result( $result, $job ) {
+		$response = isset( $result['response'] ) && is_array( $result['response'] ) ? $result['response'] : $result;
+		$output = isset( $response['output'] ) && is_array( $response['output'] ) ? $response['output'] : array();
+		$provenance = isset( $response['provenance'] ) && is_array( $response['provenance'] ) ? $response['provenance'] : array();
+		$output_print = isset( $job['payload']['output_print'] ) && is_array( $job['payload']['output_print'] ) ? $job['payload']['output_print'] : array();
+		$checksum = strtolower( trim( (string) ( $output['checksum'] ?? '' ) ) );
+		if ( 'image/png' !== strtolower( trim( (string) ( $output['mime_type'] ?? '' ) ) ) || ! preg_match( '/^[a-f0-9]{64}$/', $checksum ) || 'retain_native_x2' !== (string) ( $job['payload']['output_policy'] ?? '' ) || (int) ( $output['width'] ?? 0 ) !== (int) ( $output_print['width'] ?? 0 ) || (int) ( $output['height'] ?? 0 ) !== (int) ( $output_print['height'] ?? 0 ) || (int) ( $output['byte_size'] ?? 0 ) < 1 || (int) ( $output['byte_size'] ?? 0 ) > 67108864 ) return new \WP_Error( 'invalid_local_upscale_result', __( 'AI Model Relay local upscale output did not match the signed native ×2 PNG manifest.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$required = array( 'model_id', 'model_version', 'weight_checksum', 'cuda_device', 'precision', 'downsampler', 'processing_started_at', 'processing_finished_at' );
+		foreach ( $required as $field ) if ( '' === trim( (string) ( $provenance[ $field ] ?? '' ) ) ) return new \WP_Error( 'invalid_local_upscale_provenance', __( 'AI Model Relay local upscale provenance is incomplete.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		if ( (string) $job['model'] !== (string) $provenance['model_id'] || ! preg_match( '/^[a-f0-9]{64}$/', strtolower( (string) $provenance['weight_checksum'] ) ) || 'none' !== strtolower( (string) $provenance['downsampler'] ) || false === strtotime( (string) $provenance['processing_started_at'] ) || false === strtotime( (string) $provenance['processing_finished_at'] ) ) return new \WP_Error( 'invalid_local_upscale_provenance', __( 'AI Model Relay local upscale provenance did not match the signed native ×2 request.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		return array( 'output' => array( 'mime_type' => 'image/png', 'checksum' => $checksum, 'width' => (int) $output['width'], 'height' => (int) $output['height'], 'byte_size' => (int) $output['byte_size'] ), 'provenance' => $provenance, 'model' => (string) $job['model'], 'local_unmetered' => true );
+	}
+
 	/**
 	 * Normalize an experimental relay video result.
 	 *
@@ -966,6 +1140,12 @@ class AI_Bridge {
 			'cost_uc'      => (int) $job['fee_uc'],
 			'result_manifest' => array(),
 		);
+
+		if ( 'upscale' === (string) $job['type'] ) {
+			$output = isset( $response['output'] ) && is_array( $response['output'] ) ? $response['output'] : array();
+			$receipt['result_manifest'][] = array( 'mime_type' => (string) ( $output['mime_type'] ?? '' ), 'byte_size' => (int) ( $output['byte_size'] ?? 0 ), 'sha256' => (string) ( $output['checksum'] ?? '' ), 'width' => (int) ( $output['width'] ?? 0 ), 'height' => (int) ( $output['height'] ?? 0 ) );
+			return $receipt;
+		}
 
 		if ( 'image' !== (string) $job['type'] ) {
 			return $receipt;

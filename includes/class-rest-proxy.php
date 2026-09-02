@@ -910,6 +910,9 @@ class REST_Proxy {
 				'job_endpoint'            => rest_url( 'alorbach/v1/images/jobs' ),
 				'provider_progress_models' => $provider_progress_models,
 				'preview_models'          => $preview_image_models,
+				'model_capabilities'      => isset( $config['capabilities']['image_model_capabilities'] ) && is_array( $config['capabilities']['image_model_capabilities'] ) ? $config['capabilities']['image_model_capabilities'] : array(),
+				'capability_contract_version' => AI_Bridge::IMAGE_CAPABILITY_CONTRACT_VERSION,
+				'minimum_relay_version'    => AI_Bridge::MINIMUM_RELAY_VERSION,
 				'local_codex'             => $config['local_codex'] ?? array(),
  			),
 			'audio' => array(
@@ -1013,8 +1016,25 @@ class REST_Proxy {
 			$size    = $request->get_param( 'size' ) ?: '1024x1024';
 			$n       = max( 1, min( 10, (int) $request->get_param( 'n' ) ) );
 			$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
-			$quality = self::normalize_image_quality( $request->get_param( 'quality' ) ?: '', $model );
+			$raw_quality = $request->get_param( 'quality' );
+			$quality_explicit = is_string( $raw_quality ) ? '' !== trim( $raw_quality ) : null !== $raw_quality;
+			$quality = self::normalize_image_quality( $raw_quality ?: '', $model );
 			$output_format = $request->get_param( 'output_format' ) ?: 'png';
+			$relay_estimate = null;
+			if ( str_starts_with( (string) $model, 'model-relay:' ) ) {
+				$relay_estimate = AI_Bridge::validate_image_estimate_request( array(
+					'model' => $model,
+					'size' => $size,
+					'quality' => $quality,
+					'output_format' => $output_format,
+					'n' => $n,
+					'quality_explicit' => $quality_explicit,
+					'aspect_ratio' => $request->get_param( 'aspect_ratio' ),
+					'provider_options' => $request->get_param( 'provider_options' ),
+					'cloud_upload_confirmed' => rest_sanitize_boolean( $request->get_param( 'cloud_upload_confirmed' ) ),
+				) );
+				if ( is_wp_error( $relay_estimate ) ) return $relay_estimate;
+			}
 			$direct_options = Integration_Service::validate_direct_image_request( get_current_user_id(), $model, $size, $quality, $output_format, $n );
 			if ( is_wp_error( $direct_options ) ) {
 				return $direct_options;
@@ -1025,7 +1045,13 @@ class REST_Proxy {
 				$n              = $direct_options['candidate_count'];
 				$output_format  = $direct_options['output_format'];
 			}
-			if ( 'codex-local:image' === $model ) {
+			if ( is_array( $relay_estimate ) ) {
+				$size = $relay_estimate['size'];
+				$quality = $relay_estimate['quality'];
+				$n = $relay_estimate['candidate_count'];
+				$output_format = $relay_estimate['output_format'];
+				$cost_uc = 0;
+			} elseif ( 'codex-local:image' === $model ) {
 				$cost_uc = max( 0, (int) get_option( 'alorbach_local_codex_image_fee_uc', 0 ) );
 			} else {
 				$api_cost = Cost_Matrix::get_image_cost( $size, $model, self::get_billable_image_quality( $quality, $model ) ) * $n;
@@ -1223,6 +1249,11 @@ class REST_Proxy {
 		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images );
 		if ( is_wp_error( $response ) ) {
 			return $response;
+		}
+		$usage_api_cost = Cost_Matrix::calculate_image_usage_cost( $model, isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array() );
+		if ( null !== $usage_api_cost ) {
+			$api_cost = $usage_api_cost;
+			$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		}
 
 		Ledger::insert_transaction( $user_id, 'image_deduction', $model_name_img, -$cost, null, null, null, $request_signature, $api_cost );
@@ -2078,14 +2109,13 @@ class REST_Proxy {
 	}
 
 	/**
-	 * Admin: Clear Azure Retail Prices cache so next import fetches fresh data.
+	 * Admin: Fetch current Azure Retail Prices and update existing Azure text-model rows.
 	 *
 	 * @param \WP_REST_Request $request Request.
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_refresh_azure_prices( $request ) {
-		Azure_Retail_Prices::clear_cache();
-		return rest_ensure_response( array( 'success' => true, 'message' => __( 'Azure prices cache cleared. Next import will fetch fresh data.', 'alorbach-ai-gateway' ) ) );
+		return rest_ensure_response( Model_Importer::refresh_azure_text_costs() );
 	}
 
 	/**
