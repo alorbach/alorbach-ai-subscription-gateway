@@ -1,0 +1,89 @@
+includes/class-api-client.php
+  s_0c9c051d405f89::t_ae881576f01690 91-113,743,746,772,786,1180,1183,1212
+bin/verify-rest-contracts.php
+  s_919e9e6afaaab0::t_662efa8c2dba59 437-438,440-468,479-488,494-495
+  s_919e9e6afaaab0::t_603b931a03fc84 439,469-478,489-493
+  s_283fd6cff5aacb::t_b7c50ea510ddb6 199
+  s_283fd6cff5aacb::t_74147ff17fae28 258
+  s_283fd6cff5aacb::t_6b665657e48c8e 185-196,198,200
+  s_0c9c051d405f89::t_cbe552dc343fca 197
+  s_283fd6cff5aacb::t_17e92affa0c98a 244-256,288-289,292
+  s_0c9c051d405f89::t_c24010cce90282 175-176,184
+includes/class-integration-service.php
+  s_0c9c051d405f89::t_178487436629d0 318-324
+  s_0c9c051d405f89::t_7e655586a3d344 1159-1162,1168
+  s_0c9c051d405f89::t_20213b7cf83a45 339-340,359
+includes/class-image-jobs.php
+  s_0c9c051d405f89::t_dcb8687bd6bdc4 186-188,250-252,261,688,733-737,747-752
+includes/class-ai-bridge.php
+  s_10290d47949857::t_2261bb655527eb 772-773,779-782,1036,1038,1041
+  s_283fd6cff5aacb::t_cabf7e6b34f2ab 763-771,774-778,783-785
+  s_0c9c051d405f89::t_a44f55546e30e7 473
+  s_283fd6cff5aacb::t_a83c25b98b3db9 433
+  s_0c9c051d405f89::t_cde0a2b0aa73f8 124,137-139,841
+  s_283fd6cff5aacb::t_8b98d88c7f7f0e 824-825,840,843-846,853-855,858
+  s_283fd6cff5aacb::t_d05c70c5973b98 544-546,578-580,611-613,633-635,655-657
+  s_283fd6cff5aacb::t_aeca6f226a78c4 796-818
+  s_0c9c051d405f89::t_217ef240ef6e65 827,838,842
+  s_283fd6cff5aacb::t_4b7cc91ce5d105 436,438-442,469
+  s_283fd6cff5aacb::t_1f754e444361aa 431-432,434
+  s_283fd6cff5aacb::t_8dd20ccd01afe3 860
+  s_283fd6cff5aacb::t_47c261e657957c 1149
+  s_283fd6cff5aacb::t_8e6572983c591b 856-857
+  s_283fd6cff5aacb::t_0ac07c7a749af6 750-752,859,863,865-870,872,874-886
+  s_283fd6cff5aacb::t_9fc7a52134c7e7 26-27,135,185-186,195-196,205-206,210-214,217,284-285,294-295,303
+  s_0c9c051d405f89::t_ca078ac5fbfe8b 424
+  s_0c9c051d405f89::t_94cab3c5e57648 34-35,421-422,435,437,457,471
+  s_283fd6cff5aacb::t_2907380daa761d 28-33,397-399,425-428,430,443-456,458-463,465-468,470,472
+  s_0c9c051d405f89::t_9ba75ec0a2f0e9 423,429,464
+  s_283fd6cff5aacb::t_7c9299ec49482e 820
+  s_0c9c051d405f89::t_fe65195f3a82f0 826,828-837,839,847-852,864
+  s_283fd6cff5aacb::t_0f2c9bdbc09461 819,1031-1035,1037,1039-1040,1042-1044,1144-1148
+includes/class-rest-proxy.php
+  s_283fd6cff5aacb::t_277cb274a4481c 1023-1030,1032-1037,1048-1054
+  s_919e9e6afaaab0::t_11eb5c6c05811b 1253-1257
+  s_919e9e6afaaab0::t_aebdbfcc2554e5 2112,2118
+  s_0c9c051d405f89::t_8f1bc227e3756d 914-915
+  s_283fd6cff5aacb::t_6a6f655f01aa44 1019-1021,1031
+  s_0c9c051d405f89::t_5ef6c16af59bee 913
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5ac806e5a0207e47779e12190adf62450baa73d9",
+  "prompts": {},
+  "sessions": {
+    "s_0c9c051d405f89": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05c11-e99e-7112-a1dd-f3f3fe3e7271",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": null
+    },
+    "s_10290d47949857": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a042f6-86f9-7493-ae27-a8387fbc9764",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_283fd6cff5aacb": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fe0c8-2012-7ae3-a5b8-7804867046e5",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_919e9e6afaaab0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a046a7-3236-79c0-ae95-42dcc0639f66",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
