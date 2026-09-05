@@ -265,7 +265,7 @@ class AI_Bridge {
 	public static function complete_job_handler( $request ) {
 		$params = $request->get_json_params();
 		$params = is_array( $params ) ? $params : array();
-		$job    = self::load_authorized_job( $request, $params );
+		$job    = self::load_authorized_job( $request, $params, array( 'created', 'completed_pending_receipt' ), true );
 		if ( is_wp_error( $job ) ) {
 			return $job;
 		}
@@ -289,11 +289,51 @@ class AI_Bridge {
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
+		if ( 'chat' === $job['type'] ) {
+			/* The downstream Studio receives the browser-relayed response. Bind the
+			 * server-owned receipt to the canonical assistant choices so that a
+			 * browser cannot replace a genuine completed review with another valid
+			 * JSON report after the Gateway job has completed. */
+			$response['result_digest'] = self::chat_result_digest( $response );
+		}
+		$completion_digest = self::completion_response_digest( $response );
+		$already_charged = 'upscale' !== $job['type'] && Ledger::signature_exists( (string) $job['request_hash'] );
+		if ( $already_charged && 'completed_pending_receipt' !== (string) ( $job['status'] ?? '' ) ) {
+			return new \WP_Error( 'local_codex_completion_state_lost', __( 'The completed Local Codex result is already charged but its retry checkpoint is unavailable. Do not submit a different result.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+		if ( 'completed_pending_receipt' === (string) ( $job['status'] ?? '' ) ) {
+			if ( ! hash_equals( (string) ( $job['completion_digest'] ?? '' ), $completion_digest ) ) {
+				return new \WP_Error( 'local_codex_completion_mismatch', __( 'The retry result does not match the already submitted Local Codex result.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+			}
+		} else {
+			/* Record the normalized result in the signed job before billing. If
+			 * receipt storage fails after billing, the exact result remains available
+			 * for an authenticated, idempotent completion retry. Keep chat output for
+			 * digest verification; binary jobs need only their digest here. */
+			$job['status'] = 'completed_pending_receipt';
+			$job['completion_digest'] = $completion_digest;
+			if ( 'chat' === $job['type'] ) {
+				$job['completion_response'] = $response;
+			}
+			$stored_job = set_transient( self::job_key( (string) $job['job_id'] ), $job, self::JOB_TTL );
+			$verified_job = get_transient( self::job_key( (string) $job['job_id'] ) );
+			if ( false === $stored_job || ! is_array( $verified_job ) || ! hash_equals( (string) ( $verified_job['completion_digest'] ?? '' ), $completion_digest ) ) {
+				return new \WP_Error( 'local_codex_completion_checkpoint_failed', __( 'AI Model Relay could not checkpoint the completion safely. Retry the same completion.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+			}
+		}
+		if ( $already_charged && 'chat' === $job['type'] && isset( $job['completion_response'] ) && is_array( $job['completion_response'] ) ) {
+			$response = $job['completion_response'];
+		}
 
 		$usage = isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array();
-		if ( 'upscale' !== $job['type'] ) Ledger::insert_transaction(
-			(int) $job['user_id'], self::ledger_type_for_type( (string) $job['type'] ), (string) $job['model'], - (int) $job['fee_uc'], isset( $usage['prompt_tokens'] ) ? (int) $usage['prompt_tokens'] : null, isset( $usage['prompt_tokens_details']['cached_tokens'] ) ? (int) $usage['prompt_tokens_details']['cached_tokens'] : null, isset( $usage['completion_tokens'] ) ? (int) $usage['completion_tokens'] : null, (string) $job['request_hash'], 0
-		);
+		if ( 'upscale' !== $job['type'] && ! $already_charged ) {
+			$ledger_result = Ledger::insert_transaction(
+				(int) $job['user_id'], self::ledger_type_for_type( (string) $job['type'] ), (string) $job['model'], - (int) $job['fee_uc'], isset( $usage['prompt_tokens'] ) ? (int) $usage['prompt_tokens'] : null, isset( $usage['prompt_tokens_details']['cached_tokens'] ) ? (int) $usage['prompt_tokens_details']['cached_tokens'] : null, isset( $usage['completion_tokens'] ) ? (int) $usage['completion_tokens'] : null, (string) $job['request_hash'], 0
+			);
+			if ( false === $ledger_result && ! Ledger::signature_exists( (string) $job['request_hash'] ) ) {
+				return new \WP_Error( 'local_codex_billing_persist_failed', __( 'AI Model Relay could not record the completion charge. Retry the same completion.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+			}
+		}
 
 		$response['cost_uc']      = (int) $job['fee_uc'];
 		$response['cost_credits'] = User_Display::uc_to_credits( (int) $job['fee_uc'] );
@@ -302,7 +342,13 @@ class AI_Bridge {
 		$response['local_codex']  = true;
 		if ( 'upscale' === $job['type'] ) $response['local_unmetered'] = true;
 
-		set_transient( self::receipt_key( (string) $job['job_id'] ), self::completion_receipt( $job, $response ), self::JOB_TTL );
+		$receipt_error = self::persist_completion_receipt( $job, $response );
+		if ( is_wp_error( $receipt_error ) ) {
+			/* Keep the signed job transient intact so the browser can retry the
+			 * completion after a storage outage. Never acknowledge a charged result
+			 * unless the downstream receipt can be read back durably. */
+			return $receipt_error;
+		}
 		delete_transient( self::job_key( (string) $job['job_id'] ) );
 
 		return rest_ensure_response( $response );
@@ -321,6 +367,9 @@ class AI_Bridge {
 	public static function receipt_handler( $request ) {
 		$job_id  = sanitize_text_field( (string) $request->get_param( 'job_id' ) );
 		$receipt = get_transient( self::receipt_key( $job_id ) );
+		if ( ! is_array( $receipt ) ) {
+			$receipt = get_option( self::receipt_option_key( $job_id ), null );
+		}
 		if ( ! is_array( $receipt ) ) {
 			return new \WP_Error( 'local_codex_receipt_not_found', __( 'AI Model Relay completion receipt was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
 		}
@@ -963,7 +1012,7 @@ class AI_Bridge {
 	 * @param array            $params JSON params.
 	 * @return array|\WP_Error
 	 */
-	private static function load_authorized_job( $request, $params, $allowed_statuses = array( 'created' ) ) {
+	private static function load_authorized_job( $request, $params, $allowed_statuses = array( 'created' ), $allow_completed_replay = false ) {
 		$job_id = sanitize_text_field( (string) $request->get_param( 'job_id' ) );
 		$job    = get_transient( self::job_key( $job_id ) );
 		if ( ! is_array( $job ) ) {
@@ -979,7 +1028,7 @@ class AI_Bridge {
 		if ( (string) ( $params['request_hash'] ?? '' ) !== (string) $job['request_hash'] ) {
 			return new \WP_Error( 'local_codex_hash_mismatch', __( 'Local Codex request hash changed.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
-		if ( Ledger::signature_exists( (string) $job['request_hash'] ) ) {
+		if ( Ledger::signature_exists( (string) $job['request_hash'] ) && ! $allow_completed_replay ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 		if ( ! in_array( (string) ( $job['status'] ?? '' ), $allowed_statuses, true ) ) {
@@ -1119,6 +1168,26 @@ class AI_Bridge {
 		return 'alorbach_local_codex_receipt_' . sanitize_key( (string) $job_id );
 	}
 
+	/** Durable option key for a redacted completed-job receipt. */
+	private static function receipt_option_key( $job_id ) {
+		return 'alorbach_local_codex_receipt_' . sanitize_key( (string) $job_id );
+	}
+
+	/** Persist a receipt before acknowledging and deleting its signed job. */
+	private static function persist_completion_receipt( $job, $response ) {
+		$receipt = self::completion_receipt( $job, $response );
+		$key = self::receipt_option_key( (string) $job['job_id'] );
+		$updated = update_option( $key, $receipt, false );
+		$stored = get_option( $key, null );
+		if ( ! is_array( $stored ) || wp_json_encode( $stored ) !== wp_json_encode( $receipt ) ) {
+			return new \WP_Error( 'local_codex_receipt_persist_failed', __( 'AI Model Relay could not durably save the completion receipt. Retry the completion.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+		}
+		/* The option is authoritative; the transient is only a fast expiring
+		 * cache and may fail without losing the completion receipt. */
+		set_transient( self::receipt_key( (string) $job['job_id'] ), $receipt, self::JOB_TTL );
+		return true;
+	}
+
 	/**
 	 * Build the minimal receipt a downstream product may trust for result
 	 * integrity. It never retains raw result bytes or a relay authentication
@@ -1138,6 +1207,7 @@ class AI_Bridge {
 			'status'       => 'completed',
 			'completed_at' => gmdate( 'c' ),
 			'cost_uc'      => (int) $job['fee_uc'],
+			'result_digest' => 'chat' === (string) $job['type'] ? (string) ( $response['result_digest'] ?? '' ) : '',
 			'result_manifest' => array(),
 		);
 
@@ -1170,6 +1240,17 @@ class AI_Bridge {
 		}
 
 		return $receipt;
+	}
+
+	/** Hash only the normalized chat choices, excluding mutable billing metadata. */
+	private static function chat_result_digest( $response ) {
+		$choices = isset( $response['choices'] ) && is_array( $response['choices'] ) ? $response['choices'] : array();
+		return hash( 'sha256', (string) wp_json_encode( $choices ) );
+	}
+
+	/** Hash the normalized completion before mutable billing metadata is added. */
+	private static function completion_response_digest( $response ) {
+		return hash( 'sha256', (string) wp_json_encode( $response ) );
 	}
 
 	/**
