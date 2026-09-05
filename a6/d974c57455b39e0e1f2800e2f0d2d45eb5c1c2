@@ -1,0 +1,33 @@
+includes/class-ai-bridge.php
+  s_c926a421c74207::t_aa2720fc60c0d9 371-372
+  s_c926a421c74207::t_df818ab626d07a 1171-1190
+  s_c926a421c74207::t_2a2dad01f2b68f 292-297,323,1210,1245-1248
+  s_c926a421c74207::t_9d4a39d12baa2e 301-303
+  s_c926a421c74207::t_1ae8940503ef5a 268,298-300,304-322,324-326,329-336,1015,1031,1249-1254
+  s_c926a421c74207::t_88bf983fff0421 345-351
+  s_b7d30f3593ddce::t_b3c0c18d0fb9c9 370,1255
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a6d974c57455b39e0e1f2800e2f0d2d45eb5c1c2",
+  "prompts": {},
+  "sessions": {
+    "s_b7d30f3593ddce": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "5a9b008b-15df-4845-a8fd-4c8d6723ca01",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_c926a421c74207": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a05c0e-adc7-7490-a676-36dc937824c0",
+        "model": "gpt-5.6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
