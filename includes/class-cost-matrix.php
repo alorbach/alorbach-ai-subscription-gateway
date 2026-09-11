@@ -37,6 +37,223 @@ class Cost_Matrix {
 	}
 
 	/**
+	 * Plain model ID from a compound or plain key.
+	 *
+	 * @param string $model Model ID or entry_id::model_id key.
+	 * @return string
+	 */
+	public static function get_plain_model_id( $model ) {
+		return (string) self::parse_model_key( $model )['model'];
+	}
+
+	/**
+	 * Whether the model is a GPT Image family deployment.
+	 *
+	 * @param string $model Model ID or compound key.
+	 * @return bool
+	 */
+	public static function is_gpt_image_model( $model ) {
+		return strpos( strtolower( self::get_plain_model_id( $model ) ), 'gpt-image' ) === 0;
+	}
+
+	/**
+	 * Whether the model is Azure GPT-Image-2 or 2.5 (token-usage billed family).
+	 *
+	 * @param string $model Model ID or compound key.
+	 * @return bool
+	 */
+	public static function is_gpt_image_2_family( $model ) {
+		return strpos( strtolower( self::get_plain_model_id( $model ) ), 'gpt-image-2' ) === 0;
+	}
+
+	/**
+	 * Whether the model is GPT Image 2.5 Sunburst or Flare (including dated snapshots).
+	 *
+	 * @param string $model Model ID or compound key.
+	 * @return bool
+	 */
+	public static function is_gpt_image_2_5_model( $model ) {
+		$id = strtolower( self::get_plain_model_id( $model ) );
+		return strpos( $id, 'gpt-image-2.5-sunburst' ) === 0 || strpos( $id, 'gpt-image-2.5-flare' ) === 0;
+	}
+
+	/**
+	 * All canonical image quality values the Gateway can persist.
+	 *
+	 * @return string[]
+	 */
+	public static function get_all_image_qualities() {
+		return array( 'low', 'medium', 'high', 'xhigh', 'max' );
+	}
+
+	/**
+	 * Qualities a specific model may advertise or accept.
+	 *
+	 * @param string $model Model ID or compound key.
+	 * @return string[]
+	 */
+	public static function get_supported_image_qualities( $model ) {
+		$id = strtolower( self::get_plain_model_id( $model ) );
+		if ( strpos( $id, 'codex-image-' ) === 0 || 'codex-local:image' === $id ) {
+			return array( 'medium', 'high' );
+		}
+		if ( self::is_gpt_image_2_5_model( $model ) ) {
+			return array( 'low', 'medium', 'high', 'xhigh', 'max' );
+		}
+		return array( 'low', 'medium', 'high' );
+	}
+
+	/**
+	 * Human-readable quality label for admin and demo UI.
+	 *
+	 * @param string $quality Canonical quality.
+	 * @return string
+	 */
+	public static function get_image_quality_label( $quality ) {
+		$quality = strtolower( trim( (string) $quality ) );
+		$labels  = array(
+			'low'    => __( 'Low', 'alorbach-ai-gateway' ),
+			'medium' => __( 'Medium', 'alorbach-ai-gateway' ),
+			'high'   => __( 'High', 'alorbach-ai-gateway' ),
+			'xhigh'  => __( 'Extra high', 'alorbach-ai-gateway' ),
+			'max'    => __( 'Max', 'alorbach-ai-gateway' ),
+		);
+		return $labels[ $quality ] ?? ucfirst( $quality );
+	}
+
+	/**
+	 * Normalize a requested quality onto the model's supported set.
+	 *
+	 * @param string $quality Raw requested quality.
+	 * @param string $model   Model ID or compound key.
+	 * @return string
+	 */
+	public static function normalize_image_quality( $quality, $model ) {
+		$quality = strtolower( trim( (string) $quality ) );
+		$aliases = array(
+			'extra_high'  => 'xhigh',
+			'extra-high'  => 'xhigh',
+			'extrahigh'   => 'xhigh',
+			'extrahoch'   => 'xhigh',
+			'extra hoch'  => 'xhigh',
+			'extra-hoch'  => 'xhigh',
+		);
+		if ( isset( $aliases[ $quality ] ) ) {
+			$quality = $aliases[ $quality ];
+		}
+
+		$supported = self::get_supported_image_qualities( $model );
+		if ( in_array( $quality, $supported, true ) ) {
+			return $quality;
+		}
+
+		$id = strtolower( self::get_plain_model_id( $model ) );
+		if ( strpos( $id, 'codex-image-' ) === 0 || 'codex-local:image' === $id ) {
+			return 'high';
+		}
+
+		$default = strtolower( trim( (string) get_option( 'alorbach_image_default_quality', 'medium' ) ) );
+		if ( isset( $aliases[ $default ] ) ) {
+			$default = $aliases[ $default ];
+		}
+		if ( in_array( $default, $supported, true ) ) {
+			return $default;
+		}
+
+		return in_array( 'medium', $supported, true ) ? 'medium' : (string) ( $supported[0] ?? 'medium' );
+	}
+
+	/**
+	 * Backgrounds a GPT Image model may send to the Images API.
+	 *
+	 * @param string $model Model ID or compound key.
+	 * @return string[]
+	 */
+	public static function get_supported_image_backgrounds( $model ) {
+		if ( ! self::is_gpt_image_model( $model ) ) {
+			return array();
+		}
+		return array( 'auto', 'opaque', 'transparent' );
+	}
+
+	/**
+	 * Normalize a requested background onto the model's supported set.
+	 *
+	 * @param string $background Raw requested background.
+	 * @param string $model      Model ID or compound key.
+	 * @return string Empty when the model does not support background.
+	 */
+	public static function normalize_image_background( $background, $model ) {
+		$supported = self::get_supported_image_backgrounds( $model );
+		if ( empty( $supported ) ) {
+			return '';
+		}
+		$background = strtolower( trim( (string) $background ) );
+		if ( in_array( $background, $supported, true ) ) {
+			return $background;
+		}
+		return 'auto';
+	}
+
+	/**
+	 * Transparent backgrounds require PNG or WebP; coerce JPEG to PNG.
+	 *
+	 * @param string $output_format Canonical or MIME format.
+	 * @param string $background    Normalized background.
+	 * @return string
+	 */
+	public static function coerce_output_format_for_background( $output_format, $background ) {
+		if ( 'transparent' !== strtolower( trim( (string) $background ) ) ) {
+			return $output_format;
+		}
+		$format = strtolower( trim( (string) $output_format ) );
+		if ( in_array( $format, array( 'jpeg', 'jpg', 'image/jpeg', 'image/jpg' ), true ) ) {
+			return strpos( $format, 'image/' ) === 0 ? 'image/png' : 'png';
+		}
+		return $output_format;
+	}
+
+	/**
+	 * Default per-image reservation matrix for a GPT Image model.
+	 *
+	 * @param string $model Model ID or compound key.
+	 * @return array<string,array<string,int>>
+	 */
+	public static function get_default_gpt_image_costs( $model ) {
+		$costs = array(
+			'low'    => array( '1024x1024' => 9000, '1024x1536' => 13000, '1536x1024' => 13000 ),
+			'medium' => array( '1024x1024' => 34000, '1024x1536' => 50000, '1536x1024' => 50000 ),
+			'high'   => array( '1024x1024' => 133000, '1024x1536' => 200000, '1536x1024' => 200000 ),
+		);
+		if ( self::is_gpt_image_2_family( $model ) ) {
+			$extra_sizes = array( '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
+			foreach ( $costs as $quality => $sizes ) {
+				foreach ( $extra_sizes as $size ) {
+					if ( isset( $sizes[ $size ] ) ) {
+						continue;
+					}
+					if ( 'auto' === $size ) {
+						$costs[ $quality ][ $size ] = (int) $sizes['1024x1024'];
+						continue;
+					}
+					if ( preg_match( '/^(\d+)x(\d+)$/', $size, $dimensions ) ) {
+						$area_multiplier            = ( (int) $dimensions[1] * (int) $dimensions[2] ) / ( 1024 * 1024 );
+						$costs[ $quality ][ $size ] = (int) round( $sizes['1024x1024'] * $area_multiplier );
+					}
+				}
+			}
+		}
+		if ( ! self::is_gpt_image_2_5_model( $model ) ) {
+			return $costs;
+		}
+		foreach ( $costs['high'] as $size => $cost ) {
+			$costs['xhigh'][ $size ] = (int) round( $cost * 1.5 );
+			$costs['max'][ $size ]   = (int) round( $cost * 2 );
+		}
+		return $costs;
+	}
+
+	/**
 	 * Get input cost per token (UC).
 	 *
 	 * @param string $model Model name or compound "entry_id::model_id" key.
@@ -184,12 +401,13 @@ class Cost_Matrix {
 	 *
 	 * @param string $size    Size/dimensions (e.g. 1024x1024).
 	 * @param string $model   Model ID (e.g. gpt-image-1.5, dall-e-3). Default from options.
-	 * @param string $quality Quality (low, medium, high). Default from options.
+	 * @param string $quality Quality (low, medium, high, xhigh, max). Default from options.
 	 * @return int UC cost.
 	 */
 	public static function get_image_cost( $size = '1024x1024', $model = null, $quality = null ) {
 		$model   = $model ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
+		$plain   = self::get_plain_model_id( $model );
 
 		$model_costs = get_option( 'alorbach_image_model_costs', array() );
 		$model_costs = is_array( $model_costs ) ? $model_costs : array();
@@ -197,11 +415,65 @@ class Cost_Matrix {
 		if ( isset( $model_costs[ $model ][ $quality ][ $size ] ) ) {
 			return (int) $model_costs[ $model ][ $quality ][ $size ];
 		}
+		if ( $plain !== $model && isset( $model_costs[ $plain ][ $quality ][ $size ] ) ) {
+			return (int) $model_costs[ $plain ][ $quality ][ $size ];
+		}
 
 		$costs = get_option( 'alorbach_image_costs', array() );
 		$costs = is_array( $costs ) ? $costs : array();
 		$costs = apply_filters( 'alorbach_image_costs', $costs );
 		return isset( $costs[ $size ] ) ? (int) $costs[ $size ] : 40000;
+	}
+
+	/**
+	 * Calculate the actual Azure GPT-Image-2 cost reported by the provider.
+	 *
+	 * The Images API returns text-input, image-input and image-output tokens.
+	 * The per-image matrix is deliberately not used when this detailed usage is
+	 * available; it remains the preflight reservation and fallback.
+	 *
+	 * @param string $model Model ID or compound entry_id::model_id key.
+	 * @param array  $usage Provider usage payload.
+	 * @return int|null API cost in UC, or null when usage-based billing does not apply.
+	 */
+	public static function calculate_image_usage_cost( $model, $usage ) {
+		if ( ! self::is_gpt_image_2_family( $model ) || ! is_array( $usage ) ) {
+			return null;
+		}
+		if ( 'azure' !== API_Client::get_provider_for_model( $model ) ) {
+			return null;
+		}
+
+		$details      = isset( $usage['input_tokens_details'] ) && is_array( $usage['input_tokens_details'] ) ? $usage['input_tokens_details'] : array();
+		$text_input   = max( 0, (int) ( $details['text_tokens'] ?? 0 ) );
+		$image_input  = max( 0, (int) ( $details['image_tokens'] ?? 0 ) );
+		$image_output = max( 0, (int) ( $usage['output_tokens'] ?? 0 ) );
+		if ( 0 === $text_input && 0 === $image_input && 0 === $image_output ) {
+			return null;
+		}
+
+		// Azure Data Zone is the conservative default for the configured production
+		// deployment. The admin can switch tiers and Refresh Azure prices persists
+		// the current Retail Prices API values for the selected tier.
+		$rates = get_option( 'alorbach_azure_gpt_image_2_token_rates', array() );
+		$rates = is_array( $rates ) ? $rates : array();
+		$rates = array_merge(
+			array(
+				'text_input'  => 5500000,
+				'image_input' => 8800000,
+				'image_output' => 33000000,
+			),
+			$rates
+		);
+		$rates = apply_filters( 'alorbach_azure_gpt_image_2_token_rates', $rates, $model, $usage );
+
+		$cost = (
+			$text_input * max( 0, (int) $rates['text_input'] ) +
+			$image_input * max( 0, (int) $rates['image_input'] ) +
+			$image_output * max( 0, (int) $rates['image_output'] )
+		) / 1000000;
+
+		return max( 0, (int) round( $cost ) );
 	}
 
 	/**

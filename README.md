@@ -228,7 +228,7 @@ Base URL: `/wp-json/alorbach/v1`
 | `GET`/`POST` | `/admin/fetch-importable-models` | Fetch importable models from providers |
 | `POST` | `/admin/import-models` | Import models |
 | `POST` | `/admin/reset-models` | Reset models to defaults |
-| `POST` | `/admin/refresh-azure-prices` | Refresh Azure retail pricing |
+| `POST` | `/admin/refresh-azure-prices` | Fetch current Azure Retail Prices, update configured Azure text-model rows, and refresh GPT-Image-2 token rates |
 | `POST` | `/admin/save-google-whitelist` | Configure Google API whitelist |
 | `GET` | `/admin/image-jobs` | List recent queue jobs for monitoring |
 | `GET` | `/admin/image-jobs/<job_id>` | Read one queue job detail payload |

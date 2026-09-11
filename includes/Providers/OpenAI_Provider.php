@@ -116,13 +116,14 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return new \WP_Error( 'no_api_key', __( 'OpenAI API key not configured.', 'alorbach-ai-gateway' ) );
 		}
 
 		$reference_images = is_array( $reference_images ) ? array_values( array_filter( $reference_images, 'is_array' ) ) : array();
+		$background       = strtolower( trim( (string) $background ) );
 
 		if ( ! empty( $reference_images ) ) {
 			if ( strpos( $model, 'gpt-image' ) !== 0 ) {
@@ -140,6 +141,9 @@ class OpenAI_Provider extends Provider_Base {
 				'quality'       => $quality ?: 'medium',
 				'output_format' => $output_format ?: 'png',
 			);
+			if ( '' !== $background ) {
+				$fields['background'] = $background;
+			}
 
 			foreach ( $fields as $name => $value ) {
 				$body .= '--' . $boundary . "\r\n";
@@ -193,6 +197,9 @@ class OpenAI_Provider extends Provider_Base {
 		if ( strpos( $model, 'gpt-image' ) === 0 ) {
 			$body['quality']       = $quality ?: 'medium';
 			$body['output_format'] = $output_format ?: 'png';
+			if ( '' !== $background ) {
+				$body['background'] = $background;
+			}
 		}
 		return array(
 			'url'     => 'https://api.openai.com/v1/images/generations',

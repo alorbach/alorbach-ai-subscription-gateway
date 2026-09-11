@@ -19,30 +19,12 @@ class REST_Proxy {
 	/**
 	 * Normalize requested image quality for a specific model.
 	 *
-	 * Codex local images accept medium/high hints only. Other providers remain
-	 * limited to low/medium/high.
-	 *
 	 * @param string $quality Raw requested quality.
 	 * @param string $model   Requested model.
 	 * @return string
 	 */
 	private static function normalize_image_quality( $quality, $model ) {
-		$quality = strtolower( trim( (string) $quality ) );
-		$model   = (string) $model;
-
-		if ( strpos( $model, 'codex-image-' ) === 0 || 'codex-local:image' === $model ) {
-			if ( in_array( $quality, array( 'medium', 'high' ), true ) ) {
-				return $quality;
-			}
-
-			return 'high';
-		}
-
-		if ( in_array( $quality, array( 'low', 'medium', 'high' ), true ) ) {
-			return $quality;
-		}
-
-		return get_option( 'alorbach_image_default_quality', 'medium' );
+		return Cost_Matrix::normalize_image_quality( $quality, $model );
 	}
 
 	/**
@@ -334,6 +316,8 @@ class REST_Proxy {
 				),
 				'size'             => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
 				'quality'           => array( 'default' => 'medium', 'sanitize_callback' => 'sanitize_text_field' ),
+				'background'        => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'output_format'     => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'                 => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 				'model'             => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'duration_seconds'  => array( 'default' => 0, 'sanitize_callback' => 'absint' ),
@@ -357,6 +341,7 @@ class REST_Proxy {
 				'size'    => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'       => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'background' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'output_format' => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
 				'client_request_id' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
@@ -374,6 +359,8 @@ class REST_Proxy {
 				'size'    => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'       => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'background' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'output_format' => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
 				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
@@ -1020,6 +1007,8 @@ class REST_Proxy {
 			$quality_explicit = is_string( $raw_quality ) ? '' !== trim( $raw_quality ) : null !== $raw_quality;
 			$quality = self::normalize_image_quality( $raw_quality ?: '', $model );
 			$output_format = $request->get_param( 'output_format' ) ?: 'png';
+			$background = Cost_Matrix::normalize_image_background( $request->get_param( 'background' ), $model );
+			$output_format = Cost_Matrix::coerce_output_format_for_background( $output_format, $background );
 			$relay_estimate = null;
 			if ( str_starts_with( (string) $model, 'model-relay:' ) ) {
 				$relay_estimate = AI_Bridge::validate_image_estimate_request( array(
@@ -1035,7 +1024,7 @@ class REST_Proxy {
 				) );
 				if ( is_wp_error( $relay_estimate ) ) return $relay_estimate;
 			}
-			$direct_options = Integration_Service::validate_direct_image_request( get_current_user_id(), $model, $size, $quality, $output_format, $n );
+			$direct_options = Integration_Service::validate_direct_image_request( get_current_user_id(), $model, $size, $quality, $output_format, $n, $background );
 			if ( is_wp_error( $direct_options ) ) {
 				return $direct_options;
 			}
@@ -1044,6 +1033,7 @@ class REST_Proxy {
 				$quality        = $direct_options['quality'];
 				$n              = $direct_options['candidate_count'];
 				$output_format  = $direct_options['output_format'];
+				$background     = $direct_options['background'];
 			}
 			if ( is_array( $relay_estimate ) ) {
 				$size = $relay_estimate['size'];
@@ -1204,27 +1194,31 @@ class REST_Proxy {
 		$model_name_img   = $model_parsed_img['model'];
 		$quality = self::normalize_image_quality( $quality, $model_name_img );
 		$billable_quality = self::get_billable_image_quality( $quality, $model_name_img );
+		$background = Cost_Matrix::normalize_image_background( $request->get_param( 'background' ), $model_name_img );
+		$output_format = Cost_Matrix::coerce_output_format_for_background( $output_format, $background );
 
 		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
 		if ( $plan_error ) {
 			return $plan_error;
 		}
-		$direct_options = Integration_Service::validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $n );
+		$direct_options = Integration_Service::validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $n, $background );
 		if ( is_wp_error( $direct_options ) ) {
 			return $direct_options;
 		}
 		if ( is_array( $direct_options ) ) {
-			$size           = $direct_options['size'];
-			$quality        = $direct_options['quality'];
-			$n              = $direct_options['candidate_count'];
-			$output_format  = $direct_options['output_format'];
+			$size             = $direct_options['size'];
+			$quality          = $direct_options['quality'];
+			$n                = $direct_options['candidate_count'];
+			$output_format    = $direct_options['output_format'];
+			$background       = $direct_options['background'];
+			$billable_quality = self::get_billable_image_quality( $quality, $model_name_img );
 		}
 
 		// Idempotency: reject duplicate image requests within a 5-minute window.
 		$time_bucket       = (int) ( time() / 300 );
 		$request_signature = '' !== $client_request_id
 			? hash( 'sha256', wp_json_encode( array( $user_id, 'image', 'client_request_id', $client_request_id ) ) )
-			: hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $output_format, $n, md5( wp_json_encode( $reference_images ) ), $time_bucket ) ) );
+			: hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $output_format, $background, $n, md5( wp_json_encode( $reference_images ) ), $time_bucket ) ) );
 		if ( Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -1246,7 +1240,7 @@ class REST_Proxy {
 			);
 		}
 
-		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images );
+		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images, array( 'background' => $background ) );
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
@@ -1264,6 +1258,7 @@ class REST_Proxy {
 		$response['provider_size'] = $size;
 		$response['quality']       = $quality;
 		$response['output_format'] = $output_format;
+		$response['background']    = $background;
 		if ( '' !== $client_request_id ) {
 			$response['client_request_id'] = $client_request_id;
 		}
@@ -1314,6 +1309,8 @@ class REST_Proxy {
 				'size'            => $request->get_param( 'size' ),
 				'n'               => $request->get_param( 'n' ),
 				'quality'         => $request->get_param( 'quality' ),
+				'background'      => $request->get_param( 'background' ),
+				'output_format'   => $request->get_param( 'output_format' ),
 				'model'           => $model,
 				'reference_images' => $request->get_param( 'reference_images' ),
 			)

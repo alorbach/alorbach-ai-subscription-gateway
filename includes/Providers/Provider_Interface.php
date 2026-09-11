@@ -80,13 +80,14 @@ interface Provider_Interface {
 	 * @param string $size         Size (e.g. 1024x1024).
 	 * @param int    $n            Number of images.
 	 * @param string $model        Model ID.
-	 * @param string $quality      Quality (low, medium, high).
+	 * @param string $quality      Quality (low, medium, high, xhigh, max).
 	 * @param string $output_format Output format (png, jpeg).
 	 * @param array  $credentials Credentials.
 	 * @param array  $reference_images Optional reference image payloads.
+	 * @param string $background   Optional background (auto, opaque, transparent).
 	 * @return array{url: string, headers: array, body: string}|WP_Error|null
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() );
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' );
 
 	/**
 	 * Build transcribe request. Return null if not supported.

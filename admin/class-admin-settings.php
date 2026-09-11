@@ -267,6 +267,9 @@ class Admin_Settings {
 			$max_tokens_options_raw     = isset( $_POST['alorbach_max_tokens_options'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_max_tokens_options'] ) ) : '';
 			$default_image_model        = isset( $_POST['alorbach_image_default_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_model'] ) ) : $default_image_model;
 			$default_image_quality      = isset( $_POST['alorbach_image_default_quality'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_quality'] ) ) : $default_image_quality;
+			if ( ! in_array( $default_image_quality, \Alorbach\AIGateway\Cost_Matrix::get_all_image_qualities(), true ) ) {
+				$default_image_quality = 'medium';
+			}
 			$default_image_format       = isset( $_POST['alorbach_image_default_output_format'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_image_default_output_format'] ) ) : $default_image_format;
 			$default_image_size         = isset( $_POST['alorbach_default_image_size'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_default_image_size'] ) ) : $default_image_size;
 			$default_audio_model        = isset( $_POST['alorbach_default_audio_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_default_audio_model'] ) ) : $default_audio_model;
@@ -414,9 +417,9 @@ class Admin_Settings {
 								<th scope="row"><label for="alorbach_image_default_quality"><?php esc_html_e( 'Default image quality', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<select name="alorbach_image_default_quality" id="alorbach_image_default_quality">
-										<option value="low" <?php selected( $default_image_quality, 'low' ); ?>><?php esc_html_e( 'Low', 'alorbach-ai-gateway' ); ?></option>
-										<option value="medium" <?php selected( $default_image_quality, 'medium' ); ?>><?php esc_html_e( 'Medium', 'alorbach-ai-gateway' ); ?></option>
-										<option value="high" <?php selected( $default_image_quality, 'high' ); ?>><?php esc_html_e( 'High', 'alorbach-ai-gateway' ); ?></option>
+										<?php foreach ( \Alorbach\AIGateway\Cost_Matrix::get_all_image_qualities() as $quality_option ) : ?>
+											<option value="<?php echo esc_attr( $quality_option ); ?>" <?php selected( $default_image_quality, $quality_option ); ?>><?php echo esc_html( \Alorbach\AIGateway\Cost_Matrix::get_image_quality_label( $quality_option ) ); ?></option>
+										<?php endforeach; ?>
 									</select>
 								</td>
 							</tr>

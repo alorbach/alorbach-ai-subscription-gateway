@@ -57,6 +57,21 @@ class Integration_Service {
 	);
 
 	/**
+	 * Direct-Azure capability profile for GPT Image 2.5 Sunburst and Flare.
+	 *
+	 * @var array<string,array<int,string>|int|string>
+	 */
+	const DIRECT_AZURE_GPT_IMAGE_2_5_CAPABILITIES = array(
+		'size_mode'                => 'preset',
+		'supported_sizes'          => array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840' ),
+		'supported_qualities'      => array( 'low', 'medium', 'high', 'xhigh', 'max' ),
+		'supported_output_formats' => array( 'image/png', 'image/jpeg' ),
+		'supported_aspect_ratios'  => array( '1:1', '2:3', '3:2', '16:9', '9:16' ),
+		'supported_backgrounds'    => array( 'auto', 'opaque', 'transparent' ),
+		'candidate_count_max'      => 1,
+	);
+
+	/**
 	 * Default plans in normalized format.
 	 *
 	 * @return array
@@ -324,7 +339,7 @@ class Integration_Service {
 		}
 		$music_analysis_models = array_values( array_filter( array_values( $audio_models ), static fn( $model ) => 0 === strpos( (string) $model, 'gpt-audio' ) ) );
 		$video_models  = $admin::get_video_models();
-		$qualities     = array( 'low', 'medium', 'high' );
+		$qualities     = Cost_Matrix::get_all_image_qualities();
 		$video_sizes   = array( '1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024' );
 		$video_lengths = array( '4', '8', '12' );
 		$ai_bridge = array(
@@ -392,12 +407,14 @@ class Integration_Service {
 	 * @param string $quality Requested quality.
 	 * @param string $output_format Canonical or MIME output format.
 	 * @param int    $candidate_count Requested image count.
+	 * @param string $background Optional background (auto, opaque, transparent).
 	 * @return array<string,mixed>|null|\WP_Error
 	 */
-	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count ) {
+	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count, $background = '' ) {
 		$model  = sanitize_text_field( (string) $model );
 		$parsed = Cost_Matrix::parse_model_key( $model );
-		if ( 'gpt-image-2' !== strtolower( (string) $parsed['model'] ) || '' === (string) $parsed['entry_id'] || 'azure' !== API_Client::get_provider_for_model( $model ) ) {
+		$capabilities_profile = self::get_direct_azure_image_capability_profile( (string) $parsed['model'] );
+		if ( null === $capabilities_profile || '' === (string) $parsed['entry_id'] || 'azure' !== API_Client::get_provider_for_model( $model ) ) {
 			return null;
 		}
 
@@ -418,7 +435,13 @@ class Integration_Service {
 		$quality      = sanitize_key( (string) $quality );
 		$format       = self::normalize_direct_image_output_format( $output_format );
 		$candidate_count = max( 1, (int) $candidate_count );
-		if ( ! in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true ) || ! in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true ) || '' === $format || ! in_array( 'image/' . $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true ) || $candidate_count > (int) ( $capabilities['candidate_count_max'] ?? 0 ) ) {
+		$background   = strtolower( trim( (string) $background ) );
+		if ( '' === $background ) {
+			$background = 'auto';
+		}
+		$supported_backgrounds = (array) ( $capabilities['supported_backgrounds'] ?? array() );
+		$background_ok = empty( $supported_backgrounds ) || in_array( $background, $supported_backgrounds, true );
+		if ( ! in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true ) || ! in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true ) || '' === $format || ! in_array( 'image/' . $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true ) || $candidate_count > (int) ( $capabilities['candidate_count_max'] ?? 0 ) || ! $background_ok ) {
 			return new \WP_Error( 'direct_image_options_unsupported', __( 'The selected direct image options are not supported by the AI Gateway.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
 		}
 
@@ -428,7 +451,25 @@ class Integration_Service {
 			'quality'         => $quality,
 			'output_format'   => $format,
 			'candidate_count' => $candidate_count,
+			'background'      => empty( $supported_backgrounds ) ? $background : ( in_array( $background, $supported_backgrounds, true ) ? $background : 'auto' ),
 		);
+	}
+
+	/**
+	 * Capability profile for a Direct-Azure GPT Image model, or null when not Direct.
+	 *
+	 * @param string $model_id Plain model ID.
+	 * @return array<string,mixed>|null
+	 */
+	private static function get_direct_azure_image_capability_profile( $model_id ) {
+		$model_id = strtolower( trim( (string) $model_id ) );
+		if ( 'gpt-image-2' === $model_id ) {
+			return self::DIRECT_AZURE_GPT_IMAGE_2_CAPABILITIES;
+		}
+		if ( Cost_Matrix::is_gpt_image_2_5_model( $model_id ) ) {
+			return self::DIRECT_AZURE_GPT_IMAGE_2_5_CAPABILITIES;
+		}
+		return null;
 	}
 
 	/**
@@ -446,13 +487,13 @@ class Integration_Service {
 		foreach ( $image_models as $gateway_model_key => $label ) {
 			$gateway_model_key = sanitize_text_field( (string) $gateway_model_key );
 			$parsed = Cost_Matrix::parse_model_key( $gateway_model_key );
-			if ( 'gpt-image-2' !== strtolower( (string) $parsed['model'] ) || '' === (string) $parsed['entry_id'] || 'azure' !== API_Client::get_provider_for_model( $gateway_model_key ) ) {
+			$capabilities = self::get_direct_azure_image_capability_profile( (string) $parsed['model'] );
+			if ( null === $capabilities || '' === (string) $parsed['entry_id'] || 'azure' !== API_Client::get_provider_for_model( $gateway_model_key ) ) {
 				continue;
 			}
 			$entry = API_Keys_Helper::get_entry_by_id( (string) $parsed['entry_id'] );
 			$credentials = API_Keys_Helper::get_credentials_for_entry( (string) $parsed['entry_id'] );
 			$has_dispatch = is_array( $entry ) && ! empty( $entry['enabled'] ) && 'azure' === (string) ( $entry['type'] ?? '' ) && is_array( $credentials ) && '' !== trim( (string) ( $credentials['api_key'] ?? '' ) ) && '' !== trim( (string) ( $credentials['endpoint'] ?? '' ) );
-			$capabilities = self::DIRECT_AZURE_GPT_IMAGE_2_CAPABILITIES;
 			$has_complete_prices = self::has_complete_direct_azure_image_pricing( (string) $parsed['model'], $matrix, $capabilities );
 			$evidenced = $has_dispatch && $has_complete_prices;
 			$contracts[] = array(

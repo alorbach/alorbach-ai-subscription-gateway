@@ -278,7 +278,7 @@ class Azure_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
@@ -286,6 +286,8 @@ class Azure_Provider extends Provider_Base {
 		}
 
 		$reference_images = is_array( $reference_images ) ? array_values( array_filter( $reference_images, 'is_array' ) ) : array();
+		$is_foundry       = self::is_foundry_endpoint( $endpoint );
+		$background       = strtolower( trim( (string) $background ) );
 		if ( ! empty( $reference_images ) ) {
 			if ( strpos( $model, 'gpt-image' ) !== 0 ) {
 				return new \WP_Error( 'reference_images_unsupported', __( 'Reference-image generation is supported only for GPT Image models.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
@@ -300,6 +302,12 @@ class Azure_Provider extends Provider_Base {
 				'quality'       => $quality ?: 'medium',
 				'output_format' => $output_format ?: 'png',
 			);
+			if ( $is_foundry ) {
+				$fields = array( 'model' => $model ) + $fields;
+			}
+			if ( '' !== $background ) {
+				$fields['background'] = $background;
+			}
 
 			foreach ( $fields as $name => $value ) {
 				$body .= '--' . $boundary . "\r\n";
@@ -335,7 +343,9 @@ class Azure_Provider extends Provider_Base {
 			$body .= '--' . $boundary . '--' . "\r\n";
 
 			return array(
-				'url'     => $endpoint . '/openai/deployments/' . $model . '/images/edits?api-version=2025-04-01-preview',
+				'url'     => $is_foundry
+					? $endpoint . '/openai/v1/images/edits'
+					: $endpoint . '/openai/deployments/' . $model . '/images/edits?api-version=2025-04-01-preview',
 				'headers' => array(
 					'Content-Type' => 'multipart/form-data; boundary=' . $boundary,
 					'api-key'      => $api_key,
@@ -362,11 +372,19 @@ class Azure_Provider extends Provider_Base {
 				'n'      => $n,
 				'size'   => $size,
 			);
+			if ( $is_foundry ) {
+				$body['model'] = $model;
+			}
 			if ( strpos( $model, 'gpt-image' ) === 0 ) {
 				$body['quality']       = $quality ?: 'medium';
 				$body['output_format'] = $output_format ?: 'png';
+				if ( '' !== $background ) {
+					$body['background'] = $background;
+				}
 			}
-			$url = $endpoint . '/openai/deployments/' . $model . '/images/generations?api-version=2025-04-01-preview';
+			$url = $is_foundry
+				? $endpoint . '/openai/v1/images/generations'
+				: $endpoint . '/openai/deployments/' . $model . '/images/generations?api-version=2025-04-01-preview';
 		}
 		return array(
 			'url'     => $url,

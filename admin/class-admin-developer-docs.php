@@ -206,7 +206,7 @@ const account = await fetch(baseUrl + '/integration/account', {
     "chat_models": ["..."],
     "image_models": ["..."],
     "image_sizes": ["..."],
-    "image_qualities": ["low", "medium", "high"],
+    "image_qualities": ["low", "medium", "high", "xhigh", "max"],
     "audio_models": ["..."],
     "video_models": ["..."],
     "video_sizes": ["..."],

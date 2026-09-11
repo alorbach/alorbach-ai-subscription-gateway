@@ -752,6 +752,7 @@ class API_Client {
 		$model          = $model_parsed['model'];
 		$quality = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
+		$background = isset( $options['background'] ) ? strtolower( trim( (string) $options['background'] ) ) : '';
 
 		$provider = self::resolve_image_provider_for_request( $model, $reference_images );
 		$prov     = Provider_Registry::get( $provider );
@@ -769,7 +770,7 @@ class API_Client {
 		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
 			for ( $index = 0; $index < $n; $index++ ) {
-				$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images ), $options );
+				$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images, $background ), $options );
 				if ( ! $request || is_wp_error( $request ) ) {
 					return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 				}
@@ -783,7 +784,7 @@ class API_Client {
 			}
 			return $merged;
 		}
-		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images ), $options );
+		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -1189,6 +1190,7 @@ class API_Client {
 		$model          = $model_parsed['model'];
 		$quality       = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
+		$background    = isset( $options['background'] ) ? strtolower( trim( (string) $options['background'] ) ) : '';
 		$provider      = self::get_provider_for_model( $model );
 
 		if ( ! empty( $reference_images ) || ! self::supports_partial_image_streaming( $model, $provider ) ) {
@@ -1209,7 +1211,7 @@ class API_Client {
 			return new \WP_Error( 'no_api_key', $message );
 		}
 
-		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images ), $options );
+		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}

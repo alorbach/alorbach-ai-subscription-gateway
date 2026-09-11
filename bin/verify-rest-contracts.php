@@ -475,7 +475,17 @@ try {
 			)
 		);
 		alorbach_require( 141900 === $image_usage_cost, 'Azure GPT-Image-2 billing must use reported text-input, image-input, and image-output tokens.' );
+		alorbach_require( 141900 === Alorbach\AIGateway\Cost_Matrix::calculate_image_usage_cost(
+			'verify-refresh-azure::gpt-image-2.5-sunburst',
+			array(
+				'input_tokens_details' => array( 'text_tokens' => 200, 'image_tokens' => 1000 ),
+				'output_tokens'        => 4000,
+			)
+		), 'Azure GPT-Image-2.5 usage billing must use the same token rates as GPT-Image-2.' );
 		alorbach_require( null === Alorbach\AIGateway\Cost_Matrix::calculate_image_usage_cost( 'verify-refresh-openai::gpt-image-2', array( 'output_tokens' => 4000 ) ), 'Usage billing must not apply Azure prices to another provider.' );
+		alorbach_require( 'xhigh' === Alorbach\AIGateway\Cost_Matrix::normalize_image_quality( 'xhigh', 'gpt-image-2.5-sunburst' ), 'GPT Image 2.5 must retain xhigh quality.' );
+		alorbach_require( 'xhigh' !== Alorbach\AIGateway\Cost_Matrix::normalize_image_quality( 'xhigh', 'gpt-image-1.5' ), 'GPT Image 1.5 must not retain xhigh quality.' );
+		alorbach_require( 'transparent' === Alorbach\AIGateway\Cost_Matrix::normalize_image_background( 'transparent', 'gpt-image-2.5-flare' ), 'GPT Image models must accept transparent backgrounds.' );
 	} finally {
 		if ( '__alorbach_missing__' === $original_refresh_cost_matrix ) {
 			delete_option( 'alorbach_cost_matrix' );

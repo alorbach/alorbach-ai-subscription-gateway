@@ -323,7 +323,7 @@ class Admin_Cost_Matrix {
 					$image_model_costs[ $model ] = array();
 					foreach ( $qualities as $quality => $sizes ) {
 						$quality = sanitize_text_field( $quality );
-						if ( ! in_array( $quality, array( 'low', 'medium', 'high' ), true ) || ! is_array( $sizes ) ) {
+						if ( ! in_array( $quality, \Alorbach\AIGateway\Cost_Matrix::get_all_image_qualities(), true ) || ! is_array( $sizes ) ) {
 							continue;
 						}
 						$image_model_costs[ $model ][ $quality ] = array();
@@ -419,6 +419,7 @@ class Admin_Cost_Matrix {
 		$rest_fetch        = rest_url( 'alorbach/v1/admin/fetch-importable-models' );
 		$rest_import       = rest_url( 'alorbach/v1/admin/import-models' );
 		$rest_reset        = rest_url( 'alorbach/v1/admin/reset-models' );
+		$rest_refresh_azure_prices = rest_url( 'alorbach/v1/admin/refresh-azure-prices' );
 		$rest_save_google_whitelist = rest_url( 'alorbach/v1/admin/save-google-whitelist' );
 		$nonce             = wp_create_nonce( 'wp_rest' );
 		$relay_discovery_path = ALORBACH_PLUGIN_DIR . 'assets/js/ai-model-relay-discovery.js';
@@ -429,11 +430,12 @@ class Admin_Cost_Matrix {
 		<div class="wrap">
 			<h1><?php esc_html_e( 'Models', 'alorbach-ai-gateway' ); ?></h1>
 			<p class="description">
-				<?php esc_html_e( 'Import enabled models from your API providers. Azure text model costs are fetched from the Azure Retail Prices API when available. Costs in UC. 1 UC = 0.000001 USD.', 'alorbach-ai-gateway' ); ?>
+				<?php esc_html_e( 'Import enabled models from your API providers. Azure text-model and GPT-Image-2 token rates are fetched from the Azure Retail Prices API when available. Refresh Azure prices replaces existing Azure rates with the current Retail Prices values. Costs in UC. 1 UC = 0.000001 USD.', 'alorbach-ai-gateway' ); ?>
 			</p>
 			<p>
 				<button type="button" class="button button-primary" id="alorbach_import_models_btn"><?php esc_html_e( 'Import models', 'alorbach-ai-gateway' ); ?></button>
 				<button type="button" class="button" id="alorbach_reset_models_btn"><?php esc_html_e( 'Reset models', 'alorbach-ai-gateway' ); ?></button>
+				<button type="button" class="button" id="alorbach_refresh_azure_prices_btn"><?php esc_html_e( 'Refresh Azure prices', 'alorbach-ai-gateway' ); ?></button>
 				<span id="alorbach_import_result"></span>
 			</p>
 
@@ -711,7 +713,6 @@ class Admin_Cost_Matrix {
 
 				<?php
 				$gpt_sizes = array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
-				$gpt_qualities = array( 'low', 'medium', 'high' );
 				// Build a map of plain model name => list of compound keys stored in $image_models.
 				$img_model_entries_map = array();
 				foreach ( $image_models as $ck ) {
@@ -728,10 +729,11 @@ class Admin_Cost_Matrix {
 				if ( ! empty( $image_model_costs ) ) :
 					?>
 				<h3><?php esc_html_e( 'Image models: Cost per image by quality and size', 'alorbach-ai-gateway' ); ?></h3>
-				<p class="description"><?php esc_html_e( 'Cost varies by quality (low/medium/high) and resolution. Values in UC; USD shown next to each field. Costs are shared per model; each entry below has its own Remove/Test button.', 'alorbach-ai-gateway' ); ?></p>
+				<p class="description"><?php esc_html_e( 'Azure GPT-Image-2 prices are updated from Azure Data Zone pricing. The final amount is calculated automatically from the usage reported after generation.', 'alorbach-ai-gateway' ); ?></p>
 				<?php foreach ( $image_model_costs as $img_model => $qualities ) :
 					$is_gpt = ( strpos( $img_model, 'gpt-image' ) === 0 );
 					$sizes_for_model = $is_gpt ? $gpt_sizes : array( '1024x1024' );
+					$gpt_qualities = \Alorbach\AIGateway\Cost_Matrix::get_supported_image_qualities( $img_model );
 					// All compound keys (or the plain name if none) that map to this cost entry.
 					$compounds_for_model = isset( $img_model_entries_map[ $img_model ] ) && ! empty( $img_model_entries_map[ $img_model ] )
 						? $img_model_entries_map[ $img_model ]
@@ -753,7 +755,7 @@ class Admin_Cost_Matrix {
 								$row = isset( $qualities[ $q ] ) ? $qualities[ $q ] : array();
 								?>
 								<tr>
-									<td><?php echo esc_html( ucfirst( $q ) ); ?></td>
+									<td><?php echo esc_html( \Alorbach\AIGateway\Cost_Matrix::get_image_quality_label( $q ) ); ?></td>
 									<?php foreach ( $sizes_for_model as $s ) :
 										$val = isset( $row[ $s ] ) ? (int) $row[ $s ] : '';
 										$val_int = (int) $val;
@@ -956,6 +958,7 @@ class Admin_Cost_Matrix {
 				var restFetch = <?php echo wp_json_encode( $rest_fetch ); ?>;
 				var restImport = <?php echo wp_json_encode( $rest_import ); ?>;
 				var restReset = <?php echo wp_json_encode( $rest_reset ); ?>;
+				var restRefreshAzurePrices = <?php echo wp_json_encode( $rest_refresh_azure_prices ); ?>;
 				var restSaveGoogleWhitelist = <?php echo wp_json_encode( $rest_save_google_whitelist ); ?>;
 				var okText = <?php echo wp_json_encode( __( 'OK', 'alorbach-ai-gateway' ) ); ?>;
 				var errText = <?php echo wp_json_encode( __( 'Error', 'alorbach-ai-gateway' ) ); ?>;
@@ -1628,6 +1631,26 @@ class Admin_Cost_Matrix {
 				});
 				document.getElementById('alorbach_reset_models_btn').addEventListener('click', function() {
 					openImportModal('reset');
+				});
+				document.getElementById('alorbach_refresh_azure_prices_btn').addEventListener('click', function() {
+					var btn = this;
+					var resultEl = document.getElementById('alorbach_import_result');
+					var origText = btn.textContent;
+					btn.disabled = true;
+					btn.textContent = '...';
+					setLoading(1);
+					fetch(restRefreshAzurePrices, { method: 'POST', headers: headers, body: '{}' })
+						.then(function(r) { return r.json(); })
+						.then(function(data) {
+							setResult(resultEl, data.success, data.message || '');
+							if (data.success && (Number(data.updated || 0) > 0 || data.image_rates_updated)) {
+								window.location.reload();
+							}
+						})
+						.catch(function(err) {
+							setResult(resultEl, false, err.message);
+						})
+						.finally(function() { btn.disabled = false; btn.textContent = origText; setLoading(-1); });
 				});
 			})();
 			</script>

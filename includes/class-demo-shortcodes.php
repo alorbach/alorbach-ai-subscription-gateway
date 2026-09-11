@@ -103,6 +103,10 @@ class Demo_Shortcodes {
 							<?php esc_html_e( 'Quality', 'alorbach-ai-gateway' ); ?>
 							<select class="alorbach-demo-quality-select"></select>
 						</label>
+						<label class="alorbach-demo-background-wrap" style="display:none;">
+							<?php esc_html_e( 'Background', 'alorbach-ai-gateway' ); ?>
+							<select class="alorbach-demo-background-select"></select>
+						</label>
 						<label class="alorbach-demo-n-wrap">
 							<?php esc_html_e( 'Number', 'alorbach-ai-gateway' ); ?>
 							<input type="number" class="alorbach-demo-n" value="1" min="1" max="10">

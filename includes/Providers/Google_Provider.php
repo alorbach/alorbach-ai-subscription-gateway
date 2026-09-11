@@ -58,7 +58,7 @@ class Google_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' ) {
 		$api_key = $credentials['api_key'] ?? '';
 		if ( empty( $api_key ) ) {
 			return null;

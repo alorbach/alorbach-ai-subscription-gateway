@@ -614,11 +614,6 @@ class Model_Importer {
 			}
 			$image_to_add = array_unique( $image_to_add );
 		}
-		$gpt_image_default_costs = array(
-			'low'    => array( '1024x1024' => 9000, '1024x1536' => 13000, '1536x1024' => 13000 ),
-			'medium' => array( '1024x1024' => 34000, '1024x1536' => 50000, '1536x1024' => 50000 ),
-			'high'   => array( '1024x1024' => 133000, '1024x1536' => 200000, '1536x1024' => 200000 ),
-		);
 		foreach ( $image_to_add as $item ) {
 			$item = is_string( $item ) ? $item : (string) $item;
 			if ( empty( $item ) ) {
@@ -648,7 +643,7 @@ class Model_Importer {
 				}
 				// Costs are keyed by plain model name and shared across all entries.
 				if ( strpos( $item, 'gpt-image' ) === 0 && ! isset( $image_model_costs[ $item ] ) ) {
-					$image_model_costs[ $item ] = $gpt_image_default_costs;
+					$image_model_costs[ $item ] = Cost_Matrix::get_default_gpt_image_costs( $item );
 				}
 				// Non-GPT image models default to a flat starter cost until tuned manually.
 				if ( ! isset( $image_model_costs[ $item ] ) ) {
@@ -751,6 +746,157 @@ class Model_Importer {
 	}
 
 	/**
+	 * Refresh all existing text-model price rows assigned to Azure accounts.
+	 *
+	 * The explicit Admin refresh action intentionally replaces the current cost
+	 * matrix values for Azure rows with the current Azure Retail Prices values.
+	 * Rows for other providers and Azure models without a matching retail meter
+	 * are left untouched.
+	 *
+	 * @param array|null $azure_prices Optional price map for verification. Null fetches fresh Azure Retail Prices.
+	 * @return array{success: bool, updated: int, unchanged: int, unmatched: int, image_rates_updated?: bool, message: string}
+	 */
+	public static function refresh_azure_text_costs( $azure_prices = null ) {
+		$fetch_live_prices = null === $azure_prices;
+		$cost_data = Cost_Matrix::get_cost_matrix();
+		$models    = isset( $cost_data['models'] ) && is_array( $cost_data['models'] ) ? $cost_data['models'] : array();
+		$azure_ids = array();
+
+		foreach ( API_Keys_Helper::get_entries() as $entry ) {
+			if ( 'azure' === ( $entry['type'] ?? '' ) && ! empty( $entry['id'] ) ) {
+				$azure_ids[ (string) $entry['id'] ] = true;
+			}
+		}
+
+		$azure_row_count = 0;
+		foreach ( $models as $row ) {
+			if ( isset( $azure_ids[ (string) ( $row['entry_id'] ?? '' ) ] ) ) {
+				$azure_row_count++;
+			}
+		}
+
+		if ( null === $azure_prices ) {
+			Azure_Retail_Prices::clear_cache();
+			$azure_prices = Azure_Retail_Prices::fetch_text_costs( '', 'USD' );
+		}
+		if ( $azure_row_count > 0 && ( ! is_array( $azure_prices ) || empty( $azure_prices ) ) ) {
+			return array(
+				'success'   => false,
+				'updated'   => 0,
+				'unchanged' => 0,
+				'unmatched' => $azure_row_count,
+				'message'   => __( 'Azure Retail Prices could not be retrieved. Existing costs were not changed.', 'alorbach-ai-gateway' ),
+			);
+		}
+
+		$updated   = 0;
+		$unchanged = 0;
+		$unmatched = 0;
+		foreach ( $models as $index => $row ) {
+			if ( ! isset( $azure_ids[ (string) ( $row['entry_id'] ?? '' ) ] ) ) {
+				continue;
+			}
+
+			$model = isset( $row['model'] ) ? (string) $row['model'] : '';
+			$costs = self::get_azure_text_costs( $model, $azure_prices );
+			if ( null === $costs ) {
+				$unmatched++;
+				continue;
+			}
+
+			if (
+				(int) ( $row['input'] ?? 0 ) === $costs['input'] &&
+				(int) ( $row['output'] ?? 0 ) === $costs['output'] &&
+				(int) ( $row['cached'] ?? 0 ) === $costs['cached']
+			) {
+				$unchanged++;
+				continue;
+			}
+
+			$models[ $index ]['input']  = $costs['input'];
+			$models[ $index ]['output'] = $costs['output'];
+			$models[ $index ]['cached'] = $costs['cached'];
+			$updated++;
+		}
+
+		if ( $updated > 0 ) {
+			Cost_Matrix::save_cost_matrix( array(
+				'default' => $cost_data['default'] ?? array(),
+				'models'  => $models,
+			) );
+		}
+
+		$image_rates_updated = false;
+		$image_rates         = $fetch_live_prices ? Azure_Retail_Prices::fetch_gpt_image_2_costs( 'USD' ) : array();
+		$image_tier          = (string) get_option( 'alorbach_azure_gpt_image_2_price_tier', 'data_zone' );
+		if ( ! in_array( $image_tier, array( 'global', 'data_zone' ), true ) ) {
+			$image_tier = 'data_zone';
+		}
+		if ( isset( $image_rates[ $image_tier ] ) ) {
+			update_option( 'alorbach_azure_gpt_image_2_token_rates', $image_rates[ $image_tier ] );
+			$image_model_costs = get_option( 'alorbach_image_model_costs', array() );
+			$image_model_costs = is_array( $image_model_costs ) ? $image_model_costs : array();
+			$image_model_entries = get_option( 'alorbach_image_model_entries', array() );
+			$image_model_entries = is_array( $image_model_entries ) ? $image_model_entries : array();
+			$global_output_rate = 30000000;
+			$rate_multiplier    = (float) $image_rates[ $image_tier ]['image_output'] / $global_output_rate;
+			$base_estimates     = array(
+				'low'    => array( '1024x1024' => 9000, '1024x1536' => 13000, '1536x1024' => 13000 ),
+				'medium' => array( '1024x1024' => 34000, '1024x1536' => 50000, '1536x1024' => 50000 ),
+				'high'   => array( '1024x1024' => 133000, '1024x1536' => 200000, '1536x1024' => 200000 ),
+			);
+			foreach ( $base_estimates['high'] as $size => $cost ) {
+				$base_estimates['xhigh'][ $size ] = (int) round( $cost * 1.5 );
+				$base_estimates['max'][ $size ]   = (int) round( $cost * 2 );
+			}
+			$image_sizes        = array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840', 'auto' );
+			foreach ( $image_model_costs as $image_model => $qualities ) {
+				$image_entry_id = (string) ( $image_model_entries[ $image_model ] ?? '' );
+				if ( ! Cost_Matrix::is_gpt_image_2_family( $image_model ) || ! isset( $azure_ids[ $image_entry_id ] ) ) {
+					continue;
+				}
+				$model_estimates = $base_estimates;
+				if ( ! Cost_Matrix::is_gpt_image_2_5_model( $image_model ) ) {
+					unset( $model_estimates['xhigh'], $model_estimates['max'] );
+				}
+				foreach ( $model_estimates as $quality => $sizes ) {
+					foreach ( $image_sizes as $size ) {
+						if ( isset( $sizes[ $size ] ) ) {
+							$base_cost = $sizes[ $size ];
+						} elseif ( 'auto' === $size ) {
+							$base_cost = $sizes['1024x1024'];
+						} elseif ( preg_match( '/^(\d+)x(\d+)$/', $size, $dimensions ) ) {
+							$area_multiplier = ( (int) $dimensions[1] * (int) $dimensions[2] ) / ( 1024 * 1024 );
+							$base_cost       = $sizes['1024x1024'] * $area_multiplier;
+						} else {
+							continue;
+						}
+						$image_model_costs[ $image_model ][ $quality ][ $size ] = (int) round( $base_cost * $rate_multiplier );
+					}
+				}
+			}
+			update_option( 'alorbach_image_model_costs', $image_model_costs );
+			$image_rates_updated = true;
+		}
+
+		return array(
+			'success'   => true,
+			'updated'   => $updated,
+			'unchanged' => $unchanged,
+			'unmatched' => $unmatched,
+			'image_rates_updated' => $image_rates_updated,
+			'message'   => sprintf(
+				/* translators: 1: updated Azure text model price rows, 2: unchanged rows, 3: rows without a matching Azure Retail meter, 4: GPT-Image-2 token rates update status. */
+				__( 'Updated %1$d Azure text model price rows; %2$d unchanged; %3$d could not be matched to an Azure Retail meter. GPT-Image-2 token rates: %4$s.', 'alorbach-ai-gateway' ),
+				$updated,
+				$unchanged,
+				$unmatched,
+				$image_rates_updated ? __( 'updated', 'alorbach-ai-gateway' ) : __( 'not available', 'alorbach-ai-gateway' )
+			),
+		);
+	}
+
+	/**
 	 * Resolve text model costs from Azure API or known costs.
 	 *
 	 * @param string $model        Model ID.
@@ -760,10 +906,10 @@ class Model_Importer {
 	 */
 	private static function resolve_text_costs( $model, $provider, $azure_prices ) {
 		$default = array( 'input' => 400000, 'output' => 1600000, 'cached' => 40000 );
-		if ( $provider === 'azure' && ! empty( $azure_prices ) ) {
-			$base = self::get_model_base_for_pricing( $model );
-			if ( isset( $azure_prices[ $base ] ) && self::tier_valid( $azure_prices[ $base ] ) ) {
-				return $azure_prices[ $base ];
+		if ( $provider === 'azure' ) {
+			$azure_costs = self::get_azure_text_costs( $model, $azure_prices );
+			if ( null !== $azure_costs ) {
+				return $azure_costs;
 			}
 		}
 		if ( isset( self::$known_costs[ $model ] ) ) {
@@ -771,6 +917,28 @@ class Model_Importer {
 		}
 		$base = self::get_model_base_for_pricing( $model );
 		return isset( self::$known_costs[ $base ] ) ? self::$known_costs[ $base ] : $default;
+	}
+
+	/**
+	 * Get a valid Azure Retail Prices tier for a model, if available.
+	 *
+	 * @param string $model        Model ID.
+	 * @param array  $azure_prices Azure Retail Prices data.
+	 * @return array{input: int, output: int, cached: int}|null
+	 */
+	private static function get_azure_text_costs( $model, $azure_prices ) {
+		if ( ! is_array( $azure_prices ) || empty( $azure_prices ) ) {
+			return null;
+		}
+		$base = self::get_model_base_for_pricing( $model );
+		if ( ! isset( $azure_prices[ $base ] ) || ! self::tier_valid( $azure_prices[ $base ] ) ) {
+			return null;
+		}
+		return array(
+			'input'  => (int) $azure_prices[ $base ]['input'],
+			'output' => (int) $azure_prices[ $base ]['output'],
+			'cached' => isset( $azure_prices[ $base ]['cached'] ) ? (int) $azure_prices[ $base ]['cached'] : 0,
+		);
 	}
 
 	/**

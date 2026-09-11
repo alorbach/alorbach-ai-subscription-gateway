@@ -42,7 +42,7 @@ class AI_Bridge_Provider extends Provider_Base {
 		return new \WP_Error( 'browser_local_required', __( 'AI Model Relay requests must be executed through the user browser and tray app.', 'alorbach-ai-gateway' ) );
 	}
 
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' ) {
 		return new \WP_Error( 'browser_local_required', __( 'AI Model Relay image requests must be executed through the user browser and tray app.', 'alorbach-ai-gateway' ) );
 	}
 

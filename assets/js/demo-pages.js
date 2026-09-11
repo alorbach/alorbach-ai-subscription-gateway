@@ -706,6 +706,8 @@
 
 		var qualitySelect = container.querySelector('.alorbach-demo-quality-select');
 		var qualityWrap = container.querySelector('.alorbach-demo-quality-wrap');
+		var backgroundSelect = container.querySelector('.alorbach-demo-background-select');
+		var backgroundWrap = container.querySelector('.alorbach-demo-background-wrap');
 
 		var modelSelect = container.querySelector('.alorbach-demo-model-select');
 		var referenceInput = container.querySelector('.alorbach-demo-image-reference');
@@ -735,14 +737,62 @@
 			return String(model || '').indexOf('codex-image-') === 0 || model === 'codex-local:image';
 		}
 
+		function plainImageModel(model) {
+			var id = String(model || '');
+			var parts = id.split('::');
+			return parts.length > 1 ? parts[parts.length - 1] : id;
+		}
+
+		function isGptImage25Model(model) {
+			var id = plainImageModel(model);
+			return id.indexOf('gpt-image-2.5-sunburst') === 0 || id.indexOf('gpt-image-2.5-flare') === 0;
+		}
+
+		function getModelCapabilities(model) {
+			var caps = (imageConfig && imageConfig.model_capabilities) || {};
+			return caps[model] || caps[plainImageModel(model)] || null;
+		}
+
+		function qualityLabel(opt) {
+			var labels = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+			return labels[opt] || (opt.charAt(0).toUpperCase() + opt.slice(1));
+		}
+
+		function backgroundLabel(opt) {
+			var labels = { auto: 'Auto', opaque: 'Opaque', transparent: 'Transparent' };
+			return labels[opt] || (opt.charAt(0).toUpperCase() + opt.slice(1));
+		}
+
 		function getAllowedQualityOptions(model, qualityConfig) {
-			var options = (qualityConfig && qualityConfig.options && qualityConfig.options.length)
-				? qualityConfig.options.slice()
-				: ['low', 'medium', 'high'];
+			var modelCaps = getModelCapabilities(model);
+			var options;
+			if (modelCaps && modelCaps.supported_qualities && modelCaps.supported_qualities.length) {
+				options = modelCaps.supported_qualities.slice();
+			} else if (isGptImage25Model(model)) {
+				options = ['low', 'medium', 'high', 'xhigh', 'max'];
+			} else {
+				options = (qualityConfig && qualityConfig.options && qualityConfig.options.length)
+					? qualityConfig.options.slice()
+					: ['low', 'medium', 'high'];
+				if (!isGptImage25Model(model)) {
+					options = options.filter(function (opt) { return ['low', 'medium', 'high'].indexOf(opt) !== -1; });
+				}
+			}
 			if (isCodexImageModel(model)) {
 				options = options.filter(function (opt) { return opt !== 'low'; });
 			}
 			return options.length ? options : ['medium', 'high'];
+		}
+
+		function getAllowedBackgroundOptions(model) {
+			var modelCaps = getModelCapabilities(model);
+			if (modelCaps && modelCaps.supported_backgrounds && modelCaps.supported_backgrounds.length) {
+				return modelCaps.supported_backgrounds.slice();
+			}
+			if (plainImageModel(model).indexOf('gpt-image') === 0) {
+				return ['auto', 'opaque', 'transparent'];
+			}
+			return [];
 		}
 
 		function getDefaultQualityForModel(model, qualityConfig) {
@@ -766,11 +816,36 @@
 			options.forEach(function (opt) {
 				var o = document.createElement('option');
 				o.value = opt;
-				o.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+				o.textContent = qualityLabel(opt);
 				if (opt === desired) o.selected = true;
 				qualitySelect.appendChild(o);
 			});
 			container.dataset.quality = desired;
+		}
+
+		function syncBackgroundOptions() {
+			if (!backgroundSelect) return;
+			var model = currentImageModel();
+			var options = getAllowedBackgroundOptions(model);
+			var desired = (backgroundSelect.value || container.dataset.background || 'auto').toLowerCase();
+			if (options.indexOf(desired) === -1) desired = options[0] || 'auto';
+			backgroundSelect.innerHTML = '';
+			options.forEach(function (opt) {
+				var o = document.createElement('option');
+				o.value = opt;
+				o.textContent = backgroundLabel(opt);
+				if (opt === desired) o.selected = true;
+				backgroundSelect.appendChild(o);
+			});
+			container.dataset.background = desired;
+		}
+
+		function syncBackgroundVisibility() {
+			if (!backgroundWrap) return;
+			var q = imageConfig && imageConfig.quality ? imageConfig.quality : {};
+			var canSelectQuality = isAllowSelectEnabled(q.allow_select);
+			var options = getAllowedBackgroundOptions(currentImageModel());
+			backgroundWrap.style.display = (canSelectQuality && options.length) ? '' : 'none';
 		}
 
 		function syncQualityVisibility() {
@@ -820,6 +895,8 @@
 			container.dataset.quality = getDefaultQualityForModel(container.dataset.model, q);
 			syncQualityOptions();
 			syncQualityVisibility();
+			syncBackgroundOptions();
+			syncBackgroundVisibility();
 			refreshLocalCodexStatus(container, currentImageModel());
 			refreshImageCost();
 		});
@@ -832,6 +909,9 @@
 			n = Math.min(10, Math.max(1, n));
 			var estimateParams = { type: 'image', size: size, model: model, n: n };
 			if (qualityWrap && qualityWrap.style.display !== 'none') estimateParams.quality = quality;
+			if (backgroundWrap && backgroundWrap.style.display !== 'none') {
+				estimateParams.background = (backgroundSelect && backgroundSelect.value) || container.dataset.background || 'auto';
+			}
 			updateCostEstimate(container, 'image', estimateParams, container.querySelector('.alorbach-demo-cost'));
 		}
 
@@ -840,11 +920,17 @@
 			container.dataset.model = modelSelect.value || container.dataset.model || 'dall-e-3';
 			syncQualityOptions();
 			syncQualityVisibility();
+			syncBackgroundOptions();
+			syncBackgroundVisibility();
 			refreshLocalCodexStatus(container, currentImageModel());
 			refreshImageCost();
 		});
 		if (qualitySelect) qualitySelect.addEventListener('change', function () {
 			container.dataset.quality = qualitySelect.value || container.dataset.quality || 'medium';
+			refreshImageCost();
+		});
+		if (backgroundSelect) backgroundSelect.addEventListener('change', function () {
+			container.dataset.background = backgroundSelect.value || container.dataset.background || 'auto';
 			refreshImageCost();
 		});
 		if (nInput) nInput.addEventListener('change', refreshImageCost);
@@ -1228,6 +1314,9 @@
 			var body = { prompt: prompt, size: size, n: n };
 			if (modelWrap && modelWrap.style.display !== 'none') body.model = model;
 			if (qualityWrap && qualityWrap.style.display !== 'none') body.quality = quality;
+			if (backgroundWrap && backgroundWrap.style.display !== 'none') {
+				body.background = (backgroundSelect && backgroundSelect.value) || container.dataset.background || 'auto';
+			}
 
 			if (isLocalCodexModel(model)) {
 				body.model = model;

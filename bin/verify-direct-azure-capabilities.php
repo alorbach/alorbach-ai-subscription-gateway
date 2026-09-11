@@ -13,6 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit( 1 );
 }
 
+use Alorbach\AIGateway\Cost_Matrix;
 use Alorbach\AIGateway\Integration_Service;
 use Alorbach\AIGateway\REST_Proxy;
 
@@ -55,6 +56,29 @@ try {
 	$invalid_count = Integration_Service::validate_direct_image_request( (int) $admin->ID, $model_key, '1024x1024', 'medium', 'png', 2 );
 	alorbach_direct_azure_require( is_wp_error( $invalid_size ) && 'direct_image_options_unsupported' === $invalid_size->get_error_code(), 'Direct Azure must reject the legacy auto size.' );
 	alorbach_direct_azure_require( is_wp_error( $invalid_count ) && 'direct_image_options_unsupported' === $invalid_count->get_error_code(), 'Direct Azure must reject candidate counts above one.' );
+
+	alorbach_direct_azure_require( 'xhigh' === Cost_Matrix::normalize_image_quality( 'xhigh', 'gpt-image-2.5-sunburst' ), 'GPT Image 2.5 must keep xhigh.' );
+	alorbach_direct_azure_require( 'xhigh' === Cost_Matrix::normalize_image_quality( 'extra_high', 'gpt-image-2.5-flare-2026-09-08' ), 'GPT Image 2.5 must map extra_high to xhigh.' );
+	alorbach_direct_azure_require( 'max' === Cost_Matrix::normalize_image_quality( 'max', 'gpt-image-2.5-flare' ), 'GPT Image 2.5 must keep max.' );
+	alorbach_direct_azure_require( 'xhigh' !== Cost_Matrix::normalize_image_quality( 'xhigh', 'gpt-image-1.5' ), 'Older GPT Image models must not accept xhigh.' );
+	alorbach_direct_azure_require( 'transparent' === Cost_Matrix::normalize_image_background( 'transparent', 'gpt-image-2.5-sunburst' ), 'GPT Image 2.5 must accept transparent backgrounds.' );
+	alorbach_direct_azure_require( 'png' === Cost_Matrix::coerce_output_format_for_background( 'jpeg', 'transparent' ), 'Transparent JPEG output must coerce to PNG.' );
+
+	$two_five_contracts = array_values( array_filter( (array) ( $config['capabilities']['models'] ?? array() ), static function ( $candidate ) {
+		if ( ! is_array( $candidate ) ) {
+			return false;
+		}
+		$key = (string) ( $candidate['gateway_model_key'] ?? '' );
+		$plain = strpos( $key, '::' ) !== false ? explode( '::', $key, 2 )[1] : $key;
+		return Cost_Matrix::is_gpt_image_2_5_model( $plain );
+	} ) );
+	foreach ( $two_five_contracts as $two_five ) {
+		$caps = is_array( $two_five['image_capabilities'] ?? null ) ? $two_five['image_capabilities'] : array();
+		alorbach_direct_azure_require( in_array( 'xhigh', (array) ( $caps['supported_qualities'] ?? array() ), true ) && in_array( 'max', (array) ( $caps['supported_qualities'] ?? array() ), true ), 'Direct GPT Image 2.5 contracts must advertise xhigh and max.' );
+		alorbach_direct_azure_require( in_array( 'transparent', (array) ( $caps['supported_backgrounds'] ?? array() ), true ), 'Direct GPT Image 2.5 contracts must advertise transparent backgrounds.' );
+		$accepted = Integration_Service::validate_direct_image_request( (int) $admin->ID, (string) $two_five['gateway_model_key'], '1024x1024', 'xhigh', 'png', 1, 'transparent' );
+		alorbach_direct_azure_require( is_array( $accepted ) && 'xhigh' === ( $accepted['quality'] ?? '' ) && 'transparent' === ( $accepted['background'] ?? '' ), 'Direct GPT Image 2.5 must accept xhigh with a transparent background.' );
+	}
 
 	$estimate_request = new WP_REST_Request( 'GET', '/alorbach/v1/me/estimate' );
 	$estimate_request->set_query_params( array( 'type' => 'image', 'model' => $model_key, 'size' => '1024x1536', 'quality' => 'medium', 'output_format' => 'jpeg', 'n' => 1 ) );

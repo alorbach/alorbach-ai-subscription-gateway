@@ -136,22 +136,7 @@ class Image_Jobs {
 	 * @return string
 	 */
 	private static function normalize_image_quality( $quality, $model ) {
-		$quality = strtolower( trim( (string) $quality ) );
-		$model   = (string) $model;
-
-		if ( strpos( $model, 'codex-image-' ) === 0 ) {
-			if ( in_array( $quality, array( 'medium', 'high' ), true ) ) {
-				return $quality;
-			}
-
-			return 'high';
-		}
-
-		if ( in_array( $quality, array( 'low', 'medium', 'high' ), true ) ) {
-			return $quality;
-		}
-
-		return get_option( 'alorbach_image_default_quality', 'medium' );
+		return Cost_Matrix::normalize_image_quality( $quality, $model );
 	}
 
 	/**
@@ -184,6 +169,7 @@ class Image_Jobs {
 		$model           = isset( $args['model'] ) && $args['model'] ? sanitize_text_field( $args['model'] ) : get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		$quality         = isset( $args['quality'] ) && $args['quality'] ? sanitize_text_field( $args['quality'] ) : get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format   = isset( $args['output_format'] ) && $args['output_format'] ? sanitize_text_field( $args['output_format'] ) : get_option( 'alorbach_image_default_output_format', 'png' );
+		$background      = Cost_Matrix::normalize_image_background( $args['background'] ?? '', $model );
 		$aspect_ratio    = isset( $args['aspect_ratio'] ) ? sanitize_text_field( $args['aspect_ratio'] ) : '';
 		$provider_options = isset( $args['provider_options'] ) && is_array( $args['provider_options'] ) ? $args['provider_options'] : array();
 		$n               = isset( $args['n'] ) ? max( 1, min( 10, (int) $args['n'] ) ) : 1;
@@ -192,6 +178,20 @@ class Image_Jobs {
 		);
 		$quality         = self::normalize_image_quality( $quality, $model );
 		$billable_quality = self::get_billable_image_quality( $quality, $model );
+		$output_format   = Cost_Matrix::coerce_output_format_for_background( $output_format, $background );
+
+		$direct_options = Integration_Service::validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $n, $background );
+		if ( is_wp_error( $direct_options ) ) {
+			return $direct_options;
+		}
+		if ( is_array( $direct_options ) ) {
+			$size             = $direct_options['size'];
+			$quality          = $direct_options['quality'];
+			$n                = $direct_options['candidate_count'];
+			$output_format    = $direct_options['output_format'];
+			$background       = $direct_options['background'];
+			$billable_quality = self::get_billable_image_quality( $quality, $model );
+		}
 
 		if ( '' === $original_prompt ) {
 			$original_prompt = $prompt;
@@ -247,6 +247,7 @@ class Image_Jobs {
 			'size'               => $size,
 			'n'                  => $n,
 			'quality'            => $quality,
+			'background'         => $background,
 			'output_format'      => $output_format,
 			'aspect_ratio'       => $aspect_ratio,
 			'provider_options'   => $provider_options,
@@ -258,7 +259,7 @@ class Image_Jobs {
 			'cost_credits'       => User_Display::uc_to_credits( $cost ),
 			'cost_usd'           => User_Display::uc_to_usd( $cost ),
 			'api_cost_uc'        => $api_cost,
-			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $output_format, $aspect_ratio, $provider_options, $n, md5( wp_json_encode( $reference_images ) ), time() ) ) ),
+			'request_signature'  => hash( 'sha256', wp_json_encode( array( $user_id, 'image_job', $prompt, $size, $model, $quality, $output_format, $background, $aspect_ratio, $provider_options, $n, md5( wp_json_encode( $reference_images ) ), time() ) ) ),
 			'deduction_applied'  => false,
 			'error'              => '',
 			'revised_prompt'     => '',
@@ -732,8 +733,9 @@ class Image_Jobs {
 				},
 				$provider_reference_images,
 				array(
-					'aspect_ratio'    => $job['aspect_ratio'] ?? '',
+					'aspect_ratio'     => $job['aspect_ratio'] ?? '',
 					'provider_options' => $job['provider_options'] ?? array(),
+					'background'       => $job['background'] ?? '',
 				)
 			);
 		} else {
@@ -747,8 +749,9 @@ class Image_Jobs {
 				$job['output_format'] ?? null,
 				$provider_reference_images,
 				array(
-					'aspect_ratio'    => $job['aspect_ratio'] ?? '',
+					'aspect_ratio'     => $job['aspect_ratio'] ?? '',
 					'provider_options' => $job['provider_options'] ?? array(),
+					'background'       => $job['background'] ?? '',
 				)
 			);
 		}
@@ -776,6 +779,14 @@ class Image_Jobs {
 		$job['internal_prompt'] = isset( $response['internal_prompt'] ) && is_string( $response['internal_prompt'] ) ? $response['internal_prompt'] : (string) ( $job['internal_prompt'] ?? '' );
 		$job['provider_usage'] = isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : ( isset( $job['provider_usage'] ) && is_array( $job['provider_usage'] ) ? $job['provider_usage'] : array() );
 		$job['provider_details'] = isset( $response['provider_details'] ) && is_array( $response['provider_details'] ) ? $response['provider_details'] : ( isset( $job['provider_details'] ) && is_array( $job['provider_details'] ) ? $job['provider_details'] : array() );
+		$usage_api_cost = Cost_Matrix::calculate_image_usage_cost( $job['model'], $job['provider_usage'] );
+		if ( null !== $usage_api_cost ) {
+			$job['api_cost_uc'] = $usage_api_cost;
+			$job['cost_uc']     = Cost_Matrix::apply_user_cost( $usage_api_cost, $job['model'] );
+			$job['cost_credits'] = User_Display::uc_to_credits( $job['cost_uc'] );
+			$job['cost_usd']     = User_Display::uc_to_usd( $job['cost_uc'] );
+			self::append_job_log( $job_id, array( 'event' => 'usage_billing', 'msg' => sprintf( 'Azure GPT-Image-2 usage billing applied: api_cost_uc=%d.', $job['api_cost_uc'] ) ) );
+		}
 		$response_data_count = count( isset( $response['data'] ) && is_array( $response['data'] ) ? $response['data'] : array() );
 		self::append_job_log( $job_id, array(
 			'event' => 'api_response',

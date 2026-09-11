@@ -198,8 +198,12 @@ Request fields:
 - `prompt` required string
 - `size` optional string
 - `n` optional integer
-- `quality` optional string
+- `quality` optional string (`low`, `medium`, `high`; GPT Image 2.5 also accepts `xhigh` and `max`)
+- `background` optional string for GPT Image models (`auto`, `opaque`, `transparent`)
+- `output_format` optional string (`png`, `jpeg`)
 - `model` optional string
+
+Transparent backgrounds require PNG (JPEG is coerced to PNG).
 
 Use this when:
 
@@ -216,7 +220,9 @@ Request fields:
 - `prompt` required string
 - `size` optional string
 - `n` optional integer
-- `quality` optional string
+- `quality` optional string (`low`, `medium`, `high`; GPT Image 2.5 also accepts `xhigh` and `max`)
+- `background` optional string for GPT Image models (`auto`, `opaque`, `transparent`)
+- `output_format` optional string (`png`, `jpeg`)
 - `model` optional string
 
 Typical response fields:
@@ -338,7 +344,9 @@ Direct, server-dispatched image models are published in both `capabilities.image
 }
 ```
 
-For the configured Azure `gpt-image-2` entry, use only the advertised discrete sizes; `auto` is not a pixel preset. `POST /images` validates `size`, `quality`, `output_format`, and `n` against this contract before provider dispatch. It accepts an optional `client_request_id` (maximum 128 characters), uses it for Gateway-side duplicate detection, and echoes it in a successful response so downstream job records can retain the correlation without exposing credentials.
+Azure `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` use the same Direct transport with additional qualities (`xhigh`, `max`) and `supported_backgrounds` (`auto`, `opaque`, `transparent`). Prefer `capabilities.image_model_capabilities[gateway_model_key].supported_qualities` over the global `image_qualities` union.
+
+For Direct Azure GPT Image entries, use only the advertised discrete sizes; `auto` is not a pixel preset. `POST /images` validates `size`, `quality`, `output_format`, `background` (when advertised), and `n` against this contract before provider dispatch. It accepts an optional `client_request_id` (maximum 128 characters), uses it for Gateway-side duplicate detection, and echoes it in a successful response so downstream job records can retain the correlation without exposing credentials.
 
 ### `GET /integration/plans`
 
@@ -437,7 +445,7 @@ Resets imported models to defaults.
 
 #### `POST /admin/refresh-azure-prices`
 
-Refreshes Azure retail pricing data.
+Fetches the current Azure Retail Prices data and updates existing text-model price rows that belong to configured Azure accounts. It also refreshes the selected GPT-Image-2 token-rate tier used to bill completed image generations from provider-reported token usage. Text rows without a matching Azure Retail meter are left unchanged.
 
 #### `POST /admin/save-google-whitelist`
 

@@ -90,7 +90,7 @@ class Hugging_Face_Spaces_Provider extends Provider_Base {
 	/**
 	 * {@inheritdoc}
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array() ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' ) {
 		if ( ! empty( $reference_images ) ) {
 			return new \WP_Error( 'reference_images_unsupported', __( 'Reference-image generation is not supported for Hugging Face Spaces yet.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}

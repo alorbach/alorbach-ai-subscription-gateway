@@ -59,6 +59,28 @@ class Azure_Retail_Prices {
 	}
 
 	/**
+	 * Fetch GPT-Image-2 token rates in UC per 1M tokens, grouped by Azure
+	 * deployment tier. Image generation responses report text-input,
+	 * image-input, and image-output usage separately.
+	 *
+	 * @param string $currency Currency code (default USD).
+	 * @return array Map of global|data_zone => array( text_input, image_input, image_output ).
+	 */
+	public static function fetch_gpt_image_2_costs( $currency = 'USD' ) {
+		$cache_key = 'gpt_image_2_' . $currency;
+		$cached    = self::get_cached( $cache_key );
+		if ( null !== $cached ) {
+			return $cached;
+		}
+
+		$currency = preg_replace( '/[^\w]/', '', (string) $currency );
+		$items    = self::fetch_items_for_filter( "(contains(meterName,'Image 2') or contains(meterName,'Image 2.5') or contains(meterName,'sunburst') or contains(meterName,'flare')) and currencyCode eq '$currency'" );
+		$costs = self::parse_gpt_image_2_costs( $items );
+		self::set_cached( $cache_key, $costs );
+		return $costs;
+	}
+
+	/**
 	 * Fetch all Azure OpenAI / Foundry items from the API (paginated).
 	 *
 	 * @param string $region   Optional. armRegionName filter.
@@ -80,7 +102,18 @@ class Azure_Retail_Prices {
 		}
 		$filter = implode( ' and ', $parts );
 
-		$url    = add_query_arg( array( '$filter' => $filter ), self::API_URL );
+		return self::fetch_items_for_filter( $filter );
+	}
+
+	/**
+	 * Fetch all Retail Prices items matching a pre-built API filter.
+	 *
+	 * @param string $filter Azure Retail Prices OData filter.
+	 * @return array List of item arrays.
+	 */
+	private static function fetch_items_for_filter( $filter ) {
+		$all          = array();
+		$url          = add_query_arg( array( '$filter' => $filter ), self::API_URL );
 		$attempts = 0;
 		$max_attempts = 50;
 
@@ -174,6 +207,69 @@ class Azure_Retail_Prices {
 		}
 
 		return $by_model;
+	}
+
+	/**
+	 * Parse non-batch GPT-Image-2 media meters from Azure Retail Prices.
+	 *
+	 * @param array $items Raw Azure Retail Prices items.
+	 * @return array
+	 */
+	private static function parse_gpt_image_2_costs( $items ) {
+		$tiers = array();
+
+		foreach ( $items as $item ) {
+			$meter = isset( $item['meterName'] ) ? (string) $item['meterName'] : '';
+			$lower = strtolower( $meter );
+			$is_image_2 = (
+				strpos( $lower, 'image 2 ' ) !== false
+				|| strpos( $lower, 'image 2.5' ) !== false
+				|| strpos( $lower, 'sunburst' ) !== false
+				|| strpos( $lower, 'flare' ) !== false
+			);
+			if ( ! $is_image_2 || strpos( $lower, 'batch' ) !== false ) {
+				continue;
+			}
+
+			if ( strpos( $lower, ' dz ' ) !== false ) {
+				$tier = 'data_zone';
+			} elseif ( strpos( $lower, ' gl ' ) !== false ) {
+				$tier = 'global';
+			} else {
+				continue;
+			}
+
+			if ( strpos( $lower, 'txt inp') !== false ) {
+				$type = 'text_input';
+			} elseif ( strpos( $lower, 'img inp') !== false ) {
+				$type = 'image_input';
+			} elseif ( strpos( $lower, 'img opt') !== false || strpos( $lower, 'img out') !== false ) {
+				$type = 'image_output';
+			} else {
+				continue;
+			}
+
+			$price = isset( $item['retailPrice'] ) ? (float) $item['retailPrice'] : 0;
+			$unit  = isset( $item['unitOfMeasure'] ) ? (string) $item['unitOfMeasure'] : '1M';
+			$uc    = self::price_to_uc_per_1m( $price, $unit );
+			if ( $uc <= 0 ) {
+				continue;
+			}
+			if ( ! isset( $tiers[ $tier ] ) ) {
+				$tiers[ $tier ] = array( 'text_input' => 0, 'image_input' => 0, 'image_output' => 0 );
+			}
+			if ( 0 === $tiers[ $tier ][ $type ] || $uc < $tiers[ $tier ][ $type ] ) {
+				$tiers[ $tier ][ $type ] = (int) round( $uc );
+			}
+		}
+
+		foreach ( $tiers as $tier => $costs ) {
+			if ( empty( $costs['text_input'] ) || empty( $costs['image_input'] ) || empty( $costs['image_output'] ) ) {
+				unset( $tiers[ $tier ] );
+			}
+		}
+
+		return $tiers;
 	}
 
 	/**
