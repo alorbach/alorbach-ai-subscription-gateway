@@ -1,0 +1,43 @@
+includes/class-image-jobs.php
+  s_4f2809a1bb2d08::t_dce3fff9e9acc9 183-193
+includes/class-cost-matrix.php
+  s_4f2809a1bb2d08::t_e2c203c4bdaa5c 37-42,46-64
+  s_4f2809a1bb2d08::t_a58147f8587161 22-23,25
+  s_4f2809a1bb2d08::t_592722fdd6eee7 65-66
+includes/class-rest-proxy.php
+  s_4f2809a1bb2d08::t_0ca809ab60e19b 367-368
+  s_4f2809a1bb2d08::t_411f14404a3efe 1355
+  s_4f2809a1bb2d08::t_65f0ccb6d53da2 1032-1049
+  s_4f2809a1bb2d08::t_5c6259a26a8acd 347-348
+  s_4f2809a1bb2d08::t_07ab8fa44fa524 321
+  s_4f2809a1bb2d08::t_f1d1529aa3eef2 1226-1243
+includes/class-integration-service.php
+  s_4f2809a1bb2d08::t_4322591e5809a8 65,73-88
+  s_4f2809a1bb2d08::t_4484f998f92184 473-474
+  s_4f2809a1bb2d08::t_7176277aa420d5 493,496
+  s_4f2809a1bb2d08::t_7712ac3fa343ed 413-416
+  s_4f2809a1bb2d08::t_b941045afbc7e9 432-433,436,447-452,466-467,475-492,494-495,497,510-560
+  s_4f2809a1bb2d08::t_3ed90f4c030e43 605
+  s_4f2809a1bb2d08::t_bf23767835deff 561
+DEVELOPER-GUIDE.md
+  s_4f2809a1bb2d08::t_e683eb6828043f 347,349
+bin/verify-direct-azure-capabilities.php
+  s_4f2809a1bb2d08::t_ef0b32280e5b3e 97-100
+  s_4f2809a1bb2d08::t_6690b32f9a2afb 32-48,63-70,72-84,104-105,108-114,116-130,133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "67846bcb700b829e88dea735eef363cfc29b38c9",
+  "prompts": {},
+  "sessions": {
+    "s_4f2809a1bb2d08": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "983ff40d-b1bc-40e4-a038-9758431d72b5",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
