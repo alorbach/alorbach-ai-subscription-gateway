@@ -1,0 +1,151 @@
+includes/Providers/Google_Provider.php
+  s_4f2809a1bb2d08::t_3463961f813e39 61
+README.md
+  s_919e9e6afaaab0::t_5dc432411332e6 231
+includes/class-rest-proxy.php
+  s_4f2809a1bb2d08::t_f1acc624152b2f 27
+  s_4f2809a1bb2d08::t_dfa19835d98bc5 1243
+  s_4f2809a1bb2d08::t_cc80532734594a 319
+  s_4f2809a1bb2d08::t_b84ac8ccb49476 362-363
+  s_4f2809a1bb2d08::t_99ce97012f0be5 1261
+  s_4f2809a1bb2d08::t_7008d811bbf1f8 1312-1313
+  s_4f2809a1bb2d08::t_ef22b257ac08e1 1197-1198,1204,1221
+  s_4f2809a1bb2d08::t_d2ceb5ccfa6608 1209-1214
+  s_4f2809a1bb2d08::t_b7561dfa6c4f2f 344
+  s_4f2809a1bb2d08::t_35f83373e16714 1027,1036
+  s_4f2809a1bb2d08::t_ff73fdbb2b6cfc 320
+  s_4f2809a1bb2d08::t_5ecf3f82d5c2dd 1010-1011
+includes/Providers/Provider_Interface.php
+  s_4f2809a1bb2d08::t_b2dc3f0a07a646 83,87,90
+admin/class-admin-settings.php
+  s_4f2809a1bb2d08::t_a57081b6e53aca 270-272
+  s_4f2809a1bb2d08::t_7fd112ad67879f 420-422
+DEVELOPER-GUIDE.md
+  s_4f2809a1bb2d08::t_39cb443e50f6c2 201-203,206
+  s_4f2809a1bb2d08::t_94388cf4ab01aa 207
+  s_4f2809a1bb2d08::t_220f315842fd52 223-225
+  s_4f2809a1bb2d08::t_b6c7662a8325ac 347-349
+  s_919e9e6afaaab0::t_5dc432411332e6 448
+assets/js/demo-pages.js
+  s_4f2809a1bb2d08::t_dad944d72140dc 740-765,767-780,787-795
+  s_4f2809a1bb2d08::t_d96fde1d7eb088 923-924
+  s_4f2809a1bb2d08::t_f7ce1ac235a6e9 898-899
+  s_4f2809a1bb2d08::t_9c8c6d6b8a5079 797
+  s_4f2809a1bb2d08::t_4a3d78945e65a6 796,849,932-935,1317-1319
+  s_4f2809a1bb2d08::t_aa19ba3ac464bf 819
+  s_4f2809a1bb2d08::t_9ab842c315cbae 709-710
+  s_4f2809a1bb2d08::t_90e2d8113d6582 850
+  s_4f2809a1bb2d08::t_38e0fb28bd54b7 826-848
+  s_4f2809a1bb2d08::t_8f90460fd8aacb 912-914
+includes/Providers/Hugging_Face_Spaces_Provider.php
+  s_4f2809a1bb2d08::t_eb1f5c4c6dfbe4 93
+includes/class-model-importer.php
+  s_919e9e6afaaab0::t_aebdbfcc2554e5 748-756,758-759,761-781,783-826,880-886,888,891-892,895-898,909-912,922-942
+  s_919e9e6afaaab0::t_f85c040f98a461 760,830
+  s_919e9e6afaaab0::t_101b513ea2cbaf 837-847,853-854,856-857,875-878
+  s_4f2809a1bb2d08::t_dca8318693201a 848-851,855,858-862
+  s_4f2809a1bb2d08::t_b748e5df779d2d 646
+  s_919e9e6afaaab0::t_f9335c1756df3d 852,863-873
+  s_919e9e6afaaab0::t_7a6ba983d444fe 874
+  s_919e9e6afaaab0::t_689bb2577cc267 943
+  s_919e9e6afaaab0::t_11eb5c6c05811b 757,782,827-829,831-836,879,887,889-890,893-894
+includes/class-cost-matrix.php
+  s_4f2809a1bb2d08::t_aba7c687760386 39-227,246-255,428
+  s_4f2809a1bb2d08::t_52ce88905f4c4a 228-242
+  s_919e9e6afaaab0::t_11eb5c6c05811b 245,420,429-439,441-478
+  s_4f2809a1bb2d08::t_ed5ae344295cf1 404,410,418-419
+  s_4f2809a1bb2d08::t_982d3dba69b9e8 440
+  s_4f2809a1bb2d08::t_4146a6b04881e8 243-244
+includes/class-image-jobs.php
+  s_4f2809a1bb2d08::t_4d83b9442b997e 139
+  s_4f2809a1bb2d08::t_060ec6dd640092 736,738,752,754
+  s_4f2809a1bb2d08::t_224777abb7f12c 262
+  s_4f2809a1bb2d08::t_4478ac76f23fc1 193
+  s_919e9e6afaaab0::t_11eb5c6c05811b 782-789
+  s_4f2809a1bb2d08::t_f0c9a74f432414 172,181-187,194
+  s_4f2809a1bb2d08::t_371e918430715f 188-192
+  s_4f2809a1bb2d08::t_58680ad5855f24 250
+includes/Providers/AI_Bridge_Provider.php
+  s_4f2809a1bb2d08::t_1731405533b8ec 45
+includes/Providers/Provider_Base.php
+  s_4f2809a1bb2d08::t_f292ce411f4855 60
+bin/verify-rest-contracts.php
+  s_4f2809a1bb2d08::t_50979d976e4bc3 478-484,486-488
+admin/class-admin-cost-matrix.php
+  s_4f2809a1bb2d08::t_91d2d464d57661 736
+  s_4f2809a1bb2d08::t_5634848fe9caaf 758
+  s_919e9e6afaaab0::t_5dc432411332e6 433
+  s_919e9e6afaaab0::t_aebdbfcc2554e5 422,438,961,1635-1653
+  s_919e9e6afaaab0::t_101b513ea2cbaf 732
+  s_919e9e6afaaab0::t_41d7e3bbc81a43 1654
+  s_4f2809a1bb2d08::t_7aa0da64362031 326
+includes/class-api-client.php
+  s_4f2809a1bb2d08::t_540af761c9bdd2 773
+  s_4f2809a1bb2d08::t_c34cc83163735c 755
+  s_4f2809a1bb2d08::t_e7be547a29e2fd 1193
+  s_4f2809a1bb2d08::t_0b6abff093f105 787
+  s_4f2809a1bb2d08::t_b11a43995712ca 1214
+bin/verify-direct-azure-capabilities.php
+  s_4f2809a1bb2d08::t_4495ca9e947a15 16
+  s_4f2809a1bb2d08::t_ce2d312a0b2775 60-80
+  s_1059263389b9da::t_9ad86c782fb049 81-82
+includes/class-demo-shortcodes.php
+  s_4f2809a1bb2d08::t_434931830ba3ad 106-109
+includes/Providers/Azure_Provider.php
+  s_4f2809a1bb2d08::t_b8c6df16923401 375-377,381-383,385-387
+  s_4f2809a1bb2d08::t_9de01e36ca5cff 281,289-290,305-310
+  s_4f2809a1bb2d08::t_f697e077374e62 346-348
+includes/Providers/OpenAI_Provider.php
+  s_4f2809a1bb2d08::t_6d68f0467b9830 119,126,144-146
+  s_4f2809a1bb2d08::t_feea20032c047a 200-202
+includes/class-azure-retail-prices.php
+  s_919e9e6afaaab0::t_3061e6baa6cf39 76,105-114,273
+  s_919e9e6afaaab0::t_d4fc6753b43ad3 115-116
+  s_919e9e6afaaab0::t_3931b6fdeaf5f3 274
+  s_919e9e6afaaab0::t_11eb5c6c05811b 61-75,78-82,212-223,231-272
+  s_4f2809a1bb2d08::t_95a54700e56e15 224-230
+  s_4f2809a1bb2d08::t_22e3777ab83cf8 77
+admin/class-admin-developer-docs.php
+  s_4f2809a1bb2d08::t_4869ddc75adcf9 209
+includes/class-integration-service.php
+  s_4f2809a1bb2d08::t_24f4b6af07b241 490-491
+  s_4f2809a1bb2d08::t_43be6467d71906 342
+  s_4f2809a1bb2d08::t_87e83c63ffed3b 59,458-472
+  s_4f2809a1bb2d08::t_7933b29a3eabb1 473-474
+  s_4f2809a1bb2d08::t_0fd18db5c85869 410,413,416-417,438-444,454
+  s_4f2809a1bb2d08::t_9416bbfacac3f7 60-73
+includes/Providers/Hugging_Face_Provider.php
+  s_4f2809a1bb2d08::t_2159d285c60bbc 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a1d5a80f3b0f1081b7888210fcebdd667f91b261",
+  "prompts": {},
+  "sessions": {
+    "s_1059263389b9da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "78a36cbf-e80d-4f35-8920-e3d4abd8ecb8",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_4f2809a1bb2d08": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "983ff40d-b1bc-40e4-a038-9758431d72b5",
+        "model": "grok-4.6"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_919e9e6afaaab0": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a046a7-3236-79c0-ae95-42dcc0639f66",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
