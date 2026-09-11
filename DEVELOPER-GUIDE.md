@@ -344,9 +344,9 @@ Direct, server-dispatched image models are published in both `capabilities.image
 }
 ```
 
-Azure `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` use the same Direct transport with additional qualities (`xhigh`, `max`) and `supported_backgrounds` (`auto`, `opaque`, `transparent`). Prefer `capabilities.image_model_capabilities[gateway_model_key].supported_qualities` over the global `image_qualities` union.
+Azure `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` use the same Direct transport with additional qualities (`xhigh`, `max`), `supported_backgrounds` (`auto`, `opaque`, `transparent`), and a published image-edit contract (`contract_version` 1, `reference_images_max` 16, `candidate_count_max` 1). The Azure Images edits path accepts up to 16 reference images; quality such as `high` is independent of that limit. Prefer `capabilities.image_model_capabilities[gateway_model_key]` — both `entry-id::gpt-image-2.5-flare` and the UUID alias `entry-id:gpt-image-2.5-flare` resolve to the same contract.
 
-For Direct Azure GPT Image entries, use only the advertised discrete sizes; `auto` is not a pixel preset. `POST /images` validates `size`, `quality`, `output_format`, `background` (when advertised), and `n` against this contract before provider dispatch. It accepts an optional `client_request_id` (maximum 128 characters), uses it for Gateway-side duplicate detection, and echoes it in a successful response so downstream job records can retain the correlation without exposing credentials.
+For Direct Azure GPT Image entries, use only the advertised discrete sizes; `auto` is not a pixel preset. `POST /images` and `POST /images/jobs` validate `size`, `quality`, `output_format`, `background` (when advertised), `aspect_ratio` (when supplied), `n`, and reference-image count against this contract before provider dispatch. Validation errors distinguish unsupported quality, size, aspect ratio, output format, missing reference-image support, and a reference-image count above `reference_images_max`. It accepts an optional `client_request_id` (maximum 128 characters), uses it for Gateway-side duplicate detection, and echoes it in a successful response so downstream job records can retain the correlation without exposing credentials.
 
 ### `GET /integration/plans`
 

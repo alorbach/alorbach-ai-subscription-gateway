@@ -19,9 +19,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Cost_Matrix {
 
 	/**
-	 * Parse a model key that may be a compound "entry_id::model_id" key.
+	 * Parse a model key that may be a compound "entry_id::model_id" key
+	 * or the UUID single-colon alias "entry_id:model_id".
 	 *
-	 * @param string $key Model key (plain ID or "entry_id::model_id").
+	 * @param string $key Model key (plain ID, "entry_id::model_id", or UUID "entry_id:model_id").
 	 * @return array{entry_id: string, model: string}
 	 */
 	public static function parse_model_key( $key ) {
@@ -33,7 +34,34 @@ class Cost_Matrix {
 				'model'    => substr( $key, $pos + 2 ),
 			);
 		}
+		if ( preg_match( '/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):(.+)$/i', $key, $matches ) ) {
+			return array(
+				'entry_id' => $matches[1],
+				'model'    => $matches[2],
+			);
+		}
 		return array( 'entry_id' => '', 'model' => $key );
+	}
+
+	/**
+	 * Canonical compound key plus the single-colon Gateway alias.
+	 *
+	 * @param string $key Model ID or compound key.
+	 * @return string[]
+	 */
+	public static function gateway_model_key_aliases( $key ) {
+		$parsed = self::parse_model_key( $key );
+		if ( '' === (string) $parsed['entry_id'] || '' === (string) $parsed['model'] ) {
+			return array( (string) $key );
+		}
+		return array_values(
+			array_unique(
+				array(
+					$parsed['entry_id'] . '::' . $parsed['model'],
+					$parsed['entry_id'] . ':' . $parsed['model'],
+				)
+			)
+		);
 	}
 
 	/**

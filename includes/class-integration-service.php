@@ -62,6 +62,7 @@ class Integration_Service {
 	 * @var array<string,array<int,string>|int|string>
 	 */
 	const DIRECT_AZURE_GPT_IMAGE_2_5_CAPABILITIES = array(
+		'contract_version'         => 1,
 		'size_mode'                => 'preset',
 		'supported_sizes'          => array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840' ),
 		'supported_qualities'      => array( 'low', 'medium', 'high', 'xhigh', 'max' ),
@@ -69,6 +70,22 @@ class Integration_Service {
 		'supported_aspect_ratios'  => array( '1:1', '2:3', '3:2', '16:9', '9:16' ),
 		'supported_backgrounds'    => array( 'auto', 'opaque', 'transparent' ),
 		'candidate_count_max'      => 1,
+		'reference_images'         => true,
+		'reference_images_max'     => 16,
+		'quality_delivery'         => 'native',
+		'aspect_ratio_delivery'    => 'guidance',
+		'provider_options'         => array(
+			'size'    => array(
+				'type'     => 'enum',
+				'delivery' => 'native',
+				'values'   => array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840' ),
+			),
+			'quality' => array(
+				'type'     => 'enum',
+				'delivery' => 'native',
+				'values'   => array( 'low', 'medium', 'high', 'xhigh', 'max' ),
+			),
+		),
 	);
 
 	/**
@@ -393,6 +410,10 @@ class Integration_Service {
 			$config['active_plan'] = self::get_plan_summary( $plan );
 		}
 
+		$config['capabilities']['image_model_capabilities'] = self::with_image_model_capability_aliases(
+			is_array( $config['capabilities']['image_model_capabilities'] ?? null ) ? $config['capabilities']['image_model_capabilities'] : array()
+		);
+
 		return apply_filters( 'alorbach_integration_config', $config );
 	}
 
@@ -408,9 +429,11 @@ class Integration_Service {
 	 * @param string $output_format Canonical or MIME output format.
 	 * @param int    $candidate_count Requested image count.
 	 * @param string $background Optional background (auto, opaque, transparent).
+	 * @param int    $reference_count Number of attached reference images.
+	 * @param string $aspect_ratio Optional requested aspect ratio.
 	 * @return array<string,mixed>|null|\WP_Error
 	 */
-	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count, $background = '' ) {
+	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count, $background = '', $reference_count = 0, $aspect_ratio = '' ) {
 		$model  = sanitize_text_field( (string) $model );
 		$parsed = Cost_Matrix::parse_model_key( $model );
 		$capabilities_profile = self::get_direct_azure_image_capability_profile( (string) $parsed['model'] );
@@ -421,7 +444,12 @@ class Integration_Service {
 		$config = self::get_integration_config( (int) $user_id );
 		$contract = null;
 		foreach ( (array) ( $config['capabilities']['models'] ?? array() ) as $candidate ) {
-			if ( is_array( $candidate ) && $model === (string) ( $candidate['gateway_model_key'] ?? '' ) ) {
+			if ( ! is_array( $candidate ) ) {
+				continue;
+			}
+			$candidate_key = (string) ( $candidate['gateway_model_key'] ?? $candidate['legacy_id'] ?? '' );
+			$candidate_parsed = Cost_Matrix::parse_model_key( $candidate_key );
+			if ( $parsed['entry_id'] === $candidate_parsed['entry_id'] && $parsed['model'] === $candidate_parsed['model'] ) {
 				$contract = $candidate;
 				break;
 			}
@@ -435,14 +463,38 @@ class Integration_Service {
 		$quality      = sanitize_key( (string) $quality );
 		$format       = self::normalize_direct_image_output_format( $output_format );
 		$candidate_count = max( 1, (int) $candidate_count );
+		$reference_count = max( 0, (int) $reference_count );
+		$aspect_ratio = strtolower( trim( (string) $aspect_ratio ) );
 		$background   = strtolower( trim( (string) $background ) );
 		if ( '' === $background ) {
 			$background = 'auto';
 		}
 		$supported_backgrounds = (array) ( $capabilities['supported_backgrounds'] ?? array() );
-		$background_ok = empty( $supported_backgrounds ) || in_array( $background, $supported_backgrounds, true );
-		if ( ! in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true ) || ! in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true ) || '' === $format || ! in_array( 'image/' . $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true ) || $candidate_count > (int) ( $capabilities['candidate_count_max'] ?? 0 ) || ! $background_ok ) {
-			return new \WP_Error( 'direct_image_options_unsupported', __( 'The selected direct image options are not supported by the AI Gateway.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		$has_reference_limit   = array_key_exists( 'reference_images_max', $capabilities );
+		$reference_max         = $has_reference_limit ? (int) $capabilities['reference_images_max'] : 0;
+		if ( ! in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true ) ) {
+			return self::direct_image_option_error( 'direct_image_size_unsupported', __( 'The requested image size is not supported by the selected image model.', 'alorbach-ai-gateway' ) );
+		}
+		if ( ! in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true ) ) {
+			return self::direct_image_option_error( 'direct_image_quality_unsupported', __( 'The requested image quality is not supported by the selected image model.', 'alorbach-ai-gateway' ) );
+		}
+		if ( '' !== $aspect_ratio && ! in_array( $aspect_ratio, (array) ( $capabilities['supported_aspect_ratios'] ?? array() ), true ) ) {
+			return self::direct_image_option_error( 'direct_image_aspect_ratio_unsupported', __( 'The requested aspect ratio is not supported by the selected image model.', 'alorbach-ai-gateway' ) );
+		}
+		if ( '' === $format || ! in_array( 'image/' . $format, (array) ( $capabilities['supported_output_formats'] ?? array() ), true ) ) {
+			return self::direct_image_option_error( 'direct_image_output_format_unsupported', __( 'The requested image output format is not supported by the selected image model.', 'alorbach-ai-gateway' ) );
+		}
+		if ( $candidate_count > (int) ( $capabilities['candidate_count_max'] ?? 0 ) ) {
+			return self::direct_image_option_error( 'direct_image_candidate_count_unsupported', __( 'The requested image candidate count is not supported by the selected image model.', 'alorbach-ai-gateway' ) );
+		}
+		if ( ! empty( $supported_backgrounds ) && ! in_array( $background, $supported_backgrounds, true ) ) {
+			return self::direct_image_option_error( 'direct_image_options_unsupported', __( 'The selected direct image options are not supported by the AI Gateway.', 'alorbach-ai-gateway' ) );
+		}
+		if ( $has_reference_limit && $reference_count > 0 && $reference_max <= 0 ) {
+			return self::direct_image_option_error( 'direct_image_references_unsupported', __( 'The selected image model does not support reference images.', 'alorbach-ai-gateway' ) );
+		}
+		if ( $has_reference_limit && $reference_count > $reference_max ) {
+			return self::direct_image_option_error( 'direct_image_reference_limit_exceeded', __( 'The selected image model does not support this number of reference images.', 'alorbach-ai-gateway' ) );
 		}
 
 		return array(
@@ -453,6 +505,58 @@ class Integration_Service {
 			'candidate_count' => $candidate_count,
 			'background'      => empty( $supported_backgrounds ) ? $background : ( in_array( $background, $supported_backgrounds, true ) ? $background : 'auto' ),
 		);
+	}
+
+	/**
+	 * Count attached image references in a request payload.
+	 *
+	 * @param array<string,mixed> $payload Request payload.
+	 * @return int
+	 */
+	public static function count_image_references( $payload ) {
+		$payload = is_array( $payload ) ? $payload : array();
+		$count   = 0;
+		foreach ( array( 'input_reference_data_url', 'input_reference' ) as $key ) {
+			if ( ! empty( $payload[ $key ] ) ) {
+				$count++;
+			}
+		}
+		foreach ( array( 'reference_images', 'frames' ) as $key ) {
+			if ( isset( $payload[ $key ] ) && is_array( $payload[ $key ] ) ) {
+				$count += count( $payload[ $key ] );
+			}
+		}
+		return $count;
+	}
+
+	/**
+	 * Stable Direct-Azure option validation error.
+	 *
+	 * @param string $code Error code.
+	 * @param string $message User-facing reason.
+	 * @return \WP_Error
+	 */
+	private static function direct_image_option_error( $code, $message ) {
+		return new \WP_Error( $code, $message, array( 'status' => 422 ) );
+	}
+
+	/**
+	 * Index UUID single-colon aliases onto the published capability map.
+	 *
+	 * @param array<string,array<string,mixed>> $map Capability map keyed by gateway model id.
+	 * @return array<string,array<string,mixed>>
+	 */
+	private static function with_image_model_capability_aliases( $map ) {
+		$out = is_array( $map ) ? $map : array();
+		foreach ( $out as $key => $caps ) {
+			if ( ! is_array( $caps ) ) {
+				continue;
+			}
+			foreach ( Cost_Matrix::gateway_model_key_aliases( (string) $key ) as $alias ) {
+				$out[ $alias ] = $caps;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -498,6 +602,7 @@ class Integration_Service {
 			$evidenced = $has_dispatch && $has_complete_prices;
 			$contracts[] = array(
 				'gateway_model_key'             => $gateway_model_key,
+				'legacy_id'                     => '' !== (string) $parsed['entry_id'] ? (string) $parsed['entry_id'] . ':' . (string) $parsed['model'] : $gateway_model_key,
 				'label'                         => sanitize_text_field( (string) $label ),
 				'transport'                     => 'direct_image',
 				'eligible'                      => $evidenced,

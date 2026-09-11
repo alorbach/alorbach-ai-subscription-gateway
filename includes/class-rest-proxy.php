@@ -318,6 +318,7 @@ class REST_Proxy {
 				'quality'           => array( 'default' => 'medium', 'sanitize_callback' => 'sanitize_text_field' ),
 				'background'        => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'output_format'     => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
+				'aspect_ratio'      => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'                 => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 				'model'             => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'duration_seconds'  => array( 'default' => 0, 'sanitize_callback' => 'absint' ),
@@ -343,6 +344,8 @@ class REST_Proxy {
 				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'background' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'output_format' => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
+				'aspect_ratio' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'reference_images' => array( 'required' => false ),
 				'client_request_id' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 			),
@@ -361,6 +364,8 @@ class REST_Proxy {
 				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'background' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'output_format' => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
+				'aspect_ratio' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'reference_images' => array( 'required' => false ),
 				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
@@ -1024,7 +1029,24 @@ class REST_Proxy {
 				) );
 				if ( is_wp_error( $relay_estimate ) ) return $relay_estimate;
 			}
-			$direct_options = Integration_Service::validate_direct_image_request( get_current_user_id(), $model, $size, $quality, $output_format, $n, $background );
+			$direct_options = Integration_Service::validate_direct_image_request(
+				get_current_user_id(),
+				$model,
+				$size,
+				$quality,
+				$output_format,
+				$n,
+				$background,
+				Integration_Service::count_image_references(
+					array(
+						'reference_images'         => $request->get_param( 'reference_images' ),
+						'input_reference'          => $request->get_param( 'input_reference' ),
+						'input_reference_data_url' => $request->get_param( 'input_reference_data_url' ),
+						'frames'                   => $request->get_param( 'frames' ),
+					)
+				),
+				(string) $request->get_param( 'aspect_ratio' )
+			);
 			if ( is_wp_error( $direct_options ) ) {
 				return $direct_options;
 			}
@@ -1201,7 +1223,24 @@ class REST_Proxy {
 		if ( $plan_error ) {
 			return $plan_error;
 		}
-		$direct_options = Integration_Service::validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $n, $background );
+		$direct_options = Integration_Service::validate_direct_image_request(
+			$user_id,
+			$model,
+			$size,
+			$quality,
+			$output_format,
+			$n,
+			$background,
+			Integration_Service::count_image_references(
+				array(
+					'reference_images'         => $reference_images,
+					'input_reference'          => $request->get_param( 'input_reference' ),
+					'input_reference_data_url' => $request->get_param( 'input_reference_data_url' ),
+					'frames'                   => $request->get_param( 'frames' ),
+				)
+			),
+			(string) $request->get_param( 'aspect_ratio' )
+		);
 		if ( is_wp_error( $direct_options ) ) {
 			return $direct_options;
 		}
@@ -1313,6 +1352,7 @@ class REST_Proxy {
 				'output_format'   => $request->get_param( 'output_format' ),
 				'model'           => $model,
 				'reference_images' => $request->get_param( 'reference_images' ),
+				'aspect_ratio'    => $request->get_param( 'aspect_ratio' ),
 			)
 		);
 

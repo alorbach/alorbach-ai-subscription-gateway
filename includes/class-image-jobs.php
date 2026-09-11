@@ -180,7 +180,17 @@ class Image_Jobs {
 		$billable_quality = self::get_billable_image_quality( $quality, $model );
 		$output_format   = Cost_Matrix::coerce_output_format_for_background( $output_format, $background );
 
-		$direct_options = Integration_Service::validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $n, $background );
+		$direct_options = Integration_Service::validate_direct_image_request(
+			$user_id,
+			$model,
+			$size,
+			$quality,
+			$output_format,
+			$n,
+			$background,
+			count( $reference_images ),
+			$aspect_ratio
+		);
 		if ( is_wp_error( $direct_options ) ) {
 			return $direct_options;
 		}
