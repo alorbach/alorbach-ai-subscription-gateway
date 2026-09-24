@@ -1,0 +1,21 @@
+bin/verify-rest-contracts.php
+  s_3c069281552f1d::t_ddbec2af6be7b3 273,275
+includes/class-ai-bridge.php
+  s_3c069281552f1d::t_89df927359bed9 827-832
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "307bc59e5394d2dabbe9feeb71a929f6437081fc",
+  "prompts": {},
+  "sessions": {
+    "s_3c069281552f1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d274-fc4b-7c02-a91b-1af6fcb10865",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
