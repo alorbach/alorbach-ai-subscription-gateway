@@ -270,9 +270,9 @@ try {
 		alorbach_require( 400 === $malformed_relay_response->get_status(), 'Malformed dynamic relay model IDs must be rejected.' );
 
 		$future_relay_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
-		alorbach_set_json_body( $future_relay_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:future-backend:model.1', 'messages' => array( array( 'role' => 'user', 'content' => 'Allow future relay backend' ) ) ) ) );
+		alorbach_set_json_body( $future_relay_create, array( 'type' => 'chat', 'payload' => array( 'model' => 'model-relay:future-backend:model.1', 'messages' => array( array( 'role' => 'user', 'content' => 'Allow future relay backend ' . $local_codex_verify_run_id ) ) ) ) );
 		$future_relay_response = rest_do_request( $future_relay_create );
-		alorbach_require( 200 === $future_relay_response->get_status(), 'Safely formed dynamic relay IDs must be accepted for the paired relay to enforce capability support.' );
+		alorbach_require( 200 === $future_relay_response->get_status(), sprintf( 'Safely formed dynamic relay IDs must be accepted for the paired relay to enforce capability support (status %d, code %s).', (int) $future_relay_response->get_status(), (string) ( $future_relay_response->get_data()['code'] ?? 'none' ) ) );
 
 		$video_create = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
 		alorbach_set_json_body( $video_create, array( 'type' => 'video', 'payload' => array( 'model' => 'model-relay:grok-cli:video', 'prompt' => 'Experimental relay video ' . $local_codex_verify_run_id, 'input_reference' => array( 'b64_json' => base64_encode( 'reference' ), 'mime_type' => 'image/png' ) ) ) );
