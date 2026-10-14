@@ -1,0 +1,43 @@
+DEVELOPER-GUIDE.md
+  s_6ebd61ac7f079d::t_44dd78a3a3d016 568-569
+bin/verify-rest-contracts.php
+  s_1487bf73ebbe5e::t_6089fcd7cd3000 267
+  s_6ebd61ac7f079d::t_d48a74d95e6e1a 185-192
+  s_1487bf73ebbe5e::t_a07c84bcc73185 272
+  s_1487bf73ebbe5e::t_c7efd85e89db72 276
+  s_6ebd61ac7f079d::t_1d4c4b2073fefa 265-266,268-271,273-275,277-278
+includes/class-integration-service.php
+  s_6ebd61ac7f079d::t_6d1abb642c88ae 420-492
+includes/class-ai-bridge.php
+  s_6ebd61ac7f079d::t_92158ab338b192 470
+  s_6ebd61ac7f079d::t_ca7f78983af715 903-904
+  s_6ebd61ac7f079d::t_f37e48c38c472b 923-928
+  s_6ebd61ac7f079d::t_cf31d54dd3ed2c 535
+  s_6ebd61ac7f079d::t_b1d72e8b010b93 492-521
+  s_6ebd61ac7f079d::t_175f72a6305300 936-943
+  s_6ebd61ac7f079d::t_a258de7e064eb1 956-961,968-969
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cc7fa22092410faae95524eb5c352cba45498a6e",
+  "prompts": {},
+  "sessions": {
+    "s_1487bf73ebbe5e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f8c697bd-6733-47a8-a2da-fbbea9102595",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_6ebd61ac7f079d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "738eaf36-8999-415c-8039-3a4dcd171b24",
+        "model": "grok-4.7-high"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
