@@ -1,0 +1,26 @@
+includes/class-ai-bridge.php
+  s_1487bf73ebbe5e::t_2a31588cece024 189-193,208-213,233,245-248,484,498-501,506-536,550,889-891,898-899,906-949,990-991,1150-1152,1155,1159-1167,1169,1174-1244
+  s_1487bf73ebbe5e::t_77c35c3998a68d 1310
+  s_1487bf73ebbe5e::t_d4528f0bacf6a9 1313-1318
+  s_1487bf73ebbe5e::t_688db3294fc782 887
+bin/verify-rest-contracts.php
+  s_1487bf73ebbe5e::t_e26361e27f98d6 183,196-197,245,259-305
+DEVELOPER-GUIDE.md
+  s_1487bf73ebbe5e::t_45e7404e664dbf 568-569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "929c653188bbf322fee44023a2aadbdc50e58ae3",
+  "prompts": {},
+  "sessions": {
+    "s_1487bf73ebbe5e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f8c697bd-6733-47a8-a2da-fbbea9102595",
+        "model": "grok-4.7"
+      },
+      "human_author": null
+    }
+  }
+}
