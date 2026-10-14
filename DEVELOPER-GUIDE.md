@@ -565,6 +565,8 @@ The integration does not use a stored WordPress API key. WordPress signs jobs an
 
 The integration config contains both `ai_bridge` and its `local_codex` alias. Successful results contain both `ai_bridge: true` and `local_codex: true`.
 
+Codex image output is natively PNG, and Grok Imagine output is natively JPEG. Either model accepts a requested PNG or JPEG; WordPress converts the completed image when that request is not the native format. WebP is rejected. The signed payload sent to the Relay always uses the native format, and Grok does not accept a resolution control.
+
 ### AI Model Relay REST Flow
 
 1. Read `GET /ai-bridge/config` (legacy alias: `GET /local-codex/config`).

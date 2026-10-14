@@ -186,6 +186,11 @@ class AI_Bridge {
 			return new \WP_Error( 'invalid_local_codex_type', __( 'AI Model Relay jobs must be chat, image, video, transcribe, or local upscale jobs.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 
+		$requested_output_format = '';
+		$output_format_explicit  = false;
+		if ( 'image' === $type ) {
+			$payload = self::strip_unforwarded_image_options( $payload );
+		}
 		if ( 'chat' === $type ) {
 			$validation = self::validate_chat_payload( $payload );
 		} elseif ( 'image' === $type ) {
@@ -199,6 +204,12 @@ class AI_Bridge {
 		}
 		if ( is_wp_error( $validation ) ) {
 			return $validation;
+		}
+		if ( 'image' === $type ) {
+			$delivery                = self::apply_native_relay_output_format( $payload );
+			$payload                 = $delivery['payload'];
+			$requested_output_format = $delivery['requested_output_format'];
+			$output_format_explicit  = $delivery['output_format_explicit'];
 		}
 
 		$model      = self::model_for_type( $type, $payload );
@@ -219,7 +230,7 @@ class AI_Bridge {
 			return new \WP_Error( 'insufficient_credits', __( 'Insufficient credits.', 'alorbach-ai-gateway' ), array( 'status' => 402 ) );
 		}
 
-		$request_hash = self::request_hash( $user_id, $type, $payload );
+		$request_hash = self::request_hash( $user_id, $type, $payload, $requested_output_format );
 		if ( Ledger::signature_exists( $request_hash ) || get_transient( 'alorbach_local_codex_hash_' . $request_hash ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
@@ -231,8 +242,10 @@ class AI_Bridge {
 			'user_id'      => $user_id,
 			'type'         => $type,
 			'model'        => $model,
-			'payload'      => $payload,
-			'request_hash' => $request_hash,
+			'payload'                  => $payload,
+			'requested_output_format'  => $requested_output_format,
+			'output_format_explicit'   => $output_format_explicit,
+			'request_hash'             => $request_hash,
 			'token_hash'   => wp_hash_password( $token ),
 			'fee_uc'       => $fee_uc,
 			'created_at'   => time(),
@@ -468,7 +481,7 @@ class AI_Bridge {
 
 		return array(
 			self::relay_image_contract( 'model-relay:codex:image', 'Codex Image', 'codex-cli', array( 'text_to_image', 'image_edit' ), array( 'guidance' => true, 'native' => false ), array(), array( 'low', 'medium', 'high' ), array( '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2560x1440', '1440x2560', '3840x2160', '2160x3840' ), 4, false ),
-			self::relay_image_contract( 'model-relay:grok-cli:image', 'Grok Imagine', 'grok-cli', array( 'text_to_image', 'image_edit' ), array( 'guidance' => true, 'native' => false, 'ratio_native' => true ), array( '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2' ), array(), array( '2k', '1k' ), 4, false ),
+			self::relay_image_contract( 'model-relay:grok-cli:image', 'Grok Imagine', 'grok-cli', array( 'text_to_image', 'image_edit' ), array( 'guidance' => true, 'native' => false, 'ratio_native' => true ), array( '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2' ), array(), array(), 4, false ),
 			self::relay_image_contract( 'model-relay:xai:imagine-image', 'xAI Imagine', 'xai-api', array( 'text_to_image', 'image_edit' ), array( 'guidance' => false, 'native' => true ), array( '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '2:1', '1:2', '19.5:9', '9:19.5', '20:9', '9:20', '21:9', '5:2' ), array( 'medium', 'low' ), array( '2k', '1k' ), 3, true, 3 ),
 			self::relay_image_contract( 'model-relay:antigravity-cli:image', 'Antigravity Image', 'antigravity-cli', array( 'text_to_image' ), array( 'guidance' => true, 'native' => false ), array( '1:1', '2:3', '3:2', '4:3', '3:4', '16:9', '9:16', '21:9' ), array(), array( '1K', '2K', '4K' ), 4, false ),
 		);
@@ -482,12 +495,44 @@ class AI_Bridge {
 		foreach ( array_values( $resolution_options ) as $index => $value ) $options[] = array( 'value' => $value, 'rank' => $index + 1, 'delivery' => $resolution_delivery );
 		$quality_delivery = $quality_delivery ?: ( ! empty( $qualities ) && $resolution_native ? 'native' : 'guidance' );
 		$provider_size_key = 'codex-cli' === $backend ? 'size' : 'resolution';
-		$provider_options = array(
-			$provider_size_key => array( 'type' => 'enum', 'delivery' => $resolution_delivery, 'values' => array_values( $resolution_options ) ),
-		);
+		$provider_options = array();
+		if ( $resolution_options ) {
+			$provider_options[ $provider_size_key ] = array( 'type' => 'enum', 'delivery' => $resolution_delivery, 'values' => array_values( $resolution_options ) );
+		}
 		if ( 'antigravity-cli' === $backend ) {
 			$provider_options['image_size'] = array( 'type' => 'enum', 'delivery' => 'guidance', 'values' => array_values( $resolution_options ) );
 			unset( $provider_options['resolution'] );
+		}
+		$output_formats = array( 'image/png', 'image/jpeg', 'image/webp' );
+		$native_output_format = '';
+		if ( 'codex-cli' === $backend ) {
+			$output_formats = array( 'image/png', 'image/jpeg' );
+			$native_output_format = 'image/png';
+		} elseif ( 'grok-cli' === $backend ) {
+			$output_formats = array( 'image/jpeg', 'image/png' );
+			$native_output_format = 'image/jpeg';
+		}
+		$image_capabilities = array(
+			'contract_version' => self::IMAGE_CAPABILITY_CONTRACT_VERSION,
+			'async_jobs' => true,
+			'provider_progress' => false,
+			'preview_images' => false,
+			'reference_images' => $reference_max > 0,
+			'reference_images_max' => $reference_max,
+			'provider_cancel' => false,
+			'candidate_count_max' => max( 1, absint( $candidate_count_max ) ),
+			'supported_sizes' => $resolution_options,
+			'resolution_mode' => ! empty( $resolution_modes['native'] ) ? 'native_scale' : 'guidance',
+			'resolution_options' => $options,
+			'supported_qualities' => $qualities,
+			'quality_delivery' => $quality_delivery,
+			'supported_aspect_ratios' => $ratios,
+			'aspect_ratio_delivery' => in_array( $backend, array( 'grok-cli', 'xai-api' ), true ) ? 'native' : ( empty( $ratios ) ? '' : 'guidance' ),
+			'supported_output_formats' => $output_formats,
+			'provider_options' => $provider_options,
+		);
+		if ( '' !== $native_output_format ) {
+			$image_capabilities['native_output_format'] = $native_output_format;
 		}
 		return array(
 			'gateway_model_key' => $model,
@@ -502,25 +547,7 @@ class AI_Bridge {
 			'supported_languages' => array( 'de-DE', 'en-US' ),
 			'operation_kinds' => $operation_kinds,
 			'cloud_upload' => $cloud_upload,
-			'image_capabilities' => array(
-				'contract_version' => self::IMAGE_CAPABILITY_CONTRACT_VERSION,
-				'async_jobs' => true,
-				'provider_progress' => false,
-				'preview_images' => false,
-				'reference_images' => $reference_max > 0,
-				'reference_images_max' => $reference_max,
-				'provider_cancel' => false,
-				'candidate_count_max' => max( 1, absint( $candidate_count_max ) ),
-				'supported_sizes' => $resolution_options,
-				'resolution_mode' => ! empty( $resolution_modes['native'] ) ? 'native_scale' : 'guidance',
-				'resolution_options' => $options,
-				'supported_qualities' => $qualities,
-				'quality_delivery' => $quality_delivery,
-				'supported_aspect_ratios' => $ratios,
-				'aspect_ratio_delivery' => in_array( $backend, array( 'grok-cli', 'xai-api' ), true ) ? 'native' : ( empty( $ratios ) ? '' : 'guidance' ),
-				'supported_output_formats' => array( 'image/png', 'image/jpeg', 'image/webp' ),
-			'provider_options' => $provider_options,
-			),
+			'image_capabilities' => $image_capabilities,
 		);
 	}
 
@@ -857,19 +884,67 @@ class AI_Bridge {
 			$decoded = json_decode( (string) $payload['provider_options'], true );
 			$payload['provider_options'] = is_array( $decoded ) ? $decoded : array();
 		}
+		$payload = self::strip_unforwarded_image_options( $payload );
 		$payload['size'] = (string) ( $payload['size'] ?? $payload['provider_size'] ?? '' );
-		$payload['output_format'] = self::normalize_image_estimate_format( $payload['output_format'] ?? 'image/png' );
+		$native_format = (string) ( $contract['image_capabilities']['native_output_format'] ?? '' );
+		$raw_format = (string) ( $payload['output_format'] ?? '' );
+		$payload['output_format'] = '' === trim( $raw_format ) ? ( '' !== $native_format ? $native_format : 'image/png' ) : self::normalize_image_estimate_format( $raw_format );
 		$payload['candidate_count'] = max( 1, (int) ( $payload['candidate_count'] ?? $payload['n'] ?? 1 ) );
 		if ( ! self::image_options_are_supported( $payload, $contract ) ) return new \WP_Error( 'relay_image_options_unsupported', __( 'The selected Relay image options are not supported by this provider.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
 		return array( 'model' => $model, 'size' => $payload['size'], 'quality' => sanitize_key( (string) ( $payload['quality'] ?? '' ) ), 'output_format' => $payload['output_format'], 'candidate_count' => $payload['candidate_count'], 'provider_options' => is_array( $payload['provider_options'] ?? null ) ? $payload['provider_options'] : array() );
 	}
 
 	private static function normalize_image_estimate_format( $format ) {
-		$format = strtolower( sanitize_key( (string) $format ) );
+		$format = strtolower( trim( (string) $format ) );
+		$format = preg_replace( '/^image\//', '', $format );
 		if ( 'png' === $format ) return 'image/png';
 		if ( in_array( $format, array( 'jpg', 'jpeg' ), true ) ) return 'image/jpeg';
 		if ( 'webp' === $format ) return 'image/webp';
 		return sanitize_text_field( (string) $format );
+	}
+
+	/** Drop resolution controls the selected Relay model does not advertise. */
+	private static function strip_unforwarded_image_options( $payload ) {
+		$payload = is_array( $payload ) ? $payload : array();
+		$contract = self::image_model_contract( (string) ( $payload['model'] ?? '' ) );
+		if ( ! is_array( $contract ) ) {
+			return $payload;
+		}
+		$schema = is_array( $contract['image_capabilities']['provider_options'] ?? null ) ? $contract['image_capabilities']['provider_options'] : array();
+		if ( isset( $schema['resolution'] ) ) {
+			return $payload;
+		}
+		unset( $payload['resolution'] );
+		if ( isset( $payload['provider_options'] ) && is_array( $payload['provider_options'] ) ) {
+			unset( $payload['provider_options']['resolution'] );
+			if ( array() === $payload['provider_options'] ) {
+				unset( $payload['provider_options'] );
+			}
+		}
+		return $payload;
+	}
+
+	/**
+	 * Keep the caller's PNG or JPEG choice on the job and send only the native format to the Relay.
+	 *
+	 * @param array<string,mixed> $payload Image payload.
+	 * @return array{payload:array<string,mixed>,requested_output_format:string,output_format_explicit:bool}
+	 */
+	private static function apply_native_relay_output_format( $payload ) {
+		$contract = self::image_model_contract( (string) ( $payload['model'] ?? '' ) );
+		$native = is_array( $contract ) ? (string) ( $contract['image_capabilities']['native_output_format'] ?? '' ) : '';
+		if ( '' === $native ) {
+			return array( 'payload' => $payload, 'requested_output_format' => '', 'output_format_explicit' => false );
+		}
+		$raw = (string) ( $payload['output_format'] ?? '' );
+		$explicit = array_key_exists( 'output_format', $payload ) && '' !== trim( $raw );
+		$requested = $explicit ? self::normalize_image_estimate_format( $raw ) : $native;
+		$payload['output_format'] = $native;
+		return array(
+			'payload' => $payload,
+			'requested_output_format' => $requested,
+			'output_format_explicit' => $explicit && $requested !== $native,
+		);
 	}
 
 	/** @param array<string,mixed> $payload @param array<string,mixed> $contract */
@@ -912,7 +987,8 @@ class AI_Bridge {
 		}
 		$quality      = (string) ( $payload['quality'] ?? '' );
 		$quality_explicit = array_key_exists( 'quality_explicit', $payload ) ? (bool) $payload['quality_explicit'] : array_key_exists( 'quality', $payload );
-		$format       = (string) ( $payload['output_format'] ?? 'image/png' );
+		$format_raw   = trim( (string) ( $payload['output_format'] ?? '' ) );
+		$format       = '' === $format_raw ? (string) ( $capabilities['native_output_format'] ?? 'image/png' ) : self::normalize_image_estimate_format( $format_raw );
 		$count        = isset( $payload['candidate_count'] ) ? (int) $payload['candidate_count'] : 1;
 		if ( ! is_array( $provider_options ) || ! self::provider_options_are_supported( $provider_options, $capabilities['provider_options'] ?? array() ) ) return false;
 		$quality_supported = empty( $capabilities['supported_qualities'] ) ? ( ! $quality_explicit || '' === $quality || 'auto' === strtolower( $quality ) ) : ( 'auto' === strtolower( $quality ) || in_array( $quality, (array) $capabilities['supported_qualities'], true ) );
@@ -1071,15 +1147,99 @@ class AI_Bridge {
 			return new \WP_Error( 'invalid_local_codex_result', __( 'AI Model Relay image result was not valid.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		}
 		$requires_mime = null !== self::image_model_contract( (string) ( $job['model'] ?? '' ) );
+		$requested = (string) ( $job['requested_output_format'] ?? '' );
+		$explicit = ! empty( $job['output_format_explicit'] );
+		$images = array();
 		foreach ( $response['data'] as $image ) {
 			$encoded = is_array( $image ) && isset( $image['b64_json'] ) ? preg_replace( '/\s+/', '', (string) $image['b64_json'] ) : '';
-			$mime    = is_array( $image ) ? strtolower( trim( (string) ( $image['mime_type'] ?? '' ) ) ) : '';
+			$mime    = is_array( $image ) ? self::normalize_image_estimate_format( (string) ( $image['mime_type'] ?? '' ) ) : '';
 			if ( '' === $encoded || false === base64_decode( $encoded, true ) || ( $requires_mime && ! in_array( $mime, array( 'image/png', 'image/jpeg', 'image/webp' ), true ) ) ) {
 				return new \WP_Error( 'invalid_local_codex_result', __( 'AI Model Relay image result did not contain valid base64 image data.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 			}
+			if ( $explicit && '' !== $requested && $requested !== $mime ) {
+				$converted = self::convert_relay_image( $encoded, $requested );
+				if ( is_wp_error( $converted ) ) {
+					return $converted;
+				}
+				$image['b64_json'] = $converted;
+				$image['mime_type'] = $requested;
+			}
+			$images[] = $image;
 		}
+		$response['data'] = $images;
 		$response['model'] = (string) $job['model'];
 		return $response;
+	}
+
+	/** Convert Relay PNG and JPEG bytes. JPEG output is flattened onto white. */
+	private static function convert_relay_image( $encoded, $target_mime ) {
+		$bytes = base64_decode( (string) $encoded, true );
+		if ( false === $bytes || '' === $bytes || ! in_array( $target_mime, array( 'image/png', 'image/jpeg' ), true ) ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		if ( 'image/jpeg' === $target_mime ) {
+			$flattened = self::flatten_image_onto_white( $bytes );
+			if ( is_wp_error( $flattened ) ) {
+				return $flattened;
+			}
+			$bytes = $flattened;
+		}
+		if ( ! function_exists( 'wp_get_image_editor' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			require_once ABSPATH . 'wp-admin/includes/image.php';
+		}
+		$source = wp_tempnam( 'alorbach-relay-image-source' );
+		$typed_source = is_string( $source ) ? $source . '.jpg' : '';
+		if ( '' === $typed_source || ! rename( $source, $typed_source ) || false === file_put_contents( $typed_source, $bytes ) ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		$editor = wp_get_image_editor( $typed_source );
+		if ( is_wp_error( $editor ) ) {
+			wp_delete_file( $typed_source );
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		$saved = $editor->save( null, $target_mime );
+		wp_delete_file( $typed_source );
+		if ( is_wp_error( $saved ) || empty( $saved['path'] ) || ! is_readable( $saved['path'] ) ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		$converted = file_get_contents( $saved['path'] );
+		wp_delete_file( $saved['path'] );
+		if ( ! is_string( $converted ) || '' === $converted ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		return base64_encode( $converted );
+	}
+
+	/** Composite an image onto an opaque white canvas and return JPEG bytes. */
+	private static function flatten_image_onto_white( $bytes ) {
+		if ( ! function_exists( 'imagecreatefromstring' ) || ! function_exists( 'imagejpeg' ) || ! function_exists( 'imagecreatetruecolor' ) ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		$source = imagecreatefromstring( $bytes );
+		if ( false === $source ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		$width = imagesx( $source );
+		$height = imagesy( $source );
+		$flat = imagecreatetruecolor( $width, $height );
+		if ( false === $flat ) {
+			imagedestroy( $source );
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		$white = imagecolorallocate( $flat, 255, 255, 255 );
+		imagefilledrectangle( $flat, 0, 0, $width, $height, $white );
+		imagealphablending( $flat, true );
+		imagecopy( $flat, $source, 0, 0, 0, 0, $width, $height );
+		ob_start();
+		$saved = imagejpeg( $flat, null, 90 );
+		$jpeg = ob_get_clean();
+		imagedestroy( $source );
+		imagedestroy( $flat );
+		if ( ! $saved || ! is_string( $jpeg ) || '' === $jpeg ) {
+			return new \WP_Error( 'relay_image_convert_failed', __( 'The requested image format could not be converted.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		}
+		return $jpeg;
 	}
 
 	/** Normalize a binary-transfer manifest without retaining or forwarding PNG bytes. */
@@ -1147,10 +1307,15 @@ class AI_Bridge {
 	 * @param int    $user_id User ID.
 	 * @param string $type Type.
 	 * @param array  $payload Payload.
+	 * @param string $requested_output_format Caller delivery format, when it differs from the signed Relay payload.
 	 * @return string
 	 */
-	private static function request_hash( $user_id, $type, $payload ) {
-		return hash( 'sha256', wp_json_encode( array( (int) $user_id, (string) $type, $payload ) ) );
+	private static function request_hash( $user_id, $type, $payload, $requested_output_format = '' ) {
+		$material = array( (int) $user_id, (string) $type, $payload );
+		if ( '' !== (string) $requested_output_format ) {
+			$material[] = (string) $requested_output_format;
+		}
+		return hash( 'sha256', wp_json_encode( $material ) );
 	}
 
 	/**
