@@ -63,11 +63,20 @@ class Integration_Service {
 	 */
 	const DIRECT_AZURE_GPT_IMAGE_2_5_CAPABILITIES = array(
 		'contract_version'         => 1,
-		'size_mode'                => 'preset',
-		'supported_sizes'          => array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840' ),
+		'size_mode'                => 'arbitrary',
+		'supported_sizes'          => array(),
+		'min_width'                => 1,
+		'min_height'               => 1,
+		'max_width'                => 3840,
+		'max_height'               => 3840,
+		'min_pixels'               => 655360,
+		'max_pixels'               => 8294400,
+		'edge_multiple'            => 16,
+		'min_aspect_ratio'         => '1:3',
+		'max_aspect_ratio'         => '3:1',
 		'supported_qualities'      => array( 'low', 'medium', 'high', 'xhigh', 'max' ),
 		'supported_output_formats' => array( 'image/png', 'image/jpeg' ),
-		'supported_aspect_ratios'  => array( '1:1', '2:3', '3:2', '16:9', '9:16' ),
+		'supported_aspect_ratios'  => array( '1:1', '2:3', '3:2', '16:9', '9:16', 'custom' ),
 		'supported_backgrounds'    => array( 'auto', 'opaque', 'transparent' ),
 		'candidate_count_max'      => 1,
 		'reference_images'         => true,
@@ -75,11 +84,6 @@ class Integration_Service {
 		'quality_delivery'         => 'native',
 		'aspect_ratio_delivery'    => 'guidance',
 		'provider_options'         => array(
-			'size'    => array(
-				'type'     => 'enum',
-				'delivery' => 'native',
-				'values'   => array( '1024x1024', '1024x1536', '1536x1024', '2048x2048', '2048x1152', '3840x2160', '2160x3840' ),
-			),
 			'quality' => array(
 				'type'     => 'enum',
 				'delivery' => 'native',
@@ -370,8 +374,8 @@ class Integration_Service {
 			'relay_prefix'     => AI_Bridge::RELAY_MODEL_PREFIX,
 			'image_capability_contract_version' => AI_Bridge::IMAGE_CAPABILITY_CONTRACT_VERSION,
 			'minimum_relay_version' => AI_Bridge::MINIMUM_RELAY_VERSION,
-			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'receipt' => '/ai-bridge/jobs/{job_id}/receipt', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
-			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'receipt' => '/local-codex/jobs/{job_id}/receipt', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
+			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'handoff' => '/ai-bridge/jobs/{job_id}/handoff', 'receipt' => '/ai-bridge/jobs/{job_id}/receipt', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
+			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'handoff' => '/local-codex/jobs/{job_id}/handoff', 'receipt' => '/local-codex/jobs/{job_id}/receipt', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
 		);
 
 		$config = array(
@@ -472,7 +476,10 @@ class Integration_Service {
 		$supported_backgrounds = (array) ( $capabilities['supported_backgrounds'] ?? array() );
 		$has_reference_limit   = array_key_exists( 'reference_images_max', $capabilities );
 		$reference_max         = $has_reference_limit ? (int) $capabilities['reference_images_max'] : 0;
-		if ( ! in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true ) ) {
+		$size_supported = 'arbitrary' === (string) ( $capabilities['size_mode'] ?? '' )
+			? self::direct_azure_arbitrary_size_is_valid( $size, $capabilities )
+			: in_array( $size, (array) ( $capabilities['supported_sizes'] ?? array() ), true );
+		if ( ! $size_supported ) {
 			return self::direct_image_option_error( 'direct_image_size_unsupported', __( 'The requested image size is not supported by the selected image model.', 'alorbach-ai-gateway' ) );
 		}
 		if ( ! in_array( $quality, (array) ( $capabilities['supported_qualities'] ?? array() ), true ) ) {
@@ -505,6 +512,26 @@ class Integration_Service {
 			'candidate_count' => $candidate_count,
 			'background'      => empty( $supported_backgrounds ) ? $background : ( in_array( $background, $supported_backgrounds, true ) ? $background : 'auto' ),
 		);
+	}
+
+	/** Validate Azure GPT Image 2.5 arbitrary output dimensions. */
+	private static function direct_azure_arbitrary_size_is_valid( $size, $capabilities ) {
+		if ( ! is_array( $capabilities ) || 'arbitrary' !== (string) ( $capabilities['size_mode'] ?? '' ) || ! preg_match( '/^(\d{1,5})x(\d{1,5})$/', (string) $size, $matches ) ) return false;
+		$width = (int) $matches[1];
+		$height = (int) $matches[2];
+		$minimum_pixels = max( 0, (int) ( $capabilities['min_pixels'] ?? 0 ) );
+		$maximum_pixels = max( 0, (int) ( $capabilities['max_pixels'] ?? 0 ) );
+		$maximum_width = max( 0, (int) ( $capabilities['max_width'] ?? 0 ) );
+		$maximum_height = max( 0, (int) ( $capabilities['max_height'] ?? 0 ) );
+		$edge_multiple = max( 1, (int) ( $capabilities['edge_multiple'] ?? 1 ) );
+		$pixels = $width * $height;
+		return $width > 0 && $height > 0
+			&& $width <= $maximum_width && $height <= $maximum_height
+			&& $width >= max( 1, (int) ( $capabilities['min_width'] ?? 1 ) )
+			&& $height >= max( 1, (int) ( $capabilities['min_height'] ?? 1 ) )
+			&& 0 === $width % $edge_multiple && 0 === $height % $edge_multiple
+			&& $pixels >= $minimum_pixels && $pixels <= $maximum_pixels
+			&& $width * 3 >= $height && $height * 3 >= $width;
 	}
 
 	/**
@@ -625,6 +652,10 @@ class Integration_Service {
 	 */
 	private static function has_complete_direct_azure_image_pricing( $model, $matrix, $capabilities ) {
 		$prices = is_array( $matrix[ $model ] ?? null ) ? $matrix[ $model ] : array();
+		if ( 'arbitrary' === (string) ( $capabilities['size_mode'] ?? '' ) ) {
+			foreach ( (array) ( $capabilities['supported_qualities'] ?? array() ) as $quality ) if ( (int) ( $prices[ $quality ]['1024x1024'] ?? 0 ) <= 0 ) return false;
+			return ! empty( $capabilities['min_pixels'] ) && ! empty( $capabilities['max_pixels'] ) && ! empty( $capabilities['edge_multiple'] ) && ! empty( $capabilities['min_aspect_ratio'] ) && ! empty( $capabilities['max_aspect_ratio'] );
+		}
 		foreach ( (array) ( $capabilities['supported_qualities'] ?? array() ) as $quality ) {
 			foreach ( (array) ( $capabilities['supported_sizes'] ?? array() ) as $size ) {
 				if ( (int) ( $prices[ $quality ][ $size ] ?? 0 ) <= 0 ) return false;
@@ -1298,14 +1329,30 @@ class Integration_Service {
 			array_filter(
 				is_array( $config['capabilities']['models'] ?? null ) ? $config['capabilities']['models'] : array(),
 				static function ( $model ) use ( $config ) {
-					return is_array( $model ) && in_array( (string) ( $model['gateway_model_key'] ?? '' ), $config['capabilities']['image_models'], true );
+					if ( ! is_array( $model ) ) {
+						return false;
+					}
+					$contract_key = (string) ( $model['gateway_model_key'] ?? '' );
+					foreach ( (array) ( $config['capabilities']['image_models'] ?? array() ) as $selected_key ) {
+						if ( self::image_model_key_matches_plan_selection( $contract_key, (string) $selected_key ) ) {
+							return true;
+						}
+					}
+					return false;
 				}
 			)
 		);
-		$config['capabilities']['image_model_capabilities'] = array_intersect_key(
-			is_array( $config['capabilities']['image_model_capabilities'] ?? null ) ? $config['capabilities']['image_model_capabilities'] : array(),
-			array_fill_keys( $config['capabilities']['image_models'], true )
-		);
+		$image_model_capabilities = is_array( $config['capabilities']['image_model_capabilities'] ?? null ) ? $config['capabilities']['image_model_capabilities'] : array();
+		$allowed_image_capability_keys = array();
+		foreach ( array_keys( $image_model_capabilities ) as $contract_key ) {
+			foreach ( (array) ( $config['capabilities']['image_models'] ?? array() ) as $selected_key ) {
+				if ( self::image_model_key_matches_plan_selection( (string) $contract_key, (string) $selected_key ) ) {
+					$allowed_image_capability_keys[ $contract_key ] = true;
+					break;
+				}
+			}
+		}
+		$config['capabilities']['image_model_capabilities'] = array_intersect_key( $image_model_capabilities, $allowed_image_capability_keys );
 
 		if ( empty( $capability_map['image'] ) ) {
 			$config['defaults']['image_model']         = '';
@@ -1323,6 +1370,28 @@ class Integration_Service {
 		}
 
 		return $config;
+	}
+
+	/**
+	 * Match a canonical image contract key to an allowed plan selector.
+	 * Relay selectors may use any Gateway connection ID; Relay contracts use the catalog model ID.
+	 *
+	 * @param string $contract_key Canonical image contract key.
+	 * @param string $selected_key Plan-qualified selected model key.
+	 * @return bool
+	 */
+	private static function image_model_key_matches_plan_selection( $contract_key, $selected_key ) {
+		$contract_key = (string) $contract_key;
+		$selected_key = (string) $selected_key;
+		if ( $contract_key === $selected_key ) {
+			return true;
+		}
+
+		$selected = Cost_Matrix::parse_model_key( $selected_key );
+		$model    = (string) ( $selected['model'] ?? '' );
+		return '' !== $model
+			&& 0 === strpos( $model, AI_Bridge::RELAY_MODEL_PREFIX )
+			&& $contract_key === $model;
 	}
 
 	/**

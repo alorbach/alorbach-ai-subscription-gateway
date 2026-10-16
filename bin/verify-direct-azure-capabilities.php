@@ -16,6 +16,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 use Alorbach\AIGateway\Cost_Matrix;
 use Alorbach\AIGateway\Integration_Service;
 use Alorbach\AIGateway\REST_Proxy;
+use Alorbach\AIGateway\Providers\Azure_Provider;
 
 /** @param bool $condition @param string $message */
 function alorbach_direct_azure_require( $condition, $message ) {
@@ -42,8 +43,9 @@ try {
 	alorbach_direct_azure_require( 16 === (int) ( $two_five_profile['reference_images_max'] ?? -1 ), 'GPT Image 2.5 must publish reference_images_max 16.' );
 	alorbach_direct_azure_require( true === ( $two_five_profile['reference_images'] ?? null ), 'GPT Image 2.5 must declare reference-image support.' );
 	alorbach_direct_azure_require( 1 === (int) ( $two_five_profile['candidate_count_max'] ?? 0 ), 'GPT Image 2.5 must advertise a candidate_count_max of 1.' );
-	alorbach_direct_azure_require( ! empty( $two_five_profile['supported_sizes'] ) && ! empty( $two_five_profile['supported_qualities'] ) && ! empty( $two_five_profile['supported_aspect_ratios'] ) && ! empty( $two_five_profile['supported_output_formats'] ), 'GPT Image 2.5 must publish non-empty size, quality, aspect-ratio, and output-format arrays.' );
-	alorbach_direct_azure_require( ! empty( $two_five_profile['provider_options']['size']['values'] ) && ! empty( $two_five_profile['provider_options']['quality']['values'] ), 'GPT Image 2.5 must publish provider_options with non-empty size and quality values.' );
+	alorbach_direct_azure_require( 'arbitrary' === ( $two_five_profile['size_mode'] ?? '' ) && empty( $two_five_profile['supported_sizes'] ) && 655360 === (int) ( $two_five_profile['min_pixels'] ?? 0 ) && 8294400 === (int) ( $two_five_profile['max_pixels'] ?? 0 ) && 16 === (int) ( $two_five_profile['edge_multiple'] ?? 0 ), 'GPT Image 2.5 must publish the arbitrary-size bounds and no discrete size list.' );
+	alorbach_direct_azure_require( ! empty( $two_five_profile['supported_qualities'] ) && ! empty( $two_five_profile['supported_aspect_ratios'] ) && ! empty( $two_five_profile['supported_output_formats'] ), 'GPT Image 2.5 must publish quality, aspect-ratio, and output-format arrays.' );
+	alorbach_direct_azure_require( empty( $two_five_profile['provider_options']['size'] ) && ! empty( $two_five_profile['provider_options']['quality']['values'] ), 'GPT Image 2.5 must not expose a competing discrete size selector.' );
 	alorbach_direct_azure_require( ! array_key_exists( 'reference_images_max', Integration_Service::DIRECT_AZURE_GPT_IMAGE_2_CAPABILITIES ), 'GPT Image 2 must not inherit a false 2.5 reference-image declaration.' );
 
 	$model_key = '2497af91-687f-46ea-9cf9-bd9b2b8f4dd6::gpt-image-2';
@@ -106,13 +108,34 @@ try {
 		alorbach_direct_azure_require( in_array( 'xhigh', (array) ( $caps['supported_qualities'] ?? array() ), true ) && in_array( 'max', (array) ( $caps['supported_qualities'] ?? array() ), true ), 'Direct GPT Image 2.5 contracts must advertise xhigh and max.' );
 		alorbach_direct_azure_require( in_array( 'transparent', (array) ( $caps['supported_backgrounds'] ?? array() ), true ), 'Direct GPT Image 2.5 contracts must advertise transparent backgrounds.' );
 		alorbach_direct_azure_require( 1 === (int) ( $caps['contract_version'] ?? 0 ) && 16 === (int) ( $caps['reference_images_max'] ?? 0 ) && 1 === (int) ( $caps['candidate_count_max'] ?? 0 ), 'Direct GPT Image 2.5 contracts must publish contract_version 1, reference_images_max 16, and candidate_count_max 1.' );
-		alorbach_direct_azure_require( ! empty( $caps['supported_sizes'] ) && ! empty( $caps['supported_aspect_ratios'] ) && ! empty( $caps['supported_output_formats'] ), 'Direct GPT Image 2.5 contracts must publish non-empty size, aspect-ratio, and output-format arrays.' );
-		alorbach_direct_azure_require( ! empty( $caps['provider_options']['size']['values'] ) && ! empty( $caps['provider_options']['quality']['values'] ), 'Direct GPT Image 2.5 contracts must publish provider_options with non-empty values.' );
+		alorbach_direct_azure_require( 'arbitrary' === ( $caps['size_mode'] ?? '' ) && empty( $caps['supported_sizes'] ) && 655360 === (int) ( $caps['min_pixels'] ?? 0 ) && 8294400 === (int) ( $caps['max_pixels'] ?? 0 ) && 16 === (int) ( $caps['edge_multiple'] ?? 0 ), 'Direct GPT Image 2.5 contracts must publish the arbitrary-size capability bounds.' );
+		alorbach_direct_azure_require( ! empty( $caps['supported_aspect_ratios'] ) && ! empty( $caps['supported_output_formats'] ) && empty( $caps['provider_options']['size'] ) && ! empty( $caps['provider_options']['quality']['values'] ), 'Direct GPT Image 2.5 contracts must publish ratios/formats and no competing discrete size option.' );
 		$mapped_canonical = is_array( $config['capabilities']['image_model_capabilities'][ $canonical ] ?? null ) ? $config['capabilities']['image_model_capabilities'][ $canonical ] : array();
 		$mapped_alias = '' !== $alias && is_array( $config['capabilities']['image_model_capabilities'][ $alias ] ?? null ) ? $config['capabilities']['image_model_capabilities'][ $alias ] : array();
 		alorbach_direct_azure_require( $caps === $mapped_canonical && $caps === $mapped_alias, 'Exact GPT Image 2.5 model IDs and Gateway aliases must resolve to the same capability contract.' );
 		$accepted = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '1024x1024', 'xhigh', 'png', 1, 'transparent' );
 		alorbach_direct_azure_require( is_array( $accepted ) && 'xhigh' === ( $accepted['quality'] ?? '' ) && 'transparent' === ( $accepted['background'] ?? '' ), 'Direct GPT Image 2.5 must accept xhigh with a transparent background.' );
+		$custom = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '2016x3024', 'high', 'png', 1, 'auto', 0, '2:3' );
+		$azure_request = is_array( $custom ) ? ( new Azure_Provider() )->build_images_request( 'fixture prompt', (string) $custom['size'], 1, 'gpt-image-2.5-sunburst', 'high', 'png', array( 'endpoint' => 'https://azure.invalid', 'api_key' => 'stub' ) ) : null;
+		$azure_body = is_array( $azure_request ) ? json_decode( (string) ( $azure_request['body'] ?? '' ), true ) : null;
+		$bad_edge_multiple = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '2017x3024', 'high', 'png', 1 );
+		$bad_minimum_pixels = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '480x1360', 'high', 'png', 1 );
+		$bad_pixel_budget = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '3840x2176', 'high', 'png', 1 );
+		$bad_ratio_bounds = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '512x3840', 'high', 'png', 1 );
+		alorbach_direct_azure_require( is_array( $custom ) && '2016x3024' === ( $custom['size'] ?? '' ) && is_array( $azure_body ) && '2016x3024' === ( $azure_body['size'] ?? '' ), 'GPT Image 2.5 must accept and preserve an arbitrary 2:3 size through the Azure request builder.' );
+		alorbach_direct_azure_require( is_wp_error( $bad_edge_multiple ) && is_wp_error( $bad_minimum_pixels ) && is_wp_error( $bad_pixel_budget ) && is_wp_error( $bad_ratio_bounds ), 'GPT Image 2.5 must reject edge-multiple, minimum-area, maximum-area, and aspect-ratio violations.' );
+		$base_estimate_request = new WP_REST_Request( 'GET', '/alorbach/v1/me/estimate' );
+		$base_estimate_request->set_query_params( array( 'type' => 'image', 'model' => $canonical, 'size' => '1024x1024', 'quality' => 'high', 'output_format' => 'png', 'n' => 1 ) );
+		$base_estimate = REST_Proxy::me_estimate( $base_estimate_request );
+		$custom_estimate_request = new WP_REST_Request( 'GET', '/alorbach/v1/me/estimate' );
+		$custom_estimate_request->set_query_params( array( 'type' => 'image', 'model' => $canonical, 'size' => '2016x3024', 'quality' => 'high', 'output_format' => 'png', 'n' => 1, 'aspect_ratio' => '2:3' ) );
+		$custom_estimate = REST_Proxy::me_estimate( $custom_estimate_request );
+		alorbach_direct_azure_require( $base_estimate instanceof WP_REST_Response && $custom_estimate instanceof WP_REST_Response && (int) ( $custom_estimate->get_data()['cost_uc'] ?? 0 ) > (int) ( $base_estimate->get_data()['cost_uc'] ?? 0 ), 'The non-billable estimate must price arbitrary dimensions using their area and model quality.' );
+		$exact_custom_price_filter = static function ( $costs ) use ( $canonical ) { $costs[ $canonical ]['high']['2016x3024'] = 777; return $costs; };
+		add_filter( 'alorbach_image_model_costs', $exact_custom_price_filter );
+		$exact_custom_price = Cost_Matrix::get_image_cost( '2016x3024', $canonical, 'high' );
+		remove_filter( 'alorbach_image_model_costs', $exact_custom_price_filter );
+		alorbach_direct_azure_require( 777 === $exact_custom_price, 'An explicitly saved price for the concrete custom dimensions must take priority over the area-based estimate.' );
 		$standalone = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '1024x1024', 'high', 'png', 1, 'auto', 0 );
 		$one_persona = Integration_Service::validate_direct_image_request( (int) $admin->ID, $alias, '1024x1024', 'high', 'png', 1, 'auto', 1 );
 		$one_environment = Integration_Service::validate_direct_image_request( (int) $admin->ID, $canonical, '1024x1024', 'high', 'png', 1, 'auto', 1 );

@@ -446,6 +446,10 @@ class Cost_Matrix {
 		if ( $plain !== $model && isset( $model_costs[ $plain ][ $quality ][ $size ] ) ) {
 			return (int) $model_costs[ $plain ][ $quality ][ $size ];
 		}
+		if ( self::is_gpt_image_2_5_model( $model ) && preg_match( '/^(\d{1,5})x(\d{1,5})$/', (string) $size, $dimensions ) ) {
+			$base_cost = (int) ( $model_costs[ $model ][ $quality ]['1024x1024'] ?? $model_costs[ $plain ][ $quality ]['1024x1024'] ?? 0 );
+			if ( $base_cost > 0 ) return max( 1, (int) round( $base_cost * ( ( (int) $dimensions[1] * (int) $dimensions[2] ) / ( 1024 * 1024 ) ) ) );
+		}
 
 		$costs = get_option( 'alorbach_image_costs', array() );
 		$costs = is_array( $costs ) ? $costs : array();

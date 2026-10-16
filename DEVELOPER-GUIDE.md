@@ -1,4 +1,4 @@
-﻿# Developer Guide
+# Developer Guide
 
 External developer documentation for building against the Alorbach AI Subscription Gateway plugin.
 
@@ -574,7 +574,8 @@ Codex image output is natively PNG, and Grok Imagine output is natively JPEG. Ei
 3. Create a WordPress job with `POST /ai-bridge/jobs`.
 4. For `model-relay:*` and `local-asr:*`, send the signed job to `/v1/relay/jobs/chat`, `/v1/relay/jobs/images`, `/v1/relay/jobs/videos`, or `/v1/relay/jobs/transcribe`.
 5. For `codex-local:*`, retain the legacy `/v1/chat`, `/v1/images`, and `/v1/transcribe` tray routes so older installations remain usable.
-6. Complete with `POST /ai-bridge/jobs/<job_id>/complete`, or fail with `POST /ai-bridge/jobs/<job_id>/fail`. Every `/local-codex/*` WordPress route remains an equivalent compatibility alias.
+6. If an image job is still `created` but its browser handoff token was lost, renew it with `POST /ai-bridge/jobs/<job_id>/handoff` and the original `request_hash`. The route is owner-bound, preserves the original payload, caps renewals at eight, and stores only the renewed token hash. It returns `local_codex_job_completed` when a durable completion receipt already exists so clients can recover through the receipt route without dispatching another image job.
+7. Complete with `POST /ai-bridge/jobs/<job_id>/complete`, or fail with `POST /ai-bridge/jobs/<job_id>/fail`. Every `/local-codex/*` WordPress route remains an equivalent compatibility alias.
 
 Chat results use OpenAI-compatible `choices` and usage. Image results contain `b64_json`; transcription requires word timing; video results contain validated `b64_video` and MIME data and should be rendered through a browser Blob URL.
 

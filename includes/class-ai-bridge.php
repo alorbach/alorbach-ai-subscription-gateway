@@ -227,6 +227,9 @@ class AI_Bridge {
 			register_rest_route( 'alorbach/v1', $base . '/jobs', array(
 				'methods' => 'POST', 'callback' => array( __CLASS__, 'create_job_handler' ), 'permission_callback' => $permission,
 			) );
+			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/handoff', array(
+				'methods' => 'POST', 'callback' => array( __CLASS__, 'handoff_job_handler' ), 'permission_callback' => $permission,
+			) );
 			register_rest_route( 'alorbach/v1', $base . '/jobs/(?P<job_id>[a-zA-Z0-9\-]+)/complete', array(
 				'methods' => 'POST', 'callback' => array( __CLASS__, 'complete_job_handler' ), 'permission_callback' => $permission,
 			) );
@@ -274,6 +277,7 @@ class AI_Bridge {
 					'jobs'     => '/ai-bridge/jobs',
 					'complete' => '/ai-bridge/jobs/{job_id}/complete',
 					'receipt'  => '/ai-bridge/jobs/{job_id}/receipt',
+					'handoff' => '/ai-bridge/jobs/{job_id}/handoff',
 					'fail'     => '/ai-bridge/jobs/{job_id}/fail',
 					'cancel'   => '/ai-bridge/jobs/{job_id}/cancel',
 				),
@@ -282,6 +286,7 @@ class AI_Bridge {
 					'jobs'     => '/local-codex/jobs',
 					'complete' => '/local-codex/jobs/{job_id}/complete',
 					'receipt'  => '/local-codex/jobs/{job_id}/receipt',
+					'handoff' => '/local-codex/jobs/{job_id}/handoff',
 					'fail'     => '/local-codex/jobs/{job_id}/fail',
 					'cancel'   => '/local-codex/jobs/{job_id}/cancel',
 				),
@@ -397,6 +402,116 @@ class AI_Bridge {
 				'payload'      => $payload,
 				'expires_in'   => self::JOB_TTL,
 				'fee_uc'       => $fee_uc,
+			)
+		);
+	}
+
+	/**
+	 * Renew a signed image handoff for the same user-owned Gateway job.
+	 *
+	 * The endpoint returns a fresh handoff token while retaining only its
+	 * password hash. It never creates a new job or changes its payload.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function handoff_job_handler( $request ) {
+		if ( ! self::is_enabled() ) {
+			return new \WP_Error( 'local_codex_disabled', __( 'AI Model Relay is not enabled for this site.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
+		}
+
+		$job_id = sanitize_text_field( (string) $request->get_param( 'job_id' ) );
+		if ( ! wp_is_uuid( $job_id ) ) {
+			return new \WP_Error( 'local_codex_job_invalid', __( 'The AI Model Relay job identifier is invalid.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+
+		$params = $request->get_json_params();
+		$params = is_array( $params ) ? $params : array();
+		$request_hash = isset( $params['request_hash'] ) ? (string) $params['request_hash'] : '';
+		if ( 1 !== preg_match( '/^[a-f0-9]{64}$/', $request_hash ) ) {
+			return new \WP_Error( 'local_codex_hash_invalid', __( 'The AI Model Relay request hash is invalid.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+
+		$user_id = get_current_user_id();
+		$job = get_transient( self::job_key( $job_id ) );
+		if ( ! is_array( $job ) ) {
+			$receipt = get_transient( self::receipt_key( $job_id ) );
+			if ( ! is_array( $receipt ) ) {
+				$receipt = get_option( self::receipt_option_key( $job_id ), null );
+			}
+			if ( ! is_array( $receipt ) ) {
+				return new \WP_Error( 'local_codex_job_expired', __( 'AI Model Relay job expired or does not exist.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+			}
+			if ( (int) ( $receipt['user_id'] ?? 0 ) !== $user_id ) {
+				return new \WP_Error( 'local_codex_wrong_user', __( 'AI Model Relay job belongs to another user.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
+			}
+			if ( ! hash_equals( (string) ( $receipt['request_hash'] ?? '' ), $request_hash ) ) {
+				return new \WP_Error( 'local_codex_hash_mismatch', __( 'AI Model Relay request hash changed.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+			}
+			if ( 'image' === (string) ( $receipt['type'] ?? '' ) && 'completed' === (string) ( $receipt['status'] ?? '' ) ) {
+				return new \WP_Error( 'local_codex_job_completed', __( 'The AI Model Relay image job has already completed.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+			}
+			return new \WP_Error( 'local_codex_job_not_active', __( 'This AI Model Relay job cannot be handed off again.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+
+		if ( (int) ( $job['user_id'] ?? 0 ) !== $user_id ) {
+			return new \WP_Error( 'local_codex_wrong_user', __( 'AI Model Relay job belongs to another user.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
+		}
+		if ( ! hash_equals( (string) ( $job['request_hash'] ?? '' ), $request_hash ) ) {
+			return new \WP_Error( 'local_codex_hash_mismatch', __( 'AI Model Relay request hash changed.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+		if ( 'image' !== (string) ( $job['type'] ?? '' ) || ! is_array( $job['payload'] ?? null ) ) {
+			return new \WP_Error( 'local_codex_handoff_type_invalid', __( 'Only a valid AI Model Relay image job can be handed off again.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		if ( 'created' !== (string) ( $job['status'] ?? '' ) ) {
+			return new \WP_Error( 'local_codex_job_not_active', __( 'This AI Model Relay image job is no longer active.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+		if ( ! Integration_Service::user_can_access_capability( $user_id, 'image', (string) ( $job['model'] ?? '' ) ) ) {
+			return new \WP_Error( 'plan_restriction', __( 'Your plan no longer allows this AI Model Relay image request.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
+		}
+		$payload_error = self::validate_image_payload( $job['payload'] );
+		if ( is_wp_error( $payload_error ) ) {
+			return new \WP_Error( 'local_codex_job_invalid', __( 'The stored AI Model Relay image job is no longer valid.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
+		}
+
+		$token_hashes = isset( $job['handoff_token_hashes'] ) && is_array( $job['handoff_token_hashes'] ) ? array_values( $job['handoff_token_hashes'] ) : array();
+		if ( count( $token_hashes ) >= 8 ) {
+			return new \WP_Error( 'local_codex_handoff_limit', __( 'The AI Model Relay handoff renewal limit was reached.', 'alorbach-ai-gateway' ), array( 'status' => 429 ) );
+		}
+
+		$token = wp_generate_password( 32, false, false );
+		$token_hashes[] = wp_hash_password( $token );
+		$job['handoff_token_hashes'] = $token_hashes;
+		$job['handoff_count'] = count( $token_hashes );
+		set_transient( self::job_key( $job_id ), $job, self::JOB_TTL );
+		set_transient( 'alorbach_local_codex_hash_' . $request_hash, $job_id, self::JOB_TTL );
+
+		$stored_job = get_transient( self::job_key( $job_id ) );
+		$stored_token_hash = '';
+		if ( is_array( $stored_job ) && is_array( $stored_job['handoff_token_hashes'] ?? null ) ) {
+			$stored_token_hashes = $stored_job['handoff_token_hashes'];
+			$stored_token_hash = end( $stored_token_hashes );
+		}
+		if (
+			! is_array( $stored_job )
+			|| (int) ( $stored_job['user_id'] ?? 0 ) !== $user_id
+			|| ! hash_equals( (string) ( $stored_job['request_hash'] ?? '' ), $request_hash )
+			|| ! is_string( $stored_token_hash )
+			|| ! wp_check_password( $token, $stored_token_hash )
+		) {
+			return new \WP_Error( 'local_codex_handoff_persist_failed', __( 'AI Model Relay could not safely save the renewed handoff.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+		}
+
+		return rest_ensure_response(
+			array(
+				'job_id'       => $job_id,
+				'job_token'    => $token,
+				'request_hash' => $request_hash,
+				'request_id'   => $job_id,
+				'type'         => 'image',
+				'payload'      => $job['payload'],
+				'expires_in'   => self::JOB_TTL,
+				'fee_uc'       => (int) ( $job['fee_uc'] ?? 0 ),
 			)
 		);
 	}
@@ -1126,7 +1241,9 @@ class AI_Bridge {
 		$quality_supported = empty( $capabilities['supported_qualities'] ) ? ( ! $quality_explicit || '' === $quality || 'auto' === strtolower( $quality ) ) : ( 'auto' === strtolower( $quality ) || in_array( $quality, (array) $capabilities['supported_qualities'], true ) );
 		$size_supported = empty( $capabilities['supported_sizes'] ) || in_array( $size, (array) $capabilities['supported_sizes'], true );
 		$ratio = (string) ( $payload['aspect_ratio'] ?? '' );
-		$ratio_supported = '' === $ratio || in_array( $ratio, (array) ( $capabilities['supported_aspect_ratios'] ?? array() ), true );
+		$allowed_ratios = array_values( array_filter( array_map( 'strval', (array) ( $capabilities['supported_aspect_ratios'] ?? array() ) ) ) );
+		// An empty list means this provider does not take a ratio. Codex is constrained by size instead.
+		$ratio_supported = '' === $ratio || ! $allowed_ratios || in_array( $ratio, $allowed_ratios, true );
 		$cloud_ok = empty( $contract['cloud_upload'] ) || true === ( $payload['cloud_upload_confirmed'] ?? false ) || ( is_array( $payload['cloud_consent'] ?? null ) && true === ( $payload['cloud_consent']['confirmed'] ?? false ) );
 		return $size_supported
 			&& $quality_supported
@@ -1235,7 +1352,17 @@ class AI_Bridge {
 			return new \WP_Error( 'local_codex_wrong_user', __( 'Local Codex job belongs to another user.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
 		}
 		$token = isset( $params['job_token'] ) ? (string) $params['job_token'] : '';
-		if ( '' === $token || ! wp_check_password( $token, (string) $job['token_hash'] ) ) {
+		$token_valid = '' !== $token && wp_check_password( $token, (string) ( $job['token_hash'] ?? '' ) );
+		if ( ! $token_valid ) {
+			$handoff_token_hashes = isset( $job['handoff_token_hashes'] ) && is_array( $job['handoff_token_hashes'] ) ? array_slice( $job['handoff_token_hashes'], 0, 8 ) : array();
+			foreach ( $handoff_token_hashes as $token_hash ) {
+				if ( is_string( $token_hash ) && wp_check_password( $token, $token_hash ) ) {
+					$token_valid = true;
+					break;
+				}
+			}
+		}
+		if ( ! $token_valid ) {
 			return new \WP_Error( 'local_codex_bad_token', __( 'Local Codex job token is invalid.', 'alorbach-ai-gateway' ), array( 'status' => 403 ) );
 		}
 		if ( (string) ( $params['request_hash'] ?? '' ) !== (string) $job['request_hash'] ) {
