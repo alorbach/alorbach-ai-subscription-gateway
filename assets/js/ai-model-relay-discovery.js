@@ -27,23 +27,54 @@
 		return error;
 	}
 
+	function relaySendsCookies(bridgeUrl) {
+		try {
+			return new URL(bridgeUrl, window.location.href).origin !== window.location.origin;
+		} catch (error) {
+			return false;
+		}
+	}
+
+	function unreachableMessage(url, credentials) {
+		var target = String(url || '');
+		try { target = new URL(url, window.location.href).origin; } catch (error) {}
+		if (credentials === 'include') {
+			return 'AI Model Relay at ' + target + ' blocked the browser. Open that address and sign in to Cloudflare Access, leave the port empty, then import again.';
+		}
+		return 'AI Model Relay is not reachable.';
+	}
+
 	function jsonRequest(url, options) {
 		var opts = Object.assign({
 			method: 'GET',
 			mode: 'cors',
 			cache: 'no-store',
 			credentials: 'same-origin',
-			headers: { 'Content-Type': 'application/json' }
+			headers: {}
 		}, options || {});
+		opts.headers = Object.assign({}, opts.headers || {});
 		if (opts.body && typeof opts.body === 'object') opts.body = JSON.stringify(opts.body);
+		if (opts.body && !opts.headers['Content-Type'] && !opts.headers['content-type']) {
+			opts.headers['Content-Type'] = opts.credentials === 'include' ? 'text/plain;charset=UTF-8' : 'application/json';
+		}
+		if (String(opts.method || 'GET').toUpperCase() === 'GET') {
+			delete opts.headers['Content-Type'];
+			delete opts.headers['content-type'];
+		}
+		if (opts.credentials === 'include' && !opts.redirect) opts.redirect = 'manual';
 		return fetch(url, opts).then(function (response) {
+			if (response.type === 'opaqueredirect') {
+				var accessError = new Error(unreachableMessage(url, 'include'));
+				accessError.code = 'relay_access_login';
+				throw accessError;
+			}
 			return readJson(response).then(function (data) {
 				if (!response.ok) throw errorFromResponse(response, data);
 				return data;
 			});
 		}).catch(function (error) {
 			if (error && error.code) throw error;
-			var wrapped = new Error('AI Model Relay is not reachable.');
+			var wrapped = new Error(unreachableMessage(url, opts.credentials));
 			wrapped.code = 'relay_unreachable';
 			wrapped.cause = error;
 			throw wrapped;
@@ -79,6 +110,7 @@
 		}
 		return jsonRequest(bridge.bridgeUrl + '/v1/pair', {
 			method: 'POST',
+			credentials: relaySendsCookies(bridge.bridgeUrl) ? 'include' : 'same-origin',
 			body: { origin: bridge.origin, pairing_code: pairingCode }
 		}).then(function (data) {
 			var token = String(data && data.token || '');
@@ -192,10 +224,23 @@
 		return loadConfig(options).then(function (config) {
 			var bridge = getBridge(config || {});
 			return ensurePairedBridge(options, bridge).then(function (pairedBridge) {
-				var headers = Object.assign({ 'Content-Type': 'application/json', 'X-Alorbach-Bridge-Token': pairedBridge.token }, options.relayHeaders || {});
+				var crossOrigin = relaySendsCookies(pairedBridge.bridgeUrl);
+				var headers = Object.assign({}, options.relayHeaders || {});
+				if (crossOrigin) {
+					delete headers['Content-Type'];
+					delete headers['X-Alorbach-Bridge-Token'];
+				} else {
+					headers['X-Alorbach-Bridge-Token'] = pairedBridge.token;
+				}
+				function relayUrl(path) {
+					var url = pairedBridge.bridgeUrl + path;
+					if (!crossOrigin) return url;
+					return url + '?bridge_token=' + encodeURIComponent(pairedBridge.token);
+				}
+				var requestOptions = { headers: headers, credentials: crossOrigin ? 'include' : 'same-origin' };
 				return Promise.all([
-					jsonRequest(pairedBridge.bridgeUrl + '/v1/relay/models', { headers: headers }),
-					jsonRequest(pairedBridge.bridgeUrl + '/v1/relay/capabilities', { headers: headers })
+					jsonRequest(relayUrl('/v1/relay/models'), requestOptions),
+					jsonRequest(relayUrl('/v1/relay/capabilities'), requestOptions)
 				]).then(function (payloads) {
 					var ready = readyBackends(payloads[1]);
 					var items = [];

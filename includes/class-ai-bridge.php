@@ -112,8 +112,9 @@ class AI_Bridge {
 	 * Normalize an http(s) relay URL and an optional port override.
 	 *
 	 * An empty port keeps a port already present in the URL. Scheme defaults
-	 * 80 and 443 are omitted. Userinfo, queries, fragments, and non-root paths
-	 * are rejected so the stored value is only an origin.
+	 * 80 and 443 are omitted. Port 8765 is omitted for a public https host
+	 * because that address is reached on 443. Userinfo, queries, fragments,
+	 * and non-root paths are rejected so the stored value is only an origin.
 	 *
 	 * @param string          $url Relay URL.
 	 * @param int|string|null $port Explicit port. Empty keeps the URL port.
@@ -158,6 +159,11 @@ class AI_Bridge {
 		$display_host = false !== strpos( $host, ':' ) ? '[' . $host . ']' : $host;
 		$normalized   = $scheme . '://' . $display_host;
 		$default_port = 'https' === $scheme ? 443 : 80;
+		// The tray app listens on 8765. A public https host is reached through
+		// the TLS terminator on 443; keeping 8765 makes the browser time out.
+		if ( 8765 === $explicit_port && 'https' === $scheme && ! self::bridge_host_is_loopback( $host ) ) {
+			$explicit_port = null;
+		}
 		if ( null !== $explicit_port && $explicit_port !== $default_port ) {
 			$normalized .= ':' . $explicit_port;
 		}
@@ -188,6 +194,14 @@ class AI_Bridge {
 			'invalid_bridge_url',
 			__( 'Enter an http or https AI Model Relay URL with a host. The optional port must be from 1 to 65535. Login details and paths are not stored.', 'alorbach-ai-gateway' )
 		);
+	}
+
+	/**
+	 * @param string $host Parsed host without brackets.
+	 * @return bool
+	 */
+	private static function bridge_host_is_loopback( $host ) {
+		return in_array( $host, array( '127.0.0.1', 'localhost', '::1' ), true );
 	}
 
 	/**

@@ -595,7 +595,7 @@ class Admin_Settings {
 								<th scope="row"><label for="alorbach_ai_bridge_port"><?php esc_html_e( 'AI Model Relay port', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
 									<input type="number" name="alorbach_ai_bridge_port" id="alorbach_ai_bridge_port" value="<?php echo esc_attr( $local_codex_bridge_parts['port'] ); ?>" min="1" max="65535" step="1" class="small-text" placeholder="8765" />
-									<p class="description"><?php esc_html_e( 'Optional. Leave empty to use 443 for https or 80 for http. A port already typed into the URL is kept unless this field replaces it. The local default port is 8765.', 'alorbach-ai-gateway' ); ?></p>
+									<p class="description"><?php esc_html_e( 'Leave empty for a public https relay. Port 8765 is only the local tray app and is ignored on a public https address, because that address is reached on port 443.', 'alorbach-ai-gateway' ); ?></p>
 								</td>
 							</tr>
 							<tr>

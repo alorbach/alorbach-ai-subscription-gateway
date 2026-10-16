@@ -649,7 +649,7 @@ class Admin_API_Keys {
 								<label for="alorbach_ai_bridge_port"><?php esc_html_e( 'Port', 'alorbach-ai-gateway' ); ?></label><br />
 								<input type="number" name="alorbach_ai_bridge_port" id="alorbach_ai_bridge_port" value="<?php echo esc_attr( $bridge_parts['port'] ); ?>" min="1" max="65535" step="1" class="small-text" placeholder="8765" />
 							</p>
-							<p class="description" style="margin:0;"><?php esc_html_e( 'Leave the port empty to use 443 for https or 80 for http. A port already typed into the URL is kept unless this field replaces it. The local default is http://127.0.0.1 port 8765.', 'alorbach-ai-gateway' ); ?></p>
+							<p class="description" style="margin:0;"><?php esc_html_e( 'Leave the port empty for a public https relay. Port 8765 is only the local tray app and is ignored on a public https address, because that address is reached on port 443.', 'alorbach-ai-gateway' ); ?></p>
 						</div>
 						<?php
 					}

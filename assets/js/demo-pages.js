@@ -65,10 +65,30 @@
 				'Content-Type': 'application/json'
 			}
 		}, options || {});
+		opts.headers = Object.assign({}, opts.headers || {});
 		if (opts.body && typeof opts.body === 'object') {
 			opts.body = JSON.stringify(opts.body);
 		}
-		return fetch(url, opts);
+		var crossOrigin = false;
+		try {
+			crossOrigin = new URL(url, window.location.href).origin !== window.location.origin;
+		} catch (error) {}
+		if (crossOrigin) {
+			var token = opts.headers['X-Alorbach-Bridge-Token'] || '';
+			opts.credentials = 'include';
+			opts.redirect = 'manual';
+			opts.headers = {};
+			if (opts.body) opts.headers['Content-Type'] = 'text/plain;charset=UTF-8';
+			if (token) url += (url.indexOf('?') === -1 ? '?' : '&') + 'bridge_token=' + encodeURIComponent(token);
+		}
+		return fetch(url, opts).then(function (response) {
+			if (response.type === 'opaqueredirect') {
+				var accessError = new Error('AI Model Relay redirected this browser. Open the relay address and sign in to Cloudflare Access, then try again.');
+				accessError.code = 'relay_access_login';
+				throw accessError;
+			}
+			return response;
+		});
 	}
 
 	function localCodexReadJson(response) {

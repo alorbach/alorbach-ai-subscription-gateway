@@ -160,7 +160,7 @@ AI Model Relay is a browser-mediated workflow for users who want site AI feature
 - Plan policy: an empty allowlist permits all configured models for an enabled capability; `model-relay:*` permits relay models only within that capability
 - Notes:
   - enable it in **AI Gateway -> Settings -> Providers / Import**
-  - set the relay URL and port in **AI Gateway -> API Keys** or on that same Providers screen. Leave the port empty for the https or http default
+  - set the relay URL and port in **AI Gateway -> API Keys** or on that same Providers screen. Leave the port empty for a public https relay. Port 8765 is the local tray default and is ignored for a public https address
   - install and pair the AI Model Relay Windows tray companion
   - WordPress remains authoritative for login, plan access, quotas, rate limits, optional fees, and audit records
   - Grok Imagine video is experimental and may use an image reference
