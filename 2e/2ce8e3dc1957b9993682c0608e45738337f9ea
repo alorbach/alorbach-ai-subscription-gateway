@@ -1,0 +1,22 @@
+includes/class-ai-bridge.php
+  s_a2d5c73b0210bc::t_cf9e2f08c6582c 1116-1120,1122-1127
+bin/verify-rest-contracts.php
+  s_a2d5c73b0210bc::t_36aefcf327e01b 563-601
+  s_a2d5c73b0210bc::t_23a18de0cbf348 96-188
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e2ce8e3dc1957b9993682c0608e45738337f9ea",
+  "prompts": {},
+  "sessions": {
+    "s_a2d5c73b0210bc": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "180218e5-3bbe-447f-851e-ce4316026a90",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
