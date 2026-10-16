@@ -156,10 +156,11 @@ AI Model Relay is a browser-mediated workflow for users who want site AI feature
 - Canonical provider key: `ai_bridge`; the legacy `codex_local` key remains available
 - Canonical model IDs: `model-relay:codex:*`, `model-relay:cursor-cli:*`, `model-relay:grok-cli:*`, `model-relay:local-asr:*`, and `local-asr:*`
 - Compatibility model IDs: `codex-local:auto`, `codex-local:image`, and `codex-local:audio:*`
-- Request behavior: WordPress creates a signed one-time job, the browser sends it to the paired tray app at `http://127.0.0.1:8765`, then posts the normalized result back to WordPress
+- Request behavior: WordPress creates a signed one-time job, the browser sends it to the configured AI Model Relay address (default `http://127.0.0.1:8765`), then posts the normalized result back to WordPress
 - Plan policy: an empty allowlist permits all configured models for an enabled capability; `model-relay:*` permits relay models only within that capability
 - Notes:
   - enable it in **AI Gateway -> Settings -> Providers / Import**
+  - set the relay URL and port in **AI Gateway -> API Keys** or on that same Providers screen. Leave the port empty for the https or http default
   - install and pair the AI Model Relay Windows tray companion
   - WordPress remains authoritative for login, plan access, quotas, rate limits, optional fees, and audit records
   - Grok Imagine video is experimental and may use an image reference

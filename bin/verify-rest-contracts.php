@@ -128,6 +128,8 @@ try {
 	$old_local_codex_audio_fee_uc = get_option( 'alorbach_local_codex_audio_fee_uc', 0 );
 	$old_ai_bridge_enabled = get_option( 'alorbach_ai_bridge_enabled', '__alorbach_missing__' );
 	$old_ai_bridge_audio_fee_uc = get_option( 'alorbach_ai_bridge_audio_fee_uc', '__alorbach_missing__' );
+	$old_ai_bridge_bridge_url = get_option( 'alorbach_ai_bridge_bridge_url', '__alorbach_missing__' );
+	$old_local_codex_bridge_url = get_option( 'alorbach_local_codex_bridge_url', '__alorbach_missing__' );
 	$old_plans = get_option( 'alorbach_plans', '__alorbach_missing__' );
 	$old_api_keys = get_option( 'alorbach_api_keys', '__alorbach_missing__' );
 	try {
@@ -204,6 +206,20 @@ try {
 		$ai_bridge_config = alorbach_verify_request( '/alorbach/v1/ai-bridge/config' );
 		$legacy_bridge_config = alorbach_verify_request( '/alorbach/v1/local-codex/config' );
 		alorbach_require( 'AI Model Relay' === ( $ai_bridge_config['product_name'] ?? '' ) && ( $ai_bridge_config['bridge_url'] ?? '' ) === ( $legacy_bridge_config['bridge_url'] ?? null ), 'Canonical and legacy bridge config routes must expose equivalent settings.' );
+		alorbach_require( 'https://ai-model-relay.shooter-szene.de' === \Alorbach\AIGateway\AI_Bridge::normalize_bridge_url( 'https://ai-model-relay.shooter-szene.de/' ), 'A remote https relay URL must drop the root path and the default port.' );
+		alorbach_require( 'https://ai-model-relay.shooter-szene.de:8443' === \Alorbach\AIGateway\AI_Bridge::normalize_bridge_url( 'https://ai-model-relay.shooter-szene.de', '8443' ), 'An explicit relay port must override the URL and stay in the stored address.' );
+		alorbach_require( 'http://127.0.0.1:8765' === \Alorbach\AIGateway\AI_Bridge::normalize_bridge_url( 'http://127.0.0.1:8765', '' ), 'An empty port must keep a non-default port already present in the relay URL.' );
+		alorbach_require( is_wp_error( \Alorbach\AIGateway\AI_Bridge::normalize_bridge_url( 'https://user:secret@ai-model-relay.shooter-szene.de' ) ) && is_wp_error( \Alorbach\AIGateway\AI_Bridge::normalize_bridge_url( 'ftp://ai-model-relay.shooter-szene.de' ) ), 'Relay addresses must reject login details and non-http schemes.' );
+		$previous_bridge_url = \Alorbach\AIGateway\AI_Bridge::get_bridge_url();
+		alorbach_require( is_wp_error( \Alorbach\AIGateway\AI_Bridge::update_bridge_url( 'https://ai-model-relay.shooter-szene.de/secret', '8443' ) ) && $previous_bridge_url === \Alorbach\AIGateway\AI_Bridge::get_bridge_url(), 'An invalid relay address must leave the previous bridge URL unchanged.' );
+		alorbach_require( 'https://ai-model-relay.shooter-szene.de' === \Alorbach\AIGateway\AI_Bridge::update_bridge_url( 'https://ai-model-relay.shooter-szene.de', '' ), 'A remote relay URL without a port must be stored as an https origin.' );
+		$remote_bridge_config = alorbach_verify_request( '/alorbach/v1/ai-bridge/config' );
+		$remote_legacy_config = alorbach_verify_request( '/alorbach/v1/local-codex/config' );
+		$remote_integration = \Alorbach\AIGateway\Integration_Service::get_integration_config( 0 );
+		alorbach_require( 'https://ai-model-relay.shooter-szene.de' === ( $remote_bridge_config['bridge_url'] ?? '' ) && ( $remote_bridge_config['bridge_url'] ?? '' ) === ( $remote_legacy_config['bridge_url'] ?? null ) && ( $remote_bridge_config['bridge_url'] ?? '' ) === ( $remote_integration['ai_bridge']['bridge_url'] ?? '' ), 'Bridge config must round-trip a remote https relay URL without a port.' );
+		alorbach_require( 'https://ai-model-relay.shooter-szene.de:8443' === \Alorbach\AIGateway\AI_Bridge::update_bridge_url( 'https://ai-model-relay.shooter-szene.de:443', '8443' ), 'A custom relay port must replace a default port typed into the URL.' );
+		$ported_bridge_config = alorbach_verify_request( '/alorbach/v1/ai-bridge/config' );
+		alorbach_require( 'https://ai-model-relay.shooter-szene.de:8443' === ( $ported_bridge_config['bridge_url'] ?? '' ) && ( $ported_bridge_config['bridge_url'] ?? '' ) === ( alorbach_verify_request( '/alorbach/v1/local-codex/config' )['bridge_url'] ?? null ), 'Bridge config must round-trip a remote https relay URL with an explicit port.' );
 		alorbach_require( 'model-relay:*' === ( $ai_bridge_config['model_policy']['relay_wildcard'] ?? '' ), 'AI Bridge config must expose the capability-scoped relay wildcard policy.' );
 		alorbach_require( '/ai-bridge/jobs/{job_id}/receipt' === ( $ai_bridge_config['canonical_routes']['receipt'] ?? '' ) && '/local-codex/jobs/{job_id}/receipt' === ( $legacy_bridge_config['legacy_routes']['receipt'] ?? '' ), 'Canonical and legacy AI Bridge config must expose the owner-bound completion receipt route.' );
 		alorbach_require( true === ( $ai_bridge_config['supports_cancel'] ?? null ) && '/ai-bridge/jobs/{job_id}/cancel' === ( $ai_bridge_config['canonical_routes']['cancel'] ?? '' ) && '/local-codex/jobs/{job_id}/cancel' === ( $legacy_bridge_config['legacy_routes']['cancel'] ?? '' ), 'Canonical and legacy AI Bridge config must expose signed pre-execution cancellation.' );
@@ -466,6 +482,16 @@ try {
 			delete_option( 'alorbach_ai_bridge_audio_fee_uc' );
 		} else {
 			update_option( 'alorbach_ai_bridge_audio_fee_uc', $old_ai_bridge_audio_fee_uc, false );
+		}
+		if ( '__alorbach_missing__' === $old_ai_bridge_bridge_url ) {
+			delete_option( 'alorbach_ai_bridge_bridge_url' );
+		} else {
+			update_option( 'alorbach_ai_bridge_bridge_url', $old_ai_bridge_bridge_url, false );
+		}
+		if ( '__alorbach_missing__' === $old_local_codex_bridge_url ) {
+			delete_option( 'alorbach_local_codex_bridge_url' );
+		} else {
+			update_option( 'alorbach_local_codex_bridge_url', $old_local_codex_bridge_url, false );
 		}
 		if ( '__alorbach_missing__' === $old_plans ) {
 			delete_option( 'alorbach_plans' );

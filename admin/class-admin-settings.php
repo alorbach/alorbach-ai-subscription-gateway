@@ -246,7 +246,6 @@ class Admin_Settings {
 			$google_import_default      = in_array( $google_import_default, array( 'all', 'none' ), true ) ? $google_import_default : 'all';
 			$google_model_whitelist     = isset( $_POST['alorbach_google_model_whitelist'] ) ? sanitize_textarea_field( wp_unslash( $_POST['alorbach_google_model_whitelist'] ) ) : '';
 			$local_codex_enabled        = isset( $_POST['alorbach_local_codex_enabled'] );
-			$local_codex_bridge_url     = isset( $_POST['alorbach_local_codex_bridge_url'] ) ? esc_url_raw( wp_unslash( $_POST['alorbach_local_codex_bridge_url'] ) ) : 'http://127.0.0.1:8765';
 			$local_codex_chat_fee_uc    = isset( $_POST['alorbach_local_codex_chat_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_chat_fee_uc'] ) ) ) : 0;
 			$local_codex_image_fee_uc   = isset( $_POST['alorbach_local_codex_image_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_image_fee_uc'] ) ) ) : 0;
 			$local_codex_audio_fee_uc   = isset( $_POST['alorbach_local_codex_audio_fee_uc'] ) ? max( 0, (int) sanitize_text_field( wp_unslash( $_POST['alorbach_local_codex_audio_fee_uc'] ) ) ) : 0;
@@ -275,6 +274,7 @@ class Admin_Settings {
 			$default_audio_model        = isset( $_POST['alorbach_default_audio_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_default_audio_model'] ) ) : $default_audio_model;
 			$default_video_model        = isset( $_POST['alorbach_default_video_model'] ) ? sanitize_text_field( wp_unslash( $_POST['alorbach_default_video_model'] ) ) : $default_video_model;
 
+			$bridge_address_unchanged = false;
 			if ( 'general-defaults' === $active_tab ) {
 				update_option( 'alorbach_default_chat_model', $default_chat_model );
 				update_option( 'alorbach_default_max_tokens', $default_max_tokens );
@@ -302,7 +302,16 @@ class Admin_Settings {
 				update_option( 'alorbach_google_import_default', $google_import_default );
 				update_option( 'alorbach_google_model_whitelist', $google_model_whitelist );
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'enabled', $local_codex_enabled );
-				\Alorbach\AIGateway\AI_Bridge::update_setting( 'bridge_url', $local_codex_bridge_url ?: 'http://127.0.0.1:8765' );
+				if ( isset( $_POST['alorbach_ai_bridge_url'] ) ) {
+					$bridge_result = \Alorbach\AIGateway\AI_Bridge::update_bridge_url(
+						wp_unslash( $_POST['alorbach_ai_bridge_url'] ),
+						isset( $_POST['alorbach_ai_bridge_port'] ) ? wp_unslash( $_POST['alorbach_ai_bridge_port'] ) : ''
+					);
+					if ( is_wp_error( $bridge_result ) ) {
+						$bridge_address_unchanged = true;
+						Admin_Helper::render_notice( $bridge_result->get_error_message(), 'error' );
+					}
+				}
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'chat_fee_uc', $local_codex_chat_fee_uc );
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'image_fee_uc', $local_codex_image_fee_uc );
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'audio_fee_uc', $local_codex_audio_fee_uc );
@@ -312,7 +321,11 @@ class Admin_Settings {
 				update_option( 'alorbach_selling_multiplier', $selling_multiplier );
 				update_option( 'alorbach_debug_enabled', $debug_enabled );
 			}
-			Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
+			if ( $bridge_address_unchanged ) {
+				Admin_Helper::render_notice( __( 'Other provider settings were saved. The AI Model Relay address was not changed.', 'alorbach-ai-gateway' ), 'warning' );
+			} else {
+				Admin_Helper::render_notice( __( 'Settings saved.', 'alorbach-ai-gateway' ) );
+			}
 
 			$max_tokens_options = self::get_max_tokens_options();
 			$default_max_tokens = self::get_default_max_tokens();
@@ -324,7 +337,7 @@ class Admin_Settings {
 		$google_import_default      = get_option( 'alorbach_google_import_default', 'all' );
 		$google_model_whitelist     = get_option( 'alorbach_google_model_whitelist', \Alorbach\AIGateway\Model_Importer::GOOGLE_MODEL_WHITELIST_DEFAULT );
 		$local_codex_enabled        = (bool) \Alorbach\AIGateway\AI_Bridge::get_setting( 'enabled', true );
-		$local_codex_bridge_url     = (string) \Alorbach\AIGateway\AI_Bridge::get_setting( 'bridge_url', 'http://127.0.0.1:8765' );
+		$local_codex_bridge_parts   = \Alorbach\AIGateway\AI_Bridge::bridge_url_parts();
 		$local_codex_chat_fee_uc    = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'chat_fee_uc', 0 );
 		$local_codex_image_fee_uc   = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'image_fee_uc', 0 );
 		$local_codex_audio_fee_uc   = (int) \Alorbach\AIGateway\AI_Bridge::get_setting( 'audio_fee_uc', 0 );
@@ -559,7 +572,7 @@ class Admin_Settings {
 										<input type="checkbox" name="alorbach_local_codex_enabled" id="alorbach_local_codex_enabled" value="1" <?php checked( $local_codex_enabled ); ?> />
 										<?php esc_html_e( 'Allow logged-in users to use their own AI Model Relay tray app', 'alorbach-ai-gateway' ); ?>
 									</label>
-									<p class="description"><?php esc_html_e( 'The browser talks to the user-owned tray app on localhost. WordPress still controls plans, quotas, and audit records.', 'alorbach-ai-gateway' ); ?></p>
+									<p class="description"><?php esc_html_e( 'The browser talks to the configured AI Model Relay. WordPress still controls plans, quotas, and audit records.', 'alorbach-ai-gateway' ); ?></p>
 									<p class="description">
 										<?php
 										printf(
@@ -572,10 +585,17 @@ class Admin_Settings {
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><label for="alorbach_local_codex_bridge_url"><?php esc_html_e( 'AI Model Relay URL', 'alorbach-ai-gateway' ); ?></label></th>
+								<th scope="row"><label for="alorbach_ai_bridge_url"><?php esc_html_e( 'AI Model Relay URL', 'alorbach-ai-gateway' ); ?></label></th>
 								<td>
-									<input type="url" name="alorbach_local_codex_bridge_url" id="alorbach_local_codex_bridge_url" value="<?php echo esc_attr( $local_codex_bridge_url ); ?>" class="regular-text code" />
-									<p class="description"><?php esc_html_e( 'Default: http://127.0.0.1:8765. Keep this as localhost unless you intentionally package a different port.', 'alorbach-ai-gateway' ); ?></p>
+									<input type="url" name="alorbach_ai_bridge_url" id="alorbach_ai_bridge_url" value="<?php echo esc_attr( $local_codex_bridge_parts['url'] ); ?>" class="regular-text code" placeholder="https://ai-model-relay.example" />
+									<p class="description"><?php esc_html_e( 'Scheme and host. A remote https address is supported. The local default is http://127.0.0.1.', 'alorbach-ai-gateway' ); ?></p>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row"><label for="alorbach_ai_bridge_port"><?php esc_html_e( 'AI Model Relay port', 'alorbach-ai-gateway' ); ?></label></th>
+								<td>
+									<input type="number" name="alorbach_ai_bridge_port" id="alorbach_ai_bridge_port" value="<?php echo esc_attr( $local_codex_bridge_parts['port'] ); ?>" min="1" max="65535" step="1" class="small-text" placeholder="8765" />
+									<p class="description"><?php esc_html_e( 'Optional. Leave empty to use 443 for https or 80 for http. A port already typed into the URL is kept unless this field replaces it. The local default port is 8765.', 'alorbach-ai-gateway' ); ?></p>
 								</td>
 							</tr>
 							<tr>

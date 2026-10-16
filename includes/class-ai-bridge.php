@@ -33,6 +33,7 @@ class AI_Bridge {
 	);
 	const IMAGE_CAPABILITY_CONTRACT_VERSION = 1;
 	const MINIMUM_RELAY_VERSION = '1.0.10';
+	const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:8765';
 	const JOB_TTL           = 900;
 
 	/**
@@ -70,6 +71,137 @@ class AI_Bridge {
 		$name = sanitize_key( (string) $name );
 		update_option( 'alorbach_ai_bridge_' . $name, $value );
 		update_option( 'alorbach_local_codex_' . $name, $value );
+	}
+
+	/**
+	 * Published relay address. Invalid stored values fall back to localhost.
+	 *
+	 * @return string
+	 */
+	public static function get_bridge_url() {
+		$stored = (string) self::get_setting( 'bridge_url', self::DEFAULT_BRIDGE_URL );
+		$normalized = self::normalize_bridge_url( $stored );
+		return is_wp_error( $normalized ) ? self::DEFAULT_BRIDGE_URL : $normalized;
+	}
+
+	/**
+	 * Split a relay address into the scheme-and-host field and optional port.
+	 *
+	 * @param string|null $url Stored or raw URL. Null reads the current setting.
+	 * @return array{url:string,port:string}
+	 */
+	public static function bridge_url_parts( $url = null ) {
+		$normalized = self::normalize_bridge_url( null === $url ? self::get_bridge_url() : (string) $url );
+		if ( is_wp_error( $normalized ) ) {
+			$normalized = self::DEFAULT_BRIDGE_URL;
+		}
+		$parts = wp_parse_url( $normalized );
+		$parts = is_array( $parts ) ? $parts : array();
+		$scheme = strtolower( (string) ( $parts['scheme'] ?? 'http' ) );
+		$host   = (string) ( $parts['host'] ?? '127.0.0.1' );
+		if ( false !== strpos( $host, ':' ) ) {
+			$host = '[' . $host . ']';
+		}
+		return array(
+			'url'  => $scheme . '://' . $host,
+			'port' => isset( $parts['port'] ) ? (string) (int) $parts['port'] : '',
+		);
+	}
+
+	/**
+	 * Normalize an http(s) relay URL and an optional port override.
+	 *
+	 * An empty port keeps a port already present in the URL. Scheme defaults
+	 * 80 and 443 are omitted. Userinfo, queries, fragments, and non-root paths
+	 * are rejected so the stored value is only an origin.
+	 *
+	 * @param string          $url Relay URL.
+	 * @param int|string|null $port Explicit port. Empty keeps the URL port.
+	 * @return string|\WP_Error
+	 */
+	public static function normalize_bridge_url( $url, $port = null ) {
+		if ( ! is_string( $url ) || ( null !== $port && ! is_string( $port ) && ! is_int( $port ) ) ) {
+			return self::invalid_bridge_url();
+		}
+		$parts = wp_parse_url( trim( $url ) );
+		if ( ! is_array( $parts ) ) {
+			return self::invalid_bridge_url();
+		}
+		$scheme = strtolower( (string) ( $parts['scheme'] ?? '' ) );
+		$host   = strtolower( (string) ( $parts['host'] ?? '' ) );
+		$path   = (string) ( $parts['path'] ?? '' );
+		if ( ! in_array( $scheme, array( 'http', 'https' ), true ) || ! self::bridge_host_is_valid( $host ) ) {
+			return self::invalid_bridge_url();
+		}
+		if ( isset( $parts['user'] ) || isset( $parts['pass'] ) || ! empty( $parts['query'] ) || ! empty( $parts['fragment'] ) ) {
+			return self::invalid_bridge_url();
+		}
+		if ( '' !== $path && '/' !== $path ) {
+			return self::invalid_bridge_url();
+		}
+
+		$explicit_port = null;
+		$port_text     = null === $port ? '' : trim( (string) $port );
+		if ( '' !== $port_text ) {
+			if ( 1 !== preg_match( '/^[1-9][0-9]{0,4}$/', $port_text ) || (int) $port_text > 65535 ) {
+				return self::invalid_bridge_url();
+			}
+			$explicit_port = (int) $port_text;
+		} elseif ( isset( $parts['port'] ) ) {
+			$url_port = (int) $parts['port'];
+			if ( $url_port < 1 || $url_port > 65535 ) {
+				return self::invalid_bridge_url();
+			}
+			$explicit_port = $url_port;
+		}
+
+		$display_host = false !== strpos( $host, ':' ) ? '[' . $host . ']' : $host;
+		$normalized   = $scheme . '://' . $display_host;
+		$default_port = 'https' === $scheme ? 443 : 80;
+		if ( null !== $explicit_port && $explicit_port !== $default_port ) {
+			$normalized .= ':' . $explicit_port;
+		}
+		return $normalized;
+	}
+
+	/**
+	 * Store a normalized relay address. Invalid input leaves the previous value.
+	 *
+	 * @param string          $url Relay URL.
+	 * @param int|string|null $port Explicit port.
+	 * @return string|\WP_Error Stored URL, or the validation error.
+	 */
+	public static function update_bridge_url( $url, $port = null ) {
+		$normalized = self::normalize_bridge_url( $url, $port );
+		if ( is_wp_error( $normalized ) ) {
+			return $normalized;
+		}
+		self::update_setting( 'bridge_url', $normalized );
+		return $normalized;
+	}
+
+	/**
+	 * @return \WP_Error
+	 */
+	private static function invalid_bridge_url() {
+		return new \WP_Error(
+			'invalid_bridge_url',
+			__( 'Enter an http or https AI Model Relay URL with a host. The optional port must be from 1 to 65535. Login details and paths are not stored.', 'alorbach-ai-gateway' )
+		);
+	}
+
+	/**
+	 * @param string $host Parsed host without brackets.
+	 * @return bool
+	 */
+	private static function bridge_host_is_valid( $host ) {
+		if ( '' === $host || false !== strpos( $host, '%' ) ) {
+			return false;
+		}
+		if ( false !== filter_var( $host, FILTER_VALIDATE_IP ) ) {
+			return true;
+		}
+		return false !== filter_var( $host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME );
 	}
 
 	/**
@@ -127,7 +259,7 @@ class AI_Bridge {
 				'enabled'        => true,
 				'origin'         => self::site_origin(),
 				'product_name'   => 'AI Model Relay',
-				'bridge_url'     => (string) self::get_setting( 'bridge_url', 'http://127.0.0.1:8765' ),
+				'bridge_url'     => self::get_bridge_url(),
 				'text_prefix'    => self::MODEL_TEXT_PREFIX,
 				'image_model'    => self::MODEL_IMAGE,
 				'audio_model'    => self::MODEL_AUDIO,

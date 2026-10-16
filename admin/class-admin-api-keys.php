@@ -7,6 +7,7 @@
 
 namespace Alorbach\AIGateway\Admin;
 
+use Alorbach\AIGateway\AI_Bridge;
 use Alorbach\AIGateway\API_Keys_Helper;
 use Alorbach\AIGateway\Codex_OAuth;
 
@@ -27,6 +28,13 @@ if ( ! defined( 'ABSPATH' ) ) {
  * @since   1.0.0
  */
 class Admin_API_Keys {
+
+	/**
+	 * The site-wide relay address is rendered once, on the first saved relay row.
+	 *
+	 * @var bool
+	 */
+	private static $bridge_address_rendered = false;
 
 	/**
 	 * Provider type options.
@@ -113,11 +121,26 @@ class Admin_API_Keys {
 				$entries[] = $entry;
 			}
 			API_Keys_Helper::save_entries( $entries );
+			$bridge_address_unchanged = false;
+			if ( isset( $_POST['alorbach_ai_bridge_url'] ) ) {
+				$bridge_result = AI_Bridge::update_bridge_url(
+					wp_unslash( $_POST['alorbach_ai_bridge_url'] ),
+					isset( $_POST['alorbach_ai_bridge_port'] ) ? wp_unslash( $_POST['alorbach_ai_bridge_port'] ) : ''
+				);
+				if ( is_wp_error( $bridge_result ) ) {
+					$bridge_address_unchanged = true;
+					Admin_Helper::render_notice( $bridge_result->get_error_message(), 'error' );
+				}
+			}
 			// Handle inline Codex disconnect.
 			if ( isset( $_POST['codex_disconnect'] ) && '1' === $_POST['codex_disconnect'] ) {
 				Codex_OAuth::revoke();
 			}
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'API keys saved.', 'alorbach-ai-gateway' ) . '</p></div>';
+			if ( $bridge_address_unchanged ) {
+				Admin_Helper::render_notice( __( 'API keys saved. The AI Model Relay address was not changed.', 'alorbach-ai-gateway' ), 'warning' );
+			} else {
+				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'API keys saved.', 'alorbach-ai-gateway' ) . '</p></div>';
+			}
 		}
 
 		$entries  = API_Keys_Helper::get_entries();
@@ -210,6 +233,9 @@ class Admin_API_Keys {
 			.alorbach-api-keys tr[data-type="codex"] .codex-inline-ui { display: block; }
 			.alorbach-api-keys .ai-bridge-inline-ui { display: none; font-size: 12px; max-width: 540px; }
 			.alorbach-api-keys tr[data-type="ai_bridge"] .ai-bridge-inline-ui { display: block; }
+			.alorbach-api-keys .ai-bridge-address { display: grid; gap: 6px; margin: 0 0 8px; }
+			.alorbach-api-keys .ai-bridge-address label { font-weight: 600; }
+			.alorbach-api-keys .ai-bridge-address input[type="url"] { width: 100%; max-width: 28rem; }
 			.alorbach-api-keys .codex-image-inline-ui { display: none; font-size: 12px; max-width: 540px; }
 			.alorbach-api-keys .codex-inline-ui { font-size: 12px; max-width: 540px; }
 			.alorbach-api-keys .codex-inline-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -261,6 +287,17 @@ class Admin_API_Keys {
 			var errText = <?php echo wp_json_encode( __( 'Error', 'alorbach-ai-gateway' ) ); ?>;
 			var showText = <?php echo wp_json_encode( __( 'Show', 'alorbach-ai-gateway' ) ); ?>;
 			var hideText = <?php echo wp_json_encode( __( 'Hide', 'alorbach-ai-gateway' ) ); ?>;
+			var saveRelayBeforePairText = <?php echo wp_json_encode( __( 'Save the relay address before pairing. Pairing uses the saved address.', 'alorbach-ai-gateway' ) ); ?>;
+			var relayUrlInput = document.getElementById('alorbach_ai_bridge_url');
+			var relayPortInput = document.getElementById('alorbach_ai_bridge_port');
+			var savedRelayUrl = relayUrlInput ? relayUrlInput.value : '';
+			var savedRelayPort = relayPortInput ? relayPortInput.value : '';
+			function relayAddressUnsaved() {
+				if (!relayUrlInput) return false;
+				var portNow = relayPortInput ? relayPortInput.value : '';
+				return relayUrlInput.value.trim() !== String(savedRelayUrl).trim()
+					|| String(portNow).trim() !== String(savedRelayPort).trim();
+			}
 			var typeOptions = <?php echo wp_json_encode( self::$type_options ); ?>;
 
 			function renderTestResult(resultEl, data) {
@@ -344,6 +381,11 @@ class Admin_API_Keys {
 						var resultEl = row.querySelector('.alorbach-relay-pair-status');
 						if (!window.alorbachAiModelRelay || !window.alorbachAiModelRelay.pairFromConfig) {
 							resultEl.textContent = 'AI Model Relay pairing is unavailable.';
+							resultEl.style.color = 'red';
+							return;
+						}
+						if (relayAddressUnsaved()) {
+							resultEl.textContent = saveRelayBeforePairText;
 							resultEl.style.color = 'red';
 							return;
 						}
@@ -592,7 +634,26 @@ class Admin_API_Keys {
 					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test', 'alorbach-ai-gateway' ); ?></button>
 				</div>
 				<div class="ai-bridge-inline-ui" style="margin-top:0;">
-					<p style="margin:0 0 6px;"><?php esc_html_e( 'Uses the paired administrator browser\'s AI Model Relay. No API key or endpoint is stored here.', 'alorbach-ai-gateway' ); ?></p>
+					<p style="margin:0 0 6px;"><?php esc_html_e( 'No API key is stored. The browser uses this site-wide relay address for pairing and jobs.', 'alorbach-ai-gateway' ); ?></p>
+					<?php
+					if ( 'ai_bridge' === $type && is_numeric( $index ) && ! self::$bridge_address_rendered ) {
+						self::$bridge_address_rendered = true;
+						$bridge_parts = AI_Bridge::bridge_url_parts();
+						?>
+						<div class="ai-bridge-address">
+							<p style="margin:0;">
+								<label for="alorbach_ai_bridge_url"><?php esc_html_e( 'Relay URL', 'alorbach-ai-gateway' ); ?></label><br />
+								<input type="url" name="alorbach_ai_bridge_url" id="alorbach_ai_bridge_url" value="<?php echo esc_attr( $bridge_parts['url'] ); ?>" class="regular-text code" placeholder="https://ai-model-relay.example" />
+							</p>
+							<p style="margin:0;">
+								<label for="alorbach_ai_bridge_port"><?php esc_html_e( 'Port', 'alorbach-ai-gateway' ); ?></label><br />
+								<input type="number" name="alorbach_ai_bridge_port" id="alorbach_ai_bridge_port" value="<?php echo esc_attr( $bridge_parts['port'] ); ?>" min="1" max="65535" step="1" class="small-text" placeholder="8765" />
+							</p>
+							<p class="description" style="margin:0;"><?php esc_html_e( 'Leave the port empty to use 443 for https or 80 for http. A port already typed into the URL is kept unless this field replaces it. The local default is http://127.0.0.1 port 8765.', 'alorbach-ai-gateway' ); ?></p>
+						</div>
+						<?php
+					}
+					?>
 					<button type="button" class="button button-primary alorbach-pair-relay"><?php esc_html_e( 'Pair AI Model Relay', 'alorbach-ai-gateway' ); ?></button>
 					<button type="button" class="button alorbach-test-key"><?php esc_html_e( 'Test relay', 'alorbach-ai-gateway' ); ?></button>
 					<span class="alorbach-relay-pair-status" aria-live="polite"></span>

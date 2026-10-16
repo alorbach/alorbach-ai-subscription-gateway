@@ -362,7 +362,7 @@ class Integration_Service {
 		$ai_bridge = array(
 			'enabled'          => AI_Bridge::is_enabled(),
 			'product_name'     => 'AI Model Relay',
-			'bridge_url'       => (string) AI_Bridge::get_setting( 'bridge_url', 'http://127.0.0.1:8765' ),
+			'bridge_url'       => AI_Bridge::get_bridge_url(),
 			'origin'           => self::site_origin(),
 			'text_prefix'      => AI_Bridge::MODEL_TEXT_PREFIX,
 			'image_model'      => AI_Bridge::MODEL_IMAGE,
