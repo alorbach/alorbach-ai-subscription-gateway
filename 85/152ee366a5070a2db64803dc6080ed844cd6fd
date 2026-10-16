@@ -1,0 +1,39 @@
+bin/verify-rest-contracts.php
+  s_f777a16cd01885::t_2e04059b5ae394 131-132
+  s_f777a16cd01885::t_80694c79b439ff 209-222
+  s_f777a16cd01885::t_cf88d79e23b22e 486-495
+README.md
+  s_f777a16cd01885::t_a3a0876c571add 163
+  s_f777a16cd01885::t_7c50ab55119ab1 159
+admin/class-admin-settings.php
+  s_f777a16cd01885::t_c45d5d86e5449b 277,305-310,312-314,340,575,588-595,597-598
+  s_f777a16cd01885::t_b7a5b7a9ea36a8 324-328
+  s_f777a16cd01885::t_05b433d7402db6 311
+includes/class-integration-service.php
+  s_f777a16cd01885::t_f537311ddc6b60 365
+admin/class-admin-api-keys.php
+  s_f777a16cd01885::t_d13c9c998e75be 124
+  s_f777a16cd01885::t_8b63ed0a5d86ba 10,32-38,125-134,140-143,236-238,621-640
+  s_f777a16cd01885::t_d74db24ad2eb07 139
+includes/class-ai-bridge.php
+  s_f777a16cd01885::t_145b2165afa070 262
+  s_f777a16cd01885::t_811097991a2065 77-122,127-206
+  s_f777a16cd01885::t_86df614d2726c9 36,76
+  s_f777a16cd01885::t_7d906293ed01ac 123-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "85152ee366a5070a2db64803dc6080ed844cd6fd",
+  "prompts": {},
+  "sessions": {
+    "s_f777a16cd01885": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "48c73f8e-be98-419e-88b6-232bf81d1218",
+        "model": "grok-4.7"
+      },
+      "human_author": null
+    }
+  }
+}
