@@ -1113,11 +1113,18 @@ class AI_Bridge {
 		if ( $source_width < 1 || $source_height < 1 || $target_width < 1 || $target_height < 1 || $target_width > 12000 || $target_height > 12000 || $dpi < 72 || $dpi > 1200 ) return new \WP_Error( 'invalid_local_upscale_target', __( 'Local upscaling requires valid profile-derived target dimensions and DPI.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		$x = isset( $crop['x'] ) ? (float) $crop['x'] : -1; $y = isset( $crop['y'] ) ? (float) $crop['y'] : -1; $width = isset( $crop['width'] ) ? (float) $crop['width'] : 0; $height = isset( $crop['height'] ) ? (float) $crop['height'] : 0;
 		$fit_policy = sanitize_key( (string) ( $payload['fit_policy'] ?? 'crop_to_safe_box' ) );
-		$no_crop = in_array( $fit_policy, array( 'contain_no_crop', 'edge_fade_no_crop' ), true );
+		$full_frame = 'retain_full_frame' === $fit_policy;
+		$placement_no_crop = in_array( $fit_policy, array( 'contain_no_crop', 'edge_fade_no_crop' ), true );
+		$declares_no_crop = array_key_exists( 'no_crop', $payload ) && rest_sanitize_boolean( $payload['no_crop'] );
+		$crop_applied = rest_sanitize_boolean( $crop['crop_applied'] ?? false );
+		$approved = rest_sanitize_boolean( $crop['approved_by_user'] ?? false );
 		$crop_is_valid = $x >= 0 && $y >= 0 && $width > 0 && $height > 0 && $x + $width <= 1.000001 && $y + $height <= 1.000001;
-		if ( $no_crop ) {
-			if ( ! $crop_is_valid || abs( $x ) > 0.000001 || abs( $y ) > 0.000001 || abs( $width - 1.0 ) > 0.000001 || abs( $height - 1.0 ) > 0.000001 || rest_sanitize_boolean( $crop['approved_by_user'] ?? false ) ) return new \WP_Error( 'invalid_local_upscale_crop', __( 'No-crop local upscaling requires the complete source frame without crop approval.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
-		} elseif ( ! rest_sanitize_boolean( $crop['approved_by_user'] ?? false ) || ! $crop_is_valid || abs( ( $source_width * $width ) / ( $source_height * $height ) - ( $target_width / $target_height ) ) > 0.002 ) return new \WP_Error( 'invalid_local_upscale_crop', __( 'Approve an in-bounds crop matching the profile artwork ratio before local upscaling.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$is_complete_frame = $crop_is_valid && abs( $x ) <= 0.000001 && abs( $y ) <= 0.000001 && abs( $width - 1.0 ) <= 0.000001 && abs( $height - 1.0 ) <= 0.000001;
+		if ( $full_frame ) {
+			if ( ! $declares_no_crop || $crop_applied || $approved || ! $is_complete_frame ) return new \WP_Error( 'invalid_local_upscale_crop', __( 'No-crop local upscaling requires the complete source frame without crop approval.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		} elseif ( $placement_no_crop ) {
+			if ( ! $is_complete_frame || $approved ) return new \WP_Error( 'invalid_local_upscale_crop', __( 'No-crop local upscaling requires the complete source frame without crop approval.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		} elseif ( $declares_no_crop || ! $approved || ! $crop_is_valid || abs( ( $source_width * $width ) / ( $source_height * $height ) - ( $target_width / $target_height ) ) > 0.002 ) return new \WP_Error( 'invalid_local_upscale_crop', __( 'Approve an in-bounds crop matching the profile artwork ratio before local upscaling.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		$left = (int) ( $crop_pixels['left'] ?? -1 ); $top = (int) ( $crop_pixels['top'] ?? -1 ); $right = (int) ( $crop_pixels['right'] ?? -1 ); $bottom = (int) ( $crop_pixels['bottom'] ?? -1 );
 		$crop_width = (int) ( $crop_pixels['width'] ?? 0 ); $crop_height = (int) ( $crop_pixels['height'] ?? 0 );
 		$output_width = (int) ( $output['width'] ?? 0 ); $output_height = (int) ( $output['height'] ?? 0 );

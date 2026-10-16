@@ -93,6 +93,99 @@ function alorbach_set_json_body( WP_REST_Request $request, array $params ) {
 	$request->set_body( wp_json_encode( $params ) );
 }
 
+/**
+ * Build a local upscale payload. Pixel bounds follow the crop unless the output size is overridden.
+ *
+ * @param string $checksum Unique source checksum.
+ * @param array  $spec     Optional dimensions, policy, crop, and output overrides.
+ * @return array
+ */
+function alorbach_local_upscale_contract_payload( $checksum, array $spec = array() ) {
+	$source_width  = (int) ( $spec['source_width'] ?? 1200 );
+	$source_height = (int) ( $spec['source_height'] ?? 1800 );
+	$crop          = isset( $spec['crop'] ) && is_array( $spec['crop'] ) ? $spec['crop'] : array(
+		'x'                => 0.0,
+		'y'                => 0.0,
+		'width'            => 1.0,
+		'height'           => 1.0,
+		'approved_by_user' => false,
+		'crop_applied'     => false,
+	);
+	$x             = (float) ( $crop['x'] ?? 0 );
+	$y             = (float) ( $crop['y'] ?? 0 );
+	$width         = (float) ( $crop['width'] ?? 0 );
+	$height        = (float) ( $crop['height'] ?? 0 );
+	$left          = (int) round( $x * $source_width );
+	$top           = (int) round( $y * $source_height );
+	$right         = (int) round( ( $x + $width ) * $source_width );
+	$bottom        = (int) round( ( $y + $height ) * $source_height );
+	$crop_width    = $right - $left;
+	$crop_height   = $bottom - $top;
+	$output_width  = array_key_exists( 'output_width', $spec ) ? (int) $spec['output_width'] : $crop_width * 2;
+	$output_height = array_key_exists( 'output_height', $spec ) ? (int) $spec['output_height'] : $crop_height * 2;
+	$payload       = array(
+		'model'               => 'model-relay:local-upscale:realesrgan-x2plus',
+		'target_type'         => (string) ( $spec['target_type'] ?? 'cover' ),
+		'edition_id'          => 347882,
+		'cover_region'        => 'front',
+		'source_asset_id'     => 367490,
+		'source_asset_uuid'   => '6f1c0a2e-7b34-4d55-9a10-367490c0ffee',
+		'source_checksum'     => $checksum,
+		'source_mime_type'    => 'image/png',
+		'source_dimensions'   => array( 'width' => $source_width, 'height' => $source_height ),
+		'crop'                => $crop,
+		'crop_pixels'         => array(
+			'left'   => $left,
+			'top'    => $top,
+			'right'  => $right,
+			'bottom' => $bottom,
+			'width'  => $crop_width,
+			'height' => $crop_height,
+		),
+		'fit_policy'          => (string) ( $spec['fit_policy'] ?? 'retain_full_frame' ),
+		'upscaled_dimensions' => array( 'width' => $output_width, 'height' => $output_height ),
+		'target_print'        => array(
+			'width'  => (int) ( $spec['target_width'] ?? 1000 ),
+			'height' => (int) ( $spec['target_height'] ?? 1400 ),
+			'dpi'    => 300,
+		),
+		'output_print'        => array( 'width' => $output_width, 'height' => $output_height ),
+		'final_output_print'  => array( 'width' => $output_width, 'height' => $output_height ),
+		'output_policy'       => 'retain_native_x2',
+		'scale'               => 2,
+		'output_format'       => 'png',
+		'local_unmetered'     => true,
+	);
+	if ( ! array_key_exists( 'include_no_crop', $spec ) || true === $spec['include_no_crop'] ) {
+		$payload['no_crop'] = array_key_exists( 'no_crop', $spec ) ? $spec['no_crop'] : true;
+	}
+	return $payload;
+}
+
+/**
+ * Submit one local upscale contract without completing it.
+ *
+ * @param array $payload Upscale payload.
+ * @return WP_REST_Response
+ */
+function alorbach_post_upscale_contract( array $payload ) {
+	$request = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs' );
+	alorbach_set_json_body( $request, array( 'type' => 'upscale', 'payload' => $payload ) );
+	return rest_do_request( $request );
+}
+
+/**
+ * Cancel a signed upscale job before a relay can execute it.
+ *
+ * @param array $data Create-job response data.
+ * @return WP_REST_Response
+ */
+function alorbach_cancel_upscale_contract( array $data ) {
+	$request = new WP_REST_Request( 'POST', '/alorbach/v1/ai-bridge/jobs/' . rawurlencode( (string) ( $data['job_id'] ?? '' ) ) . '/cancel' );
+	alorbach_set_json_body( $request, array( 'job_token' => (string) ( $data['job_token'] ?? '' ), 'request_hash' => (string) ( $data['request_hash'] ?? '' ) ) );
+	return rest_do_request( $request );
+}
+
 try {
 	$config  = alorbach_verify_request( '/alorbach/v1/integration/config' );
 	$plans   = alorbach_verify_request( '/alorbach/v1/integration/plans' );
@@ -466,6 +559,45 @@ try {
 		);
 		$local_audio_invalid_response = rest_do_request( $local_audio_invalid_complete );
 		alorbach_require( 400 === $local_audio_invalid_response->get_status(), 'Local Codex transcribe completion must reject missing word timing.' );
+
+		$cover_checksum = hash( 'sha256', 'cover-full-frame-' . $local_codex_verify_run_id );
+		$cover_payload  = alorbach_local_upscale_contract_payload( $cover_checksum );
+		$cover_response = alorbach_post_upscale_contract( $cover_payload );
+		$cover_data     = $cover_response->get_data();
+		$cover_roundtrip = json_decode( wp_json_encode( $cover_payload ), true );
+		alorbach_require( 200 === $cover_response->get_status() && 0 === (int) ( $cover_data['fee_uc'] ?? -1 ) && $cover_roundtrip === ( $cover_data['payload'] ?? null ), sprintf( 'A retain_full_frame cover upscale must accept the complete uncropped frame (status %d, code %s).', (int) $cover_response->get_status(), (string) ( $cover_data['code'] ?? 'none' ) ) );
+		$cover_cancel = alorbach_cancel_upscale_contract( $cover_data );
+		alorbach_require( 200 === $cover_cancel->get_status() && 'cancelled' === ( $cover_cancel->get_data()['status'] ?? '' ), 'The accepted cover upscale contract must be cancelled before any relay execution.' );
+
+		$partial_crop = array( 'x' => 0.0, 'y' => 0.0, 'width' => 0.5, 'height' => 1.0, 'approved_by_user' => false, 'crop_applied' => false );
+		$partial_response = alorbach_post_upscale_contract( alorbach_local_upscale_contract_payload( hash( 'sha256', 'cover-partial-crop-' . $local_codex_verify_run_id ), array( 'crop' => $partial_crop ) ) );
+		alorbach_require( 400 === $partial_response->get_status() && 'invalid_local_upscale_crop' === ( $partial_response->get_data()['code'] ?? '' ), 'A partial crop must stay invalid under retain_full_frame even when no_crop is true.' );
+
+		$contradictory_response = alorbach_post_upscale_contract( alorbach_local_upscale_contract_payload( hash( 'sha256', 'cover-no-crop-false-' . $local_codex_verify_run_id ), array( 'no_crop' => false ) ) );
+		alorbach_require( 400 === $contradictory_response->get_status() && 'invalid_local_upscale_crop' === ( $contradictory_response->get_data()['code'] ?? '' ), 'retain_full_frame must reject a contradictory no_crop value.' );
+		$approved_crop = array( 'x' => 0.0, 'y' => 0.25, 'width' => 1.0, 'height' => 0.5, 'approved_by_user' => true, 'crop_applied' => true );
+		$approved_no_crop_spec = array( 'fit_policy' => 'crop_to_safe_box', 'source_width' => 1000, 'source_height' => 2000, 'target_width' => 1000, 'target_height' => 1000, 'target_type' => 'page', 'crop' => $approved_crop, 'no_crop' => true );
+		$approved_no_crop_response = alorbach_post_upscale_contract( alorbach_local_upscale_contract_payload( hash( 'sha256', 'approved-crop-with-no-crop-' . $local_codex_verify_run_id ), $approved_no_crop_spec ) );
+		alorbach_require( 400 === $approved_no_crop_response->get_status() && 'invalid_local_upscale_crop' === ( $approved_no_crop_response->get_data()['code'] ?? '' ), 'no_crop true must not validate an otherwise approved partial crop.' );
+
+		$approved_frame_crop = array( 'x' => 0.0, 'y' => 0.0, 'width' => 1.0, 'height' => 1.0, 'approved_by_user' => true, 'crop_applied' => false );
+		$approved_frame_response = alorbach_post_upscale_contract( alorbach_local_upscale_contract_payload( hash( 'sha256', 'cover-approved-frame-' . $local_codex_verify_run_id ), array( 'crop' => $approved_frame_crop ) ) );
+		alorbach_require( 400 === $approved_frame_response->get_status() && 'invalid_local_upscale_crop' === ( $approved_frame_response->get_data()['code'] ?? '' ), 'Full-frame mode must reject a claimed crop approval.' );
+
+		$wrong_scale_response = alorbach_post_upscale_contract( alorbach_local_upscale_contract_payload( hash( 'sha256', 'cover-wrong-x2-' . $local_codex_verify_run_id ), array( 'output_width' => 2402, 'output_height' => 3600 ) ) );
+		alorbach_require( 400 === $wrong_scale_response->get_status() && 'invalid_local_upscale_output_contract' === ( $wrong_scale_response->get_data()['code'] ?? '' ), 'Full-frame upscaling must reject output dimensions that are not the native x2 size.' );
+
+		$contain_payload = alorbach_local_upscale_contract_payload( hash( 'sha256', 'contain-no-crop-' . $local_codex_verify_run_id ), array( 'fit_policy' => 'contain_no_crop', 'include_no_crop' => false ) );
+		$contain_response = alorbach_post_upscale_contract( $contain_payload );
+		$contain_data = $contain_response->get_data();
+		alorbach_require( 200 === $contain_response->get_status() && 0 === (int) ( $contain_data['fee_uc'] ?? -1 ) && 'contain_no_crop' === ( $contain_data['payload']['fit_policy'] ?? '' ) && ! array_key_exists( 'no_crop', (array) ( $contain_data['payload'] ?? array() ) ), sprintf( 'contain_no_crop page upscaling must stay valid without a cover no_crop flag (status %d, code %s).', (int) $contain_response->get_status(), (string) ( $contain_data['code'] ?? 'none' ) ) );
+		alorbach_require( 200 === alorbach_cancel_upscale_contract( $contain_data )->get_status(), 'The accepted contain_no_crop contract must be cancelled before any relay execution.' );
+
+		$approved_payload = alorbach_local_upscale_contract_payload( hash( 'sha256', 'approved-crop-' . $local_codex_verify_run_id ), array( 'fit_policy' => 'crop_to_safe_box', 'include_no_crop' => false, 'source_width' => 1000, 'source_height' => 2000, 'target_width' => 1000, 'target_height' => 1000, 'target_type' => 'page', 'crop' => $approved_crop ) );
+		$approved_response = alorbach_post_upscale_contract( $approved_payload );
+		$approved_data = $approved_response->get_data();
+		alorbach_require( 200 === $approved_response->get_status() && 0 === (int) ( $approved_data['fee_uc'] ?? -1 ) && true === ( $approved_data['payload']['crop']['approved_by_user'] ?? false ) && ! array_key_exists( 'no_crop', (array) ( $approved_data['payload'] ?? array() ) ), sprintf( 'An explicitly approved crop must stay valid when no_crop is omitted (status %d, code %s).', (int) $approved_response->get_status(), (string) ( $approved_data['code'] ?? 'none' ) ) );
+		alorbach_require( 200 === alorbach_cancel_upscale_contract( $approved_data )->get_status(), 'The accepted crop contract must be cancelled before any relay execution.' );
 
 		\Alorbach\AIGateway\AI_Bridge::update_setting( 'enabled', false );
 		$local_codex_disabled_verify = \Alorbach\AIGateway\API_Validator::verify_key( 'codex_local' );
