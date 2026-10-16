@@ -1,0 +1,43 @@
+README.md
+  s_f777a16cd01885::t_7c50ab55119ab1 159
+  s_f777a16cd01885::t_a3a0876c571add 163
+includes/class-integration-service.php
+  s_f777a16cd01885::t_f537311ddc6b60 365
+includes/class-ai-bridge.php
+  s_f777a16cd01885::t_86df614d2726c9 36,76
+  s_f777a16cd01885::t_145b2165afa070 262
+  s_f777a16cd01885::t_7d906293ed01ac 123-126
+  s_f777a16cd01885::t_811097991a2065 77-122,127-206
+admin/class-admin-settings.php
+  s_f777a16cd01885::t_da457827ba82d4 334
+  s_f777a16cd01885::t_a4c3b4294766d5 582,584-589,591-592
+  s_f777a16cd01885::t_e92a3c87ed41d3 583
+  s_f777a16cd01885::t_b88e869da4d286 304-312
+  s_f777a16cd01885::t_6a20f90b70c788 569
+bin/verify-rest-contracts.php
+  s_f777a16cd01885::t_2e04059b5ae394 131-132
+  s_f777a16cd01885::t_80694c79b439ff 209-222
+  s_f777a16cd01885::t_cf88d79e23b22e 486-495
+admin/class-admin-api-keys.php
+  s_f777a16cd01885::t_f2e91efa48f78f 33-38
+  s_f777a16cd01885::t_0b0cfadbf172f0 10,32
+  s_f777a16cd01885::t_e33e4213a6ff04 230-232
+  s_f777a16cd01885::t_e80d6c3fc54e38 124-132
+  s_f777a16cd01885::t_5ce1b0750db1f6 615-634
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "349cfa2103a5ae0f39d787f71fc95de4758a50f0",
+  "prompts": {},
+  "sessions": {
+    "s_f777a16cd01885": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "48c73f8e-be98-419e-88b6-232bf81d1218",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
