@@ -1,0 +1,36 @@
+assets/js/ai-model-relay-discovery.js
+  s_f777a16cd01885::t_232cc0ba9f110f 42
+  s_f777a16cd01885::t_5c2cb9be04e790 227-240,242-243
+  s_f777a16cd01885::t_e716be5ffbb919 113
+  s_f777a16cd01885::t_d82fe2d236c986 30-41,43-46,53,55,57-64,66-70,77
+bin/verify-rest-contracts.php
+  s_f777a16cd01885::t_2a921dd89f00ce 212-213
+admin/class-admin-api-keys.php
+  s_f777a16cd01885::t_32bb274d85298c 652
+README.md
+  s_f777a16cd01885::t_ebc256cc5bf364 163
+includes/class-ai-bridge.php
+  s_f777a16cd01885::t_f521039fb803a8 162-166,200-202
+  s_f777a16cd01885::t_9a7d96209c7816 203-207
+  s_f777a16cd01885::t_bbe3757926a060 115-117
+admin/class-admin-settings.php
+  s_f777a16cd01885::t_d27cea8967e38a 598
+assets/js/demo-pages.js
+  s_f777a16cd01885::t_b17ff676ab25fd 68,72-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "329dcbb076933a4a3d65a839d0fa8a360a042cb5",
+  "prompts": {},
+  "sessions": {
+    "s_f777a16cd01885": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "48c73f8e-be98-419e-88b6-232bf81d1218",
+        "model": "grok-4.7"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
