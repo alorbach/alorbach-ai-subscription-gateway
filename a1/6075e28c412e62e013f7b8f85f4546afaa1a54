@@ -1,0 +1,42 @@
+bin/verify-direct-azure-capabilities.php
+  s_e8b110ba016f0c::t_32c578f00268f4 134-138
+  s_e8b110ba016f0c::t_c97e68f40f6b7b 123
+  s_e8b110ba016f0c::t_34327b0042f743 19,120,125
+  s_e8b110ba016f0c::t_e648c88eb107d3 119
+  s_e8b110ba016f0c::t_b14d99987cfbb5 46-48,111-112,118,121-122,124,126-133
+includes/class-integration-service.php
+  s_e8b110ba016f0c::t_b14d99987cfbb5 479-482,517-533,655-656
+  s_e8b110ba016f0c::t_95b2a0052ddad5 75,534
+  s_e8b110ba016f0c::t_e30987ac3b3024 66-74
+  s_806261fbdfead4::t_45c63bcf313593 76,79,377-378,535-536,657-658,1332-1341,1345-1355,1375-1395
+DEVELOPER-GUIDE.md
+  s_806261fbdfead4::t_decf965a31ab30 1,577-578
+includes/class-ai-bridge.php
+  s_806261fbdfead4::t_19a5a5aac283c2 230-232,280,289,409-518,1244-1246,1355-1365
+includes/class-cost-matrix.php
+  s_806261fbdfead4::t_8d4362f5f49b47 449-452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a16075e28c412e62e013f7b8f85f4546afaa1a54",
+  "prompts": {},
+  "sessions": {
+    "s_806261fbdfead4": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13e4a-58c2-7fb2-b0ec-d6ce256b41b1",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_e8b110ba016f0c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d3f1-f7ca-76b1-800d-2f9834a4214b",
+        "model": "gpt-6-luna"
+      },
+      "human_author": null
+    }
+  }
+}
