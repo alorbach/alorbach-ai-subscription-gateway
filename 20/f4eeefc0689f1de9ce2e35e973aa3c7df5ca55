@@ -1,0 +1,33 @@
+includes/class-server-chat-models.php
+  s_14c9f186c24ff0::t_07de3d8dcb0aae 1-407
+tests/server-chat-models-test.php
+  s_14c9f186c24ff0::t_0632fe15939da0 1-143
+bin/verify-server-chat-capabilities.php
+  s_14c9f186c24ff0::t_a14a793cc0e8ac 1-134
+tests/fixtures/server-chat-contract.json
+  s_14c9f186c24ff0::t_e267b013d94115 1-68
+DEVELOPER-GUIDE.md
+  s_14c9f186c24ff0::t_5bdd8cbef37b65 349-374,544
+admin/class-admin-settings.php
+  s_14c9f186c24ff0::t_6f26d2e8c71679 35,205-310,426-427,739-740
+alorbach-ai-subscription-gateway.php
+  s_14c9f186c24ff0::t_94b01c117655e1 34
+includes/class-integration-service.php
+  s_14c9f186c24ff0::t_a8a8ad3cc80efa 354,395,397-398,1339-1342,1363,1383-1400
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "20f4eeefc0689f1de9ce2e35e973aa3c7df5ca55",
+  "prompts": {},
+  "sessions": {
+    "s_14c9f186c24ff0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c685b22-616b-4ed5-b7f1-0319a32c20bc",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
