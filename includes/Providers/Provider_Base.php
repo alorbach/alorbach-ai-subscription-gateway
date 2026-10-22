@@ -22,7 +22,7 @@ abstract class Provider_Base implements Provider_Interface {
 	 * @var array
 	 */
 	protected static $max_completion_tokens_models = array(
-		'gpt-4o', 'gpt-4.1', 'gpt-5', 'o1', 'o3', 'o4', 'sora',
+		'gpt-4o', 'gpt-4.1', 'gpt-5', 'gpt-6', 'o1', 'o3', 'o4', 'sora',
 	);
 
 	/**
