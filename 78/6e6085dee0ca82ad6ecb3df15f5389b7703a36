@@ -1,0 +1,21 @@
+DEVELOPER-GUIDE.md
+  s_14c9f186c24ff0::t_89e0c380fc5228 87-89
+includes/class-rest-proxy.php
+  s_14c9f186c24ff0::t_2997a75cab1d28 227-234,660-671,768-770,811-813
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "786e6085dee0ca82ad6ecb3df15f5389b7703a36",
+  "prompts": {},
+  "sessions": {
+    "s_14c9f186c24ff0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c685b22-616b-4ed5-b7f1-0319a32c20bc",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
