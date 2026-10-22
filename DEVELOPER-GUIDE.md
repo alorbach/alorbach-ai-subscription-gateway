@@ -346,6 +346,48 @@ Direct, server-dispatched image models are published in both `capabilities.image
 
 Azure `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` use the same Direct transport with additional qualities (`xhigh`, `max`), `supported_backgrounds` (`auto`, `opaque`, `transparent`), and a published image-edit contract (`contract_version` 1, `reference_images_max` 16, `candidate_count_max` 1). The Azure Images edits path accepts up to 16 reference images; quality such as `high` is independent of that limit. Prefer `capabilities.image_model_capabilities[gateway_model_key]` — both `entry-id::gpt-image-2.5-flare` and the UUID alias `entry-id:gpt-image-2.5-flare` resolve to the same contract.
 
+Server-dispatched chat models are published in `capabilities.models` with `transport: "sync_chat"` (contract version `capabilities.server_chat_contract_version`, currently `1.0.0`), and their eligible keys additionally in `capabilities.server_chat_models`. They exist for downstream products that call `POST /chat` from their own server without a browser. Only models that an administrator has saved under AI Gateway > Settings > Server Chat Models are published at all. A model that was saved with the switch off appears with `eligible: false` and `disabled_reason: "disabled_by_admin"`; a model that was never saved does not appear. Prefixed AI Model Relay and local keys are never stored or published; a non-prefixed model name that sits under an AI Model Relay or local Codex provider entry is skipped entirely. A contract has this shape:
+
+```json
+{
+  "gateway_model_key": "<entry-id>::gpt-5.6-luna",
+  "label": "gpt-5.6-luna (Azure / Prod)",
+  "provider": "azure",
+  "transport": "sync_chat",
+  "chat_contract_version": "1.0.0",
+  "eligible": true,
+  "disabled_reason": null,
+  "admin_enabled": true,
+  "server_dispatch_evidenced": true,
+  "dispatch_entry_exclusive": true,
+  "pricing_evidenced": true,
+  "requires_browser_pairing": false,
+  "supported_languages": ["de-DE", "en-US"],
+  "operation_slugs": ["story_create", "book_title_create"],
+  "structured_output": false,
+  "provider_cancel": false,
+  "provider_resume": false,
+  "text_cost_estimate": false
+}
+```
+
+`eligible` is `true` only while every gate passes. `disabled_reason` names the first failing gate, evaluated in this order:
+
+1. `disabled_by_admin` - the administrator switch is off.
+2. `dispatch_credentials_missing` - the provider type has no chat dispatcher, or the configured provider entry is disabled or its credentials are incomplete (Azure also needs an endpoint; Codex needs a connected OAuth session).
+3. `dispatch_entry_ambiguous` - more than one enabled entry exists for the provider type (keyed or not), or the entry named by a compound key is not the only enabled one. `POST /chat` reads `free_pass_through` from the first enabled entry of the type while dispatch walks the enabled entries that have an API key, so the Gateway cannot promise which credentials and pricing serve the request.
+4. `pricing_missing` - no priced model row and no free pass-through (see below).
+5. `languages_missing` - `supported_languages` is empty.
+6. `operations_missing` - `operation_slugs` is empty.
+
+A seventh value, `filter_invalid`, is set when a contract leaves the `alorbach_server_chat_model_contracts` filter ineligible without a reason, for example because the filter returned it as eligible without the full evidence above or switched off a built-eligible contract. Models that belong to an AI Model Relay or local Codex provider entry are never published at all (no contract, not listed in the admin tab).
+
+`server_dispatch_evidenced` reports the dispatch gate and `dispatch_entry_exclusive` reports the entry gate (the provider type has exactly one enabled entry, counting keyless entries too, and for a compound key it is the entry named by the key). Dispatch credentials and `free_pass_through` are both read from that sole entry. Pricing is evidenced by an explicit cost-matrix row with positive input and output prices for exactly this model and entry, or by `free_pass_through` enabled on the sole dispatch entry; catalog defaults never count. Pricing evidence in detail: for a compound key a cost-matrix row for that model and that entry, for a plain key the first cost-matrix row for that model name, in both cases with positive input and output prices; or `free_pass_through` on the sole enabled entry of the type. The administrator confirms that a saved model is a chat model (the text catalog is built from all cost-matrix rows, so the Gateway cannot tell chat models from others). `eligible: true` does not guarantee success: `POST /chat` still applies login, plan access, balance, rate limit, monthly quota and duplicate checks. Plan access on `POST /chat` is checked by model name, so a plan that allows one entry's model also admits the same model name under another entry; a server-side consumer must therefore send only a `gateway_model_key` it received as an eligible contract. `supported_languages` are BCP-47 content locales in the form `xx-XX` or `xxx-XX` (for example `de-DE`, `fil-PH`); input is case-normalized (`en-us` becomes `en-US`) and other values are dropped. `operation_slugs` are lowercase `snake_case` names owned by the downstream product; the Gateway publishes them without interpreting them. Send `gateway_model_key` verbatim as `model` to `POST /chat`. No credential, endpoint or price internals are ever included.
+
+The payload gains two fields in `capabilities`: `server_chat_models` (the `gateway_model_key` values of all eligible contracts) and `server_chat_contract_version` (currently `1.0.0`). Existing fields keep their meaning; `capabilities.models` additionally contains the `sync_chat` entries, so a client that reads that list must check `transport`. If a `sync_chat` key would equal the key of a relay or direct image contract, the `sync_chat` contract is not published. Anonymous callers receive the unfiltered set of configured contracts; for a logged-in caller a contract is present only when its key is in the plan-filtered `capabilities.chat_models`, and `server_chat_models` is recomputed from the filtered list.
+
+Sites can adjust the published list with the filter `alorbach_server_chat_model_contracts( array $contracts, array $text_models )`, which receives the built contracts and the configured text catalog (`compound key => label`). The returned value is validated and fails closed: The filter may only remove contracts or change documented fields of contracts the Gateway built for this call: contracts with a `gateway_model_key` that was not built (added keys), contracts whose `provider` is a relay provider, and duplicate keys are discarded, and each kept contract is rebuilt from the documented fields only, in documented order (unknown fields such as `api_key` or `endpoint` are discarded; missing fields fall back to the built value). When a contract stays eligible, `disabled_reason` is forced to `null`. Further: a non-array publishes nothing, and entries that are not arrays, lack a string `gateway_model_key`, do not have `transport: "sync_chat"`, or carry a relay or local key are dropped; the list is re-indexed. A contract stays eligible only when `eligible` is strictly `true`, `admin_enabled`, `server_dispatch_evidenced`, `dispatch_entry_exclusive` and `pricing_evidenced` are strictly `true`, and `supported_languages` and `operation_slugs` are non-empty arrays; otherwise it is forced to `eligible: false` with `disabled_reason: "filter_invalid"` (an existing reason is kept). `requires_browser_pairing`, `structured_output`, `provider_cancel`, `provider_resume` and `text_cost_estimate` are forced to `false`.
+
 For Direct Azure GPT Image entries, use only the advertised discrete sizes; `auto` is not a pixel preset. `POST /images` and `POST /images/jobs` validate `size`, `quality`, `output_format`, `background` (when advertised), `aspect_ratio` (when supplied), `n`, and reference-image count against this contract before provider dispatch. Validation errors distinguish unsupported quality, size, aspect ratio, output format, missing reference-image support, and a reference-image count above `reference_images_max`. It accepts an optional `client_request_id` (maximum 128 characters), uses it for Gateway-side duplicate detection, and echoes it in a successful response so downstream job records can retain the correlation without exposing credentials.
 
 ### `GET /integration/plans`
@@ -515,6 +557,7 @@ Used for chat-style generation via `/chat`.
 
 - typical use cases: chat assistants, text generation, structured output, multi-step flows
 - main providers: OpenAI, Azure OpenAI, Google Gemini, GitHub Models, Codex
+- server-side consumers (no browser) must select only models published as eligible `sync_chat` contracts in `GET /integration/config` (see Public Integration Endpoints)
 
 ### Image Models
 

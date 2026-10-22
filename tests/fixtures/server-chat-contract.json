@@ -1,0 +1,71 @@
+{
+  "fixture": "Expected capabilities excerpt of GET /integration/config for three configured server chat models (see tests/server-chat-models-test.php). No provider is called and no credential appears.",
+  "capabilities": {
+    "server_chat_contract_version": "1.0.0",
+    "server_chat_models": [
+      "62f21a64-9a37-42f7-bde4-f7627bed9b3b::gpt-5.6-luna"
+    ],
+    "models": [
+      {
+        "gateway_model_key": "62f21a64-9a37-42f7-bde4-f7627bed9b3b::gpt-5.6-luna",
+        "label": "gpt-5.6-luna (Azure / Prod)",
+        "provider": "azure",
+        "transport": "sync_chat",
+        "chat_contract_version": "1.0.0",
+        "eligible": true,
+        "disabled_reason": null,
+        "admin_enabled": true,
+        "server_dispatch_evidenced": true,
+        "dispatch_entry_exclusive": true,
+        "pricing_evidenced": true,
+        "requires_browser_pairing": false,
+        "supported_languages": ["de-DE", "en-US"],
+        "operation_slugs": ["story_create", "book_title_create", "page_scene_create"],
+        "structured_output": false,
+        "provider_cancel": false,
+        "provider_resume": false,
+        "text_cost_estimate": false
+      },
+      {
+        "gateway_model_key": "gpt-4.1-mini",
+        "label": "gpt-4.1-mini",
+        "provider": "openai",
+        "transport": "sync_chat",
+        "chat_contract_version": "1.0.0",
+        "eligible": false,
+        "disabled_reason": "dispatch_credentials_missing",
+        "admin_enabled": true,
+        "server_dispatch_evidenced": false,
+        "dispatch_entry_exclusive": false,
+        "pricing_evidenced": true,
+        "requires_browser_pairing": false,
+        "supported_languages": ["en-US"],
+        "operation_slugs": ["story_create"],
+        "structured_output": false,
+        "provider_cancel": false,
+        "provider_resume": false,
+        "text_cost_estimate": false
+      },
+      {
+        "gateway_model_key": "62f21a64-9a37-42f7-bde4-f7627bed9b3b::gpt-6-luna",
+        "label": "gpt-6-luna (Azure / Prod)",
+        "provider": "azure",
+        "transport": "sync_chat",
+        "chat_contract_version": "1.0.0",
+        "eligible": false,
+        "disabled_reason": "pricing_missing",
+        "admin_enabled": true,
+        "server_dispatch_evidenced": true,
+        "dispatch_entry_exclusive": true,
+        "pricing_evidenced": false,
+        "requires_browser_pairing": false,
+        "supported_languages": ["de-DE"],
+        "operation_slugs": ["story_create"],
+        "structured_output": false,
+        "provider_cancel": false,
+        "provider_resume": false,
+        "text_cost_estimate": false
+      }
+    ]
+  }
+}

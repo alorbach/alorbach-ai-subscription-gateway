@@ -32,6 +32,7 @@ class Admin_Settings {
 			'rate-limits'      => __( 'Rate Limits & Quotas', 'alorbach-ai-gateway' ),
 			'billing'          => __( 'Billing & Account URLs', 'alorbach-ai-gateway' ),
 			'providers'        => __( 'Providers / Import', 'alorbach-ai-gateway' ),
+			'server-chat'      => __( 'Server Chat Models', 'alorbach-ai-gateway' ),
 			'advanced'         => __( 'Advanced', 'alorbach-ai-gateway' ),
 		);
 	}
@@ -202,6 +203,116 @@ class Admin_Settings {
 	}
 
 	/**
+	 * Read the posted Server Chat Models rows into the stored map shape.
+	 * Rows are indexed, not keyed by model, because compound keys contain dots.
+	 *
+	 * @return array<string,array{enabled:bool,supported_languages:string,operation_slugs:string}>
+	 */
+	private static function read_server_chat_rows() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Verified by the caller.
+		$rows = isset( $_POST['alorbach_server_chat'] ) && is_array( $_POST['alorbach_server_chat'] ) ? wp_unslash( $_POST['alorbach_server_chat'] ) : array();
+		$map  = array();
+		foreach ( $rows as $row ) {
+			if ( ! is_array( $row ) || empty( $row['key'] ) || ! is_string( $row['key'] ) ) {
+				continue;
+			}
+			$map[ sanitize_text_field( $row['key'] ) ] = array(
+				'enabled'             => ! empty( $row['enabled'] ),
+				'supported_languages' => isset( $row['supported_languages'] ) && is_string( $row['supported_languages'] ) ? sanitize_text_field( $row['supported_languages'] ) : '',
+				'operation_slugs'     => isset( $row['operation_slugs'] ) && is_string( $row['operation_slugs'] ) ? sanitize_textarea_field( $row['operation_slugs'] ) : '',
+			);
+		}
+		return $map;
+	}
+
+	/**
+	 * Render the Server Chat Models tab: one row per server-capable text model
+	 * with the administrator switch, content languages, operation slugs and the
+	 * read-only evidence the Gateway found for that model.
+	 *
+	 * @param array<string,string> $text_models Configured text catalog.
+	 */
+	private static function render_server_chat_tab( $text_models ) {
+		$server_models = \Alorbach\AIGateway\Server_Chat_Models::filter_server_models( $text_models );
+		$settings      = \Alorbach\AIGateway\Server_Chat_Models::get_settings();
+		$contracts     = array();
+		foreach ( \Alorbach\AIGateway\Server_Chat_Models::get_integration_model_capabilities( $text_models ) as $contract ) {
+			if ( is_array( $contract ) && isset( $contract['gateway_model_key'] ) ) {
+				$contracts[ (string) $contract['gateway_model_key'] ] = $contract;
+			}
+		}
+		?>
+		<h2><?php esc_html_e( 'Server Chat Models', 'alorbach-ai-gateway' ); ?></h2>
+		<p class="alorbach-settings-tab-copy"><?php esc_html_e( 'Downstream products that run AI jobs on their own server (without an open browser) only use a chat model that is eligible: a model is published only after it has been saved in this tab, and it is eligible only when it is switched on and proven for dispatch (exactly one enabled provider entry with complete credentials) and pricing, and has explicit content languages and operation slugs. Everything is off by default. AI Model Relay and local models are never listed or published.', 'alorbach-ai-gateway' ); ?></p>
+		<p class="description"><?php esc_html_e( 'Languages are BCP-47 content locales such as de-DE, en-US (comma separated). Operation slugs are lowercase snake_case names defined by the downstream product, one per line or comma separated. The contract is published in GET /integration/config under capabilities.models with transport sync_chat.', 'alorbach-ai-gateway' ); ?></p>
+		<?php if ( empty( $server_models ) ) : ?>
+			<p><?php esc_html_e( 'No provider text model is configured in the cost matrix yet.', 'alorbach-ai-gateway' ); ?></p>
+		<?php else : ?>
+			<style>
+				.alorbach-server-chat-table td, .alorbach-server-chat-table th { vertical-align: top; }
+				.alorbach-server-chat-table textarea { width: 100%; min-height: 72px; }
+				.alorbach-server-chat-table input[type="text"] { width: 100%; }
+				.alorbach-server-chat-evidence { font-size: 12px; line-height: 1.6; }
+				.alorbach-server-chat-evidence .ok { color: #00a32a; }
+				.alorbach-server-chat-evidence .missing { color: #d63638; }
+			</style>
+			<table class="widefat striped alorbach-server-chat-table">
+				<thead>
+					<tr>
+						<th scope="col" style="width:1%"><?php esc_html_e( 'On', 'alorbach-ai-gateway' ); ?></th>
+						<th scope="col"><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
+						<th scope="col" style="width:18%"><?php esc_html_e( 'Languages', 'alorbach-ai-gateway' ); ?></th>
+						<th scope="col" style="width:30%"><?php esc_html_e( 'Operation slugs', 'alorbach-ai-gateway' ); ?></th>
+						<th scope="col" style="width:18%"><?php esc_html_e( 'Evidence', 'alorbach-ai-gateway' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+				<?php $index = 0; ?>
+				<?php foreach ( $server_models as $key => $label ) : ?>
+					<?php
+					if ( \Alorbach\AIGateway\Server_Chat_Models::is_relay_provider( \Alorbach\AIGateway\API_Client::get_provider_for_model( (string) $key ) ) ) {
+						continue; // Relay-backed models are never published.
+					}
+					$row      = isset( $settings[ $key ] ) ? $settings[ $key ] : array( 'enabled' => false, 'supported_languages' => array(), 'operation_slugs' => array() );
+					$contract = isset( $contracts[ $key ] ) ? $contracts[ $key ] : null;
+					$field    = 'alorbach_server_chat[' . $index . ']';
+					$id       = 'alorbach-server-chat-' . $index;
+					?>
+					<tr>
+						<td>
+							<input type="hidden" name="<?php echo esc_attr( $field ); ?>[key]" value="<?php echo esc_attr( $key ); ?>" />
+							<input type="checkbox" name="<?php echo esc_attr( $field ); ?>[enabled]" id="<?php echo esc_attr( $id ); ?>-enabled" value="1" <?php checked( ! empty( $row['enabled'] ) ); ?> />
+						</td>
+						<td>
+							<label for="<?php echo esc_attr( $id ); ?>-enabled"><strong><?php echo esc_html( $label ); ?></strong></label><br />
+							<code><?php echo esc_html( $key ); ?></code>
+						</td>
+						<td><input type="text" name="<?php echo esc_attr( $field ); ?>[supported_languages]" value="<?php echo esc_attr( implode( ', ', (array) $row['supported_languages'] ) ); ?>" placeholder="de-DE, en-US" class="code" /></td>
+						<td><textarea name="<?php echo esc_attr( $field ); ?>[operation_slugs]" class="code" rows="3"><?php echo esc_textarea( implode( "\n", (array) $row['operation_slugs'] ) ); ?></textarea></td>
+						<td class="alorbach-server-chat-evidence">
+							<?php if ( null === $contract ) : ?>
+								<span><?php esc_html_e( 'Not configured', 'alorbach-ai-gateway' ); ?></span>
+							<?php else : ?>
+								<span class="<?php echo ! empty( $contract['server_dispatch_evidenced'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['server_dispatch_evidenced'] ) ? esc_html__( 'Dispatch: credentials present', 'alorbach-ai-gateway' ) : esc_html__( 'Dispatch: credentials missing', 'alorbach-ai-gateway' ); ?></span><br />
+								<span class="<?php echo ! empty( $contract['dispatch_entry_exclusive'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['dispatch_entry_exclusive'] ) ? esc_html__( 'Dispatch entry: exclusive', 'alorbach-ai-gateway' ) : esc_html__( 'Dispatch entry: not exclusive', 'alorbach-ai-gateway' ); ?></span><br />
+								<span class="<?php echo ! empty( $contract['pricing_evidenced'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['pricing_evidenced'] ) ? esc_html__( 'Pricing: explicit row', 'alorbach-ai-gateway' ) : esc_html__( 'Pricing: no explicit row', 'alorbach-ai-gateway' ); ?></span><br />
+								<?php if ( ! empty( $contract['eligible'] ) ) : ?>
+									<strong class="ok"><?php esc_html_e( 'Published as eligible', 'alorbach-ai-gateway' ); ?></strong>
+								<?php else : ?>
+									<strong class="missing"><?php esc_html_e( 'Published, not eligible:', 'alorbach-ai-gateway' ); ?></strong> <code><?php echo esc_html( (string) ( isset( $contract['disabled_reason'] ) ? $contract['disabled_reason'] : '' ) ); ?></code>
+								<?php endif; ?>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<?php $index++; ?>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+		<?php endif; ?>
+		<?php
+	}
+
+	/**
 	 * Render Settings page.
 	 */
 	public static function render() {
@@ -316,6 +427,19 @@ class Admin_Settings {
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'image_fee_uc', $local_codex_image_fee_uc );
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'audio_fee_uc', $local_codex_audio_fee_uc );
 				\Alorbach\AIGateway\AI_Bridge::update_setting( 'video_fee_uc', $local_codex_video_fee_uc );
+			} elseif ( 'server-chat' === $active_tab ) {
+				$server_chat_rows  = \Alorbach\AIGateway\Server_Chat_Models::merge_for_save( \Alorbach\AIGateway\Server_Chat_Models::get_settings(), self::read_server_chat_rows() );
+				$server_chat_saved = \Alorbach\AIGateway\Server_Chat_Models::update_settings( $server_chat_rows );
+				if ( count( $server_chat_saved ) >= \Alorbach\AIGateway\Server_Chat_Models::MAX_MODELS && count( $server_chat_rows ) > count( $server_chat_saved ) ) {
+					Admin_Helper::render_notice(
+						sprintf(
+							/* translators: %d: maximum number of stored server chat model rows. */
+							__( 'Only the first %d Server Chat Models rows were stored. Rows of models that are no longer in the catalog were dropped first.', 'alorbach-ai-gateway' ),
+							\Alorbach\AIGateway\Server_Chat_Models::MAX_MODELS
+						),
+						'warning'
+					);
+				}
 			} else {
 				update_option( 'alorbach_selling_enabled', $selling_enabled );
 				update_option( 'alorbach_selling_multiplier', $selling_multiplier );
@@ -627,6 +751,8 @@ class Admin_Settings {
 								</td>
 							</tr>
 						</table>
+					<?php elseif ( 'server-chat' === $active_tab ) : ?>
+						<?php self::render_server_chat_tab( $text_models ); ?>
 					<?php else : ?>
 						<h2><?php esc_html_e( 'Advanced', 'alorbach-ai-gateway' ); ?></h2>
 						<p class="alorbach-settings-tab-copy"><?php esc_html_e( 'Operational switches that affect markup behavior and diagnostics.', 'alorbach-ai-gateway' ); ?></p>

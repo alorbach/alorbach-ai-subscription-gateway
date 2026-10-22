@@ -351,6 +351,22 @@ class Integration_Service {
 		$audio_models  = $admin::get_audio_models();
 		$relay_models  = AI_Bridge::get_integration_model_capabilities();
 		$direct_image_models = self::get_direct_image_model_capabilities( $image_models );
+		$server_chat_models  = Server_Chat_Models::get_integration_model_capabilities( $text_models );
+		// A sync_chat contract never shares a gateway_model_key with a relay or direct image contract.
+		$reserved_model_keys = array();
+		foreach ( array_merge( $relay_models, $direct_image_models ) as $model_contract ) {
+			if ( is_array( $model_contract ) && isset( $model_contract['gateway_model_key'] ) ) {
+				$reserved_model_keys[ (string) $model_contract['gateway_model_key'] ] = true;
+			}
+		}
+		$server_chat_models = array_values(
+			array_filter(
+				$server_chat_models,
+				static function ( $contract ) use ( $reserved_model_keys ) {
+					return ! isset( $reserved_model_keys[ (string) $contract['gateway_model_key'] ] );
+				}
+			)
+		);
 		$image_model_capabilities = array();
 		foreach ( array_merge( $relay_models, $direct_image_models ) as $model_contract ) {
 			if ( ! is_array( $model_contract ) || empty( $model_contract['gateway_model_key'] ) || ! is_array( $model_contract['image_capabilities'] ?? null ) ) {
@@ -391,8 +407,10 @@ class Integration_Service {
 			'capabilities'      => array(
 				'chat_models'     => array_keys( $text_models ),
 				'image_models'    => array_keys( $image_models ),
-				'models'          => array_merge( $relay_models, $direct_image_models ),
+				'models'          => array_merge( $relay_models, $direct_image_models, $server_chat_models ),
 				'image_model_capabilities' => $image_model_capabilities,
+				'server_chat_models' => Server_Chat_Models::eligible_keys( $server_chat_models ),
+				'server_chat_contract_version' => Server_Chat_Models::CONTRACT_VERSION,
 				'image_sizes'     => array_values( $image_sizes ),
 				'image_qualities' => $qualities,
 				'audio_models'    => array_values( $audio_models ),
@@ -448,7 +466,7 @@ class Integration_Service {
 		$config = self::get_integration_config( (int) $user_id );
 		$contract = null;
 		foreach ( (array) ( $config['capabilities']['models'] ?? array() ) as $candidate ) {
-			if ( ! is_array( $candidate ) ) {
+			if ( ! is_array( $candidate ) || ( isset( $candidate['transport'] ) && 'direct_image' !== $candidate['transport'] ) ) {
 				continue;
 			}
 			$candidate_key = (string) ( $candidate['gateway_model_key'] ?? $candidate['legacy_id'] ?? '' );
@@ -1333,6 +1351,10 @@ class Integration_Service {
 						return false;
 					}
 					$contract_key = (string) ( $model['gateway_model_key'] ?? '' );
+					if ( Server_Chat_Models::TRANSPORT === (string) ( $model['transport'] ?? '' ) ) {
+						// A server chat contract follows the plan's chat catalog, never the image catalog.
+						return Server_Chat_Models::is_visible_for_chat_catalog( $contract_key, (array) ( $config['capabilities']['chat_models'] ?? array() ) );
+					}
 					foreach ( (array) ( $config['capabilities']['image_models'] ?? array() ) as $selected_key ) {
 						if ( self::image_model_key_matches_plan_selection( $contract_key, (string) $selected_key ) ) {
 							return true;
@@ -1353,6 +1375,7 @@ class Integration_Service {
 			}
 		}
 		$config['capabilities']['image_model_capabilities'] = array_intersect_key( $image_model_capabilities, $allowed_image_capability_keys );
+		$config['capabilities']['server_chat_models'] = Server_Chat_Models::eligible_keys( $config['capabilities']['models'] );
 
 		if ( empty( $capability_map['image'] ) ) {
 			$config['defaults']['image_model']         = '';
