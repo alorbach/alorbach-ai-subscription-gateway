@@ -224,6 +224,14 @@ class REST_Proxy {
 					'default'           => '',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
+				'client_request_id' => array(
+					'default'           => '',
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'idempotency_key'   => array(
+					'default'           => '',
+					'sanitize_callback' => 'sanitize_text_field',
+				),
 			),
 		) );
 
@@ -649,7 +657,18 @@ class REST_Proxy {
 			$max_tokens = $model_max;
 		}
 
-		$request_signature = hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model ) ) );
+		// A client that names its attempt (client_request_id, or its alias idempotency_key) is deduplicated by that id,
+		// so a deliberate new attempt with the same prompt is not refused forever. Without an id the content signature applies.
+		$client_request_id = (string) $request->get_param( 'client_request_id' );
+		if ( '' === $client_request_id ) {
+			$client_request_id = (string) $request->get_param( 'idempotency_key' );
+		}
+		if ( strlen( $client_request_id ) > 128 ) {
+			return new \WP_Error( 'invalid_client_request_id', __( 'client_request_id must not exceed 128 characters.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+		$request_signature = '' !== $client_request_id
+			? hash( 'sha256', wp_json_encode( array( $user_id, 'chat', 'client_request_id', $client_request_id ) ) )
+			: hash( 'sha256', wp_json_encode( array( $user_id, $messages, $model ) ) );
 		$multi_step_lock   = 'alorbach_chat_inflight_' . $request_signature;
 		$bypass_duplicate = (bool) apply_filters( 'alorbach_bypass_duplicate_request', false, 'chat', $user_id, $request_signature, $model );
 		if ( ! $bypass_duplicate && ( Ledger::signature_exists( $request_signature ) || ( $multi_step && get_transient( $multi_step_lock ) ) ) ) {
@@ -746,6 +765,9 @@ class REST_Proxy {
 				'request_signature' => $request_signature,
 				'deduction_applied' => false,
 			) );
+			if ( '' !== $client_request_id ) {
+				$response['client_request_id'] = $client_request_id;
+			}
 			return rest_ensure_response( $response );
 		}
 
@@ -786,6 +808,9 @@ class REST_Proxy {
 			'request_signature' => $request_signature,
 			'deduction_applied' => true,
 		) );
+		if ( '' !== $client_request_id ) {
+			$response['client_request_id'] = $client_request_id;
+		}
 		return rest_ensure_response( $response );
 	}
 

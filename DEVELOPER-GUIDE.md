@@ -84,6 +84,9 @@ Common request fields:
 - `multi_step` optional boolean
 - `max_steps` optional integer
 - `continue_message` optional string
+- `client_request_id` optional string, at most 128 characters (`idempotency_key` is accepted as an alias)
+
+Duplicate protection: without `client_request_id` a request is refused with `409 duplicate_request` when the same user already sent the same `messages` to the same `model`, at any time. With `client_request_id` the Gateway deduplicates by that id instead, so a deliberate new attempt with the same prompt needs a new id, and a replay of the same id is refused. A successful response echoes `client_request_id`. When `max_tokens` is omitted the Gateway uses 1024 (clamped to the model maximum); reasoning models usually need a larger explicit value.
 
 Typical response:
 
