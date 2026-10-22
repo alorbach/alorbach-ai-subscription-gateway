@@ -1,0 +1,19 @@
+includes/Providers/Provider_Base.php
+  s_14c9f186c24ff0::t_2000d275c027bb 25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "427e80867fd815f9db04e08b6a65c902d6279a0a",
+  "prompts": {},
+  "sessions": {
+    "s_14c9f186c24ff0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3c685b22-616b-4ed5-b7f1-0319a32c20bc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
