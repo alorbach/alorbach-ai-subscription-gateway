@@ -93,6 +93,7 @@ class Image_Attempts {
 			$diagnostic['provider_error_param'] = $safe_fields['provider_error_param'];
 			$diagnostic['provider_request_id'] = $safe_fields['provider_request_id'];
 			$diagnostic['provider_error_message_sha256'] = $safe_fields['provider_error_message_sha256'];
+			$diagnostic['provider_error_message'] = $safe_fields['provider_error_message'];
 			$retry_after = $error_data['retry_after'] ?? null;
 			if ( is_scalar( $retry_after ) && preg_match( '/^\d{1,6}$/', (string) $retry_after ) ) {
 				$diagnostic['retry_after_seconds'] = min( 3600, absint( $retry_after ) );
@@ -260,16 +261,16 @@ class Image_Attempts {
 		if ( array_key_exists( 'provider_error_reason', $classification ) ) {
 			$fields = Image_Error_Diagnostics::normalize_fields( $classification );
 			$stored = array(
-				'schema' => 'provider-error-diagnostics.v1',
+				'schema' => 'provider-error-diagnostics.v2',
 				'provider_error_reason' => $fields['provider_error_reason'],
 			);
-			foreach ( array( 'provider_error_param', 'provider_request_id', 'provider_error_message_sha256' ) as $key ) {
+			foreach ( array( 'provider_error_param', 'provider_request_id', 'provider_error_message_sha256', 'provider_error_message' ) as $key ) {
 				if ( null !== $fields[ $key ] ) {
 					$stored[ $key ] = $fields[ $key ];
 				}
 			}
 			$json = wp_json_encode( $stored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
-			if ( ! is_string( $json ) || strlen( $json ) > 2048 ) {
+			if ( ! is_string( $json ) || strlen( $json ) > 6144 ) {
 				return new \WP_Error( 'image_attempt_storage_unavailable', __( 'This image attempt could not be recorded safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
 			}
 			$values['provider_error_diagnostics'] = $json;
@@ -421,6 +422,7 @@ class Image_Attempts {
 			'provider_error_param' => $provider_error_diagnostics['provider_error_param'],
 			'provider_request_id' => $provider_error_diagnostics['provider_request_id'],
 			'provider_error_message_sha256' => $provider_error_diagnostics['provider_error_message_sha256'],
+			'provider_error_message' => $provider_error_diagnostics['provider_error_message'],
 			'retry_after_seconds' => isset( $row['retry_after_seconds'] ) && is_numeric( $row['retry_after_seconds'] ) ? min( 3600, absint( $row['retry_after_seconds'] ) ) : null,
 		);
 	}
@@ -694,12 +696,13 @@ class Image_Attempts {
 			'provider_error_param' => null,
 			'provider_request_id' => null,
 			'provider_error_message_sha256' => null,
+			'provider_error_message' => null,
 		);
-		if ( ! is_string( $raw ) || strlen( $raw ) > 2048 ) {
+		if ( ! is_string( $raw ) || strlen( $raw ) > 6144 ) {
 			return $empty;
 		}
 		$decoded = json_decode( $raw, true );
-		if ( ! is_array( $decoded ) || 'provider-error-diagnostics.v1' !== ( $decoded['schema'] ?? '' ) ) {
+		if ( ! is_array( $decoded ) || ! in_array( ( $decoded['schema'] ?? '' ), array( 'provider-error-diagnostics.v1', 'provider-error-diagnostics.v2' ), true ) ) {
 			return $empty;
 		}
 		$fields = Image_Error_Diagnostics::normalize_fields( $decoded );
@@ -708,6 +711,7 @@ class Image_Attempts {
 			'provider_error_param' => $fields['provider_error_param'],
 			'provider_request_id' => $fields['provider_request_id'],
 			'provider_error_message_sha256' => $fields['provider_error_message_sha256'],
+			'provider_error_message' => $fields['provider_error_message'],
 		);
 	}
 

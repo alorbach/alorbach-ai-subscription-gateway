@@ -127,6 +127,19 @@ abstract class Provider_Base implements Provider_Interface {
 	}
 
 	/**
+	 * Whether a normalized image option may be sent as a provider body field.
+	 * Providers may override this for options their API rejects; unknown/custom
+	 * providers retain the historical pass-through behavior by default.
+	 *
+	 * @param string $option Option key.
+	 * @param string $model  Model ID.
+	 * @return bool
+	 */
+	public function supports_image_request_option( $option, $model = '' ) {
+		return true;
+	}
+
+	/**
 	 * Classify OpenAI-style model ID into type.
 	 *
 	 * @param string $model_id Model ID.

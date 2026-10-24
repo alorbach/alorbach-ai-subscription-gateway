@@ -66,6 +66,22 @@ class Azure_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Azure OpenAI Images routes accept dimensions through `size` and reject
+	 * the generic aspect_ratio field. Native FLUX provider routes retain it.
+	 *
+	 * @param string $option Option key.
+	 * @param string $model  Model ID.
+	 * @return bool
+	 */
+	public function supports_image_request_option( $option, $model = '' ) {
+		$option = strtolower( preg_replace( '/[^a-z0-9]/i', '', (string) $option ) );
+		if ( 'aspectratio' === $option ) {
+			return null !== self::get_flux_bfl_path( $model );
+		}
+		return parent::supports_image_request_option( $option, $model );
+	}
+
+	/**
 	 * Whether the model ID targets Azure Speech Services transcription.
 	 *
 	 * @param string $model Model ID.

@@ -83,6 +83,7 @@ require_once dirname( __DIR__ ) . '/includes/class-image-attestation.php';
 
 use Alorbach\AIGateway\Image_Attempts;
 use Alorbach\AIGateway\Image_Attestation;
+use Alorbach\AIGateway\Image_Error_Diagnostics;
 
 function check( $condition, $message ) {
 	if ( ! $condition ) {
@@ -187,14 +188,12 @@ $test_db->row = array(
 	'evidence_id' => 'diagnostic-evidence', 'request_hash' => $hash, 'client_request_hash' => null, 'conflict_status' => 0,
 );
 $private_message = 'private prompt and sk-credential-value';
-$classification = Image_Attempts::classify_error( 'api_error', array(
-	'status' => 400,
-	'provider_error_code' => 'unsupported_parameter',
-	'provider_error_reason' => 'unsupported_parameter',
-	'provider_error_param' => 'quality',
-	'provider_request_id' => 'req_ABC-123:xyz.456',
-	'provider_error_message_sha256' => hash( 'sha256', $private_message ),
-) );
+$provider_diagnostics = Image_Error_Diagnostics::from_payload(
+	array( 'error' => array( 'code' => 'unsupported_parameter', 'param' => 'quality', 'message' => $private_message ) ),
+	array( 'x-request-id' => 'req_ABC-123:xyz.456' ),
+	'{"prompt":"private prompt"}'
+);
+$classification = Image_Attempts::classify_error( 'api_error', array_merge( array( 'status' => 400 ), $provider_diagnostics ) );
 $saved_diagnostic = Image_Attempts::mark_error( $test_db->row, $classification );
 check( is_array( $saved_diagnostic ) && 'possibly_sent' === $saved_diagnostic['dispatch_status'] && 'unknown' === $saved_diagnostic['outcome'], 'provider HTTP error remains possibly sent with an unknown outcome' );
 check( null === $saved_diagnostic['cost_usd'] && null === $saved_diagnostic['provider_cost_usd'] && 'unresolved' === $saved_diagnostic['billing_status'], 'provider diagnostics never infer either cost or billing state' );
@@ -202,8 +201,13 @@ $projected_diagnostic = Image_Attempts::public_evidence( $saved_diagnostic );
 check( 'unsupported_parameter' === $projected_diagnostic['provider_error_code'] && 'unsupported_parameter' === $projected_diagnostic['provider_error_reason'] && 'quality' === $projected_diagnostic['provider_error_param'], 'allowlisted provider code, reason, and parameter survive the public projection' );
 check( false === $projected_diagnostic['retry_safe'], 'provider diagnostics never make a possibly-sent attempt safe to retry' );
 check( 'req_ABC-123:xyz.456' === $projected_diagnostic['provider_request_id'] && hash( 'sha256', $private_message ) === $projected_diagnostic['provider_error_message_sha256'], 'validated request ID and message fingerprint survive persistence' );
+check( '[request text redacted] and [credential redacted]' === $projected_diagnostic['provider_error_message'], 'sanitized provider message survives WP_Error classification, persistence, and public projection' );
 $stored_json = (string) $saved_diagnostic['provider_error_diagnostics'];
-check( false === strpos( $stored_json, $private_message ) && false === strpos( wp_json_encode( $projected_diagnostic ), 'sk-credential-value' ), 'raw provider message, prompt, and credential never persist or project' );
+check( 'provider-error-diagnostics.v2' === json_decode( $stored_json, true )['schema'], 'new message records use the nested diagnostics v2 schema' );
+check( false === strpos( $stored_json, $private_message ) && false === strpos( wp_json_encode( $projected_diagnostic ), 'private prompt' ) && false === strpos( wp_json_encode( $projected_diagnostic ), 'sk-credential-value' ), 'raw provider message, prompt, and credential never persist or project' );
+
+$legacy_diagnostic = Image_Attempts::public_evidence( array_merge( $saved_diagnostic, array( 'provider_error_diagnostics' => wp_json_encode( array( 'schema' => 'provider-error-diagnostics.v1', 'provider_error_reason' => 'provider_rejected' ) ) ) ) );
+check( 'provider_rejected' === $legacy_diagnostic['provider_error_reason'] && null === $legacy_diagnostic['provider_error_message'], 'legacy nested diagnostics v1 rows remain readable without a message' );
 
 $key = openssl_pkey_new( array( 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'private_key_bits' => 2048 ) );
 check( false !== $key, 'test RSA key generation' );

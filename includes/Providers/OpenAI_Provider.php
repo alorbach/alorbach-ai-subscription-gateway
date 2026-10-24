@@ -93,6 +93,15 @@ class OpenAI_Provider extends Provider_Base {
 		);
 	}
 
+	/** OpenAI Images uses `size` and does not accept generic aspect_ratio. */
+	public function supports_image_request_option( $option, $model = '' ) {
+		$option = strtolower( preg_replace( '/[^a-z0-9]/i', '', (string) $option ) );
+		if ( 'aspectratio' === $option ) {
+			return false;
+		}
+		return parent::supports_image_request_option( $option, $model );
+	}
+
 	/**
 	 * {@inheritdoc}
 	 */

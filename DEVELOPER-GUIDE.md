@@ -809,6 +809,7 @@ if ( alorbach_user_can_access_capability( 'image', 'gpt-image-1', $user_id ) ) {
 
 ## Documentation Map
 
+- [Image request parameter handling](docs/image-request-parameters.md): provider-specific image `size` and `aspect_ratio` serialization reference
 Use the docs in these places for these purposes:
 
 - `README.md`: public plugin overview and high-level endpoint summary

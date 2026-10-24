@@ -89,7 +89,7 @@ class API_Client {
 	}
 
 	/** Add normalized model-specific image options to a provider request body. */
-	private static function apply_image_request_options( $request, $options = array() ) {
+	private static function apply_image_request_options( $request, $options = array(), $provider = null, $model = '' ) {
 		if ( ! is_array( $request ) || ! is_array( $options ) || ( empty( $options['aspect_ratio'] ) && empty( $options['provider_options'] ) ) ) {
 			return $request;
 		}
@@ -97,12 +97,23 @@ class API_Client {
 		if ( ! is_array( $body ) ) {
 			return $request;
 		}
-		if ( ! empty( $options['aspect_ratio'] ) ) {
+		$supports_aspect_ratio = ! is_object( $provider ) || ! method_exists( $provider, 'supports_image_request_option' ) || $provider->supports_image_request_option( 'aspect_ratio', (string) $model );
+		if ( ! $supports_aspect_ratio ) {
+			foreach ( array_keys( $body ) as $body_key ) {
+				if ( 'aspectratio' === strtolower( preg_replace( '/[^a-z0-9]/i', '', (string) $body_key ) ) ) {
+					unset( $body[ $body_key ] );
+				}
+			}
+		}
+		if ( $supports_aspect_ratio && ! empty( $options['aspect_ratio'] ) ) {
 			$body['aspect_ratio'] = sanitize_text_field( (string) $options['aspect_ratio'] );
 		}
 		$provider_options = is_array( $options['provider_options'] ?? null ) ? $options['provider_options'] : array();
 		foreach ( $provider_options as $key => $value ) {
 			if ( ! is_string( $key ) || ! preg_match( '/^[a-z][a-z0-9_]{0,63}$/i', $key ) || ! is_scalar( $value ) || '' === trim( (string) $value ) ) {
+				continue;
+			}
+			if ( 'aspectratio' === strtolower( preg_replace( '/[^a-z0-9]/i', '', $key ) ) && ! $supports_aspect_ratio ) {
 				continue;
 			}
 			$body[ $key ] = is_bool( $value ) ? $value : sanitize_text_field( (string) $value );
@@ -770,7 +781,7 @@ class API_Client {
 		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
 			for ( $index = 0; $index < $n; $index++ ) {
-				$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images, $background ), $options );
+				$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, 1, $model, $quality, $output_format, $creds, $reference_images, $background ), $options, $prov, $model );
 				if ( ! $request || is_wp_error( $request ) ) {
 					return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 				}
@@ -784,7 +795,7 @@ class API_Client {
 			}
 			return $merged;
 		}
-		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options );
+		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options, $prov, $model );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -885,12 +896,15 @@ class API_Client {
 		$content_type = (string) wp_remote_retrieve_header( $response, 'content-type' );
 		$raw_body = wp_remote_retrieve_body( $response );
 		$body_response = json_decode( $raw_body, true );
+		$body_decode_error = json_last_error();
 		if ( $code >= 400 ) {
 			$err_data = self::image_http_error_data(
 				$code,
 				$body_response,
 				self::image_response_request_headers( $response ),
-				wp_remote_retrieve_header( $response, 'retry-after' )
+				wp_remote_retrieve_header( $response, 'retry-after' ),
+				$request['body'] ?? null,
+				JSON_ERROR_NONE === $body_decode_error ? null : $raw_body
 			);
 			return new \WP_Error( 'api_error', __( 'Image provider returned an HTTP error.', 'alorbach-ai-gateway' ), $err_data );
 		}
@@ -921,10 +935,10 @@ class API_Client {
 	}
 
 	/** Build an allowlisted error projection while the provider response is available. */
-	private static function image_http_error_data( $status, $payload, $headers = array(), $retry_after = null ) {
+	private static function image_http_error_data( $status, $payload, $headers = array(), $retry_after = null, $request_context = null, $plain_body = null ) {
 		$data = array_merge(
 			array( 'status' => min( 599, max( 100, absint( $status ) ) ) ),
-			Image_Error_Diagnostics::from_payload( $payload, is_array( $headers ) ? $headers : array() )
+			Image_Error_Diagnostics::from_payload( $payload, is_array( $headers ) ? $headers : array(), $request_context, $plain_body )
 		);
 		if ( null !== $data['provider_error_code'] ) {
 			$data['error_code'] = $data['provider_error_code'];
@@ -1012,12 +1026,15 @@ class API_Client {
 		$code          = wp_remote_retrieve_response_code( $response );
 		$raw_body      = wp_remote_retrieve_body( $response );
 		$body_response = json_decode( $raw_body, true );
+		$body_decode_error = json_last_error();
 		if ( $code >= 400 ) {
 			$data = self::image_http_error_data(
 				$code,
 				$body_response,
 				self::image_response_request_headers( $response ),
-				wp_remote_retrieve_header( $response, 'retry-after' )
+				wp_remote_retrieve_header( $response, 'retry-after' ),
+				$request['body'] ?? null,
+				JSON_ERROR_NONE === $body_decode_error ? null : $raw_body
 			);
 			return new \WP_Error( 'api_error', __( 'Image provider returned an HTTP error.', 'alorbach-ai-gateway' ), $data );
 		}
@@ -1043,16 +1060,19 @@ class API_Client {
 		$poll_body = wp_remote_retrieve_body( $poll_response );
 		if ( $poll_code >= 400 ) {
 			$decoded = json_decode( $poll_body, true );
+			$poll_decode_error = json_last_error();
 			$data = self::image_http_error_data(
 				$poll_code,
 				$decoded,
 				self::image_response_request_headers( $poll_response ),
-				wp_remote_retrieve_header( $poll_response, 'retry-after' )
+				wp_remote_retrieve_header( $poll_response, 'retry-after' ),
+				$request['body'] ?? null,
+				JSON_ERROR_NONE === $poll_decode_error ? null : $poll_body
 			);
 			return new \WP_Error( 'api_error', __( 'Image provider polling returned an HTTP error.', 'alorbach-ai-gateway' ), $data );
 		}
 
-		return self::normalize_gradio_image_response( $poll_body );
+		return self::normalize_gradio_image_response( $poll_body, $request['body'] ?? null );
 	}
 
 	/**
@@ -1061,7 +1081,7 @@ class API_Client {
 	 * @param string $raw_body Raw response body.
 	 * @return array|\WP_Error
 	 */
-	private static function normalize_gradio_image_response( $raw_body ) {
+	private static function normalize_gradio_image_response( $raw_body, $request_context = null ) {
 		$buffer           = (string) $raw_body;
 		$last_payload     = null;
 		$complete_payload = null;
@@ -1102,7 +1122,7 @@ class API_Client {
 		}
 
 		if ( $saw_error_event ) {
-			$diagnostics = Image_Error_Diagnostics::from_payload( $error_payload );
+			$diagnostics = Image_Error_Diagnostics::from_payload( $error_payload, array(), $request_context );
 			return new \WP_Error(
 				'api_error',
 				__( 'Image provider returned a Gradio error event.', 'alorbach-ai-gateway' ),
@@ -1213,7 +1233,7 @@ class API_Client {
 			return new \WP_Error( 'no_api_key', $message );
 		}
 
-		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options );
+		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options, $prov, $model );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
@@ -1288,7 +1308,8 @@ class API_Client {
 
 		if ( $code >= 400 ) {
 			$body_response = json_decode( $state['raw'], true );
-			$err_data = self::image_http_error_data( $code, $body_response, $response_headers, $response_headers['retry-after'] ?? null );
+			$body_decode_error = json_last_error();
+			$err_data = self::image_http_error_data( $code, $body_response, $response_headers, $response_headers['retry-after'] ?? null, $request['body'] ?? null, JSON_ERROR_NONE === $body_decode_error ? null : $state['raw'] );
 			return new \WP_Error( 'api_error', __( 'Image provider returned an HTTP error.', 'alorbach-ai-gateway' ), $err_data );
 		}
 
