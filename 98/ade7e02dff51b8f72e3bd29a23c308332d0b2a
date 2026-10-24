@@ -1,0 +1,31 @@
+alorbach-ai-subscription-gateway.php
+  s_437c8198d77097::t_c397766ff5743f 34
+docs/image-attempt-recovery.md
+  s_437c8198d77097::t_60d397fb005785 45-54
+includes/class-api-client.php
+  s_437c8198d77097::t_2e0d126262e5b6 889-895,923-949,1016-1022,1046-1050,1052,1105,1108-1109,1291-1292
+includes/class-image-attempts.php
+  s_437c8198d77097::t_d00599d0740daa 26,90-95,239,241-245,258-278,399,420-423,611,617,637,653-711,732
+includes/class-image-error-diagnostics.php
+  s_437c8198d77097::t_284b933c51a50e 1-330
+tests/image-attempt-recovery-test.php
+  s_437c8198d77097::t_446566f7cf0441 22,30,51-53,61-76,80,124-128,136,162,166-168,182-207
+tests/image-error-diagnostics-test.php
+  s_437c8198d77097::t_478fc1f969444e 1-80
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "98ade7e02dff51b8f72e3bd29a23c308332d0b2a",
+  "prompts": {},
+  "sessions": {
+    "s_437c8198d77097": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16c55-5ef7-7e51-9325-9e9a8486bd61",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
