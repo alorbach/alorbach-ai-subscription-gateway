@@ -1,0 +1,62 @@
+tests/image-request-options-test.php
+  s_437c8198d77097::t_642886023ab4bb 1-61
+includes/Providers/Azure_Provider.php
+  s_437c8198d77097::t_44923a8eeecb69 69-83
+  s_3c069281552f1d::t_ad1f21621cc20c 68
+tests/image-error-diagnostics-test.php
+  s_437c8198d77097::t_c2c03b628c1f2f 94
+  s_437c8198d77097::t_ab62f04b0b54b3 21-22,27-29,82-93,95-106,129-141
+  s_437c8198d77097::t_4e4d4bf3715384 107-128
+  s_437c8198d77097::t_3905e6f0d1ba27 142
+includes/class-image-error-diagnostics.php
+  s_437c8198d77097::t_f997b35132cead 148,163-172,230-232,235-241,244-248,263,268-270
+  s_437c8198d77097::t_7157d86ebda77d 191
+  s_437c8198d77097::t_8fa8c820283b44 146,229,233-234,267,271
+  s_437c8198d77097::t_25f2c7617e7a76 182-183
+  s_437c8198d77097::t_d1221c96dc1390 15-16,66-69,77,82-86,93-94,120,124-145,147,149-162,173-181,184-190,192-228,242-243,249-262,264-266,272-284
+  s_437c8198d77097::t_d776bf185ba640 285
+includes/class-image-attempts.php
+  s_437c8198d77097::t_4b62c5b6ffe22d 96
+  s_437c8198d77097::t_a55b1289cefe3b 264,267,273,425,699,701,705,714
+includes/Providers/OpenAI_Provider.php
+  s_437c8198d77097::t_c2dca5964a57f1 96-104
+includes/class-api-client.php
+  s_437c8198d77097::t_e35a072cfc3a99 899,905-907,938,941,1029,1035-1037,1063,1068-1070,1075,1084,1125,1311-1312
+  s_437c8198d77097::t_e4e2b0e8d048d0 92,100-108,116-118,784,798,1236
+tests/image-attempt-recovery-test.php
+  s_437c8198d77097::t_85d48ce8c39a75 86
+  s_437c8198d77097::t_84f4f5c30ba991 191-196,204,206-210,240
+docs/image-attempt-recovery.md
+  s_437c8198d77097::t_51f53705b44028 48,50
+  s_437c8198d77097::t_305d519a3d9066 55-57
+includes/Providers/Provider_Base.php
+  s_437c8198d77097::t_b25d3c2bab5842 129-141
+DEVELOPER-GUIDE.md
+  s_437c8198d77097::t_4b677b7f47054c 812
+docs/image-request-parameters.md
+  s_437c8198d77097::t_49dbe6ee7f8681 1-32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "12a5c80a332e5a7e20d8fc0a6041b18c6d09c08b",
+  "prompts": {},
+  "sessions": {
+    "s_3c069281552f1d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d274-fc4b-7c02-a91b-1af6fcb10865",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_437c8198d77097": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16c55-5ef7-7e51-9325-9e9a8486bd61",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
