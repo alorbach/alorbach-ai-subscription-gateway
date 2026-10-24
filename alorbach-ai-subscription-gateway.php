@@ -31,6 +31,8 @@ require_once ALORBACH_PLUGIN_DIR . 'includes/class-ai-bridge.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-local-codex-bridge.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-cli-image-jobs.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-jobs.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-attempts.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-attestation.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-server-chat-models.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-integration-service.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Interface.php';

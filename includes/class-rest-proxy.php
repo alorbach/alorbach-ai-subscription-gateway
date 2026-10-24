@@ -355,7 +355,43 @@ class REST_Proxy {
 				'aspect_ratio' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'reference_images' => array( 'required' => false ),
 				'client_request_id' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'client_request_hash' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/images/attempts/(?P<client_request_id>[A-Za-z0-9._:-]+)', array(
+			'methods' => 'GET',
+			'callback' => array( __CLASS__, 'image_attempt_lookup_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args' => array(
+				'client_request_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/images/attempts/(?P<client_request_id>[A-Za-z0-9._:-]+)/result', array(
+			'methods' => 'GET',
+			'callback' => array( __CLASS__, 'image_attempt_result_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args' => array(
+				'client_request_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'evidence_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				'request_hash' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/images/attempts/(?P<client_request_id>[A-Za-z0-9._:-]+)/reconcile', array(
+			'methods' => 'POST',
+			'callback' => array( __CLASS__, 'image_attempt_reconcile_handler' ),
+			'permission_callback' => function () {
+				return is_user_logged_in();
+			},
+			'args' => array(
+				'client_request_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -1212,26 +1248,21 @@ class REST_Proxy {
 	 */
 	public static function images_handler( $request ) {
 		$user_id = get_current_user_id();
-
-		$rate_error = self::check_rate_limit( $user_id, 'images' );
-		if ( $rate_error ) {
-			return $rate_error;
-		}
-
-		$quota_error = self::check_monthly_quota( $user_id );
-		if ( $quota_error ) {
-			return $quota_error;
-		}
-
 		$prompt  = $request->get_param( 'prompt' );
-		$size    = $request->get_param( 'size' );
+		$size    = $request->get_param( 'size' ) ?: '1024x1024';
 		$n       = (int) $request->get_param( 'n' );
 		$n       = min( 10, max( 1, $n ) );
 		$quality = $request->get_param( 'quality' );
 		$output_format = $request->get_param( 'output_format' ) ?: 'png';
-		$client_request_id = sanitize_text_field( (string) $request->get_param( 'client_request_id' ) );
-		if ( strlen( $client_request_id ) > 128 ) {
+		$raw_client_request_id = trim( (string) $request->get_param( 'client_request_id' ) );
+		$client_request_id = Image_Attempts::sanitize_client_request_id( $raw_client_request_id );
+		if ( '' !== $raw_client_request_id && '' === $client_request_id ) {
 			return new \WP_Error( 'invalid_client_request_id', __( 'client_request_id must not exceed 128 characters.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+		$client_request_hash_raw = trim( (string) $request->get_param( 'client_request_hash' ) );
+		$client_request_hash = '' === $client_request_hash_raw ? null : Image_Attempts::valid_client_request_hash( $client_request_hash_raw );
+		if ( '' !== $client_request_hash_raw && null === $client_request_hash ) {
+			return new \WP_Error( 'invalid_client_request_hash', __( 'The saved request binding is invalid.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
 		}
 		$reference_images = $request->get_param( 'reference_images' );
 		$reference_images = is_array( $reference_images ) ? $reference_images : array();
@@ -1243,11 +1274,28 @@ class REST_Proxy {
 		$billable_quality = self::get_billable_image_quality( $quality, $model_name_img );
 		$background = Cost_Matrix::normalize_image_background( $request->get_param( 'background' ), $model_name_img );
 		$output_format = Cost_Matrix::coerce_output_format_for_background( $output_format, $background );
+		$aspect_ratio = sanitize_text_field( (string) $request->get_param( 'aspect_ratio' ) );
+		$provider_options = self::normalize_direct_provider_options( $request->get_param( 'provider_options' ) );
+		$request_binding = array(
+			'model' => $model,
+			'prompt' => (string) $prompt,
+			'size' => (string) $size,
+			'n' => $n,
+			'quality' => (string) $quality,
+			'output_format' => (string) $output_format,
+			'background' => (string) $background,
+			'aspect_ratio' => $aspect_ratio,
+			'provider_options' => $provider_options,
+			'reference_images' => $reference_images,
+			'mask_image' => $request->get_param( 'mask_image' ),
+			'input_reference' => $request->get_param( 'input_reference' ),
+			'input_reference_data_url' => $request->get_param( 'input_reference_data_url' ),
+			'frames' => $request->get_param( 'frames' ),
+		);
+		$request_hash = '' !== $client_request_id ? Image_Attempts::request_hash( $user_id, $client_request_id, $request_binding ) : '';
+		$attempt = null;
 
-		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
-		if ( $plan_error ) {
-			return $plan_error;
-		}
+		// Normalize model-specific options before claiming the immutable request.
 		$direct_options = Integration_Service::validate_direct_image_request(
 			$user_id,
 			$model,
@@ -1259,15 +1307,29 @@ class REST_Proxy {
 			Integration_Service::count_image_references(
 				array(
 					'reference_images'         => $reference_images,
-					'input_reference'          => $request->get_param( 'input_reference' ),
-					'input_reference_data_url' => $request->get_param( 'input_reference_data_url' ),
-					'frames'                   => $request->get_param( 'frames' ),
+					'input_reference'          => $request_binding['input_reference'],
+					'input_reference_data_url' => $request_binding['input_reference_data_url'],
+					'frames'                   => $request_binding['frames'],
 				)
 			),
-			(string) $request->get_param( 'aspect_ratio' )
+			$aspect_ratio
 		);
 		if ( is_wp_error( $direct_options ) ) {
-			return $direct_options;
+			if ( '' !== $client_request_id ) {
+				$claim = self::claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash );
+				if ( is_wp_error( $claim ) ) {
+					return $claim;
+				}
+				if ( is_array( $claim ) ) {
+					if ( 'claimed' === $claim['state'] ) {
+						$attempt = Image_Attempts::mark_error( $claim['attempt'], array( 'dispatch_status' => 'not_sent', 'outcome' => 'rejected', 'source' => 'gateway_preflight_v1', 'cost_usd' => '0.00000000', 'provider_cost_usd' => '0.00000000', 'billing_status' => 'not_charged', 'failure_class' => 'invalid_response' ) );
+						$attempt = is_array( $attempt ) ? $attempt : $claim['attempt'];
+						return self::safe_image_error( 'image_request_rejected', 422, $user_id, $client_request_id, $attempt );
+					}
+					return self::existing_image_attempt_error( $claim, $user_id, $client_request_id, $request_hash );
+				}
+			}
+			return new \WP_Error( 'image_request_rejected', __( 'The image request did not pass Gateway validation.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
 		}
 		if ( is_array( $direct_options ) ) {
 			$size             = $direct_options['size'];
@@ -1276,14 +1338,56 @@ class REST_Proxy {
 			$output_format    = $direct_options['output_format'];
 			$background       = $direct_options['background'];
 			$billable_quality = self::get_billable_image_quality( $quality, $model_name_img );
+			$request_binding['size'] = $size;
+			$request_binding['quality'] = $quality;
+			$request_binding['n'] = $n;
+			$request_binding['output_format'] = $output_format;
+			$request_binding['background'] = $background;
+			$request_hash = '' !== $client_request_id ? Image_Attempts::request_hash( $user_id, $client_request_id, $request_binding ) : '';
 		}
 
-		// Idempotency: reject duplicate image requests within a 5-minute window.
-		$time_bucket       = (int) ( time() / 300 );
+		if ( '' !== $client_request_id ) {
+			$claim = self::claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash );
+			if ( is_wp_error( $claim ) ) {
+				return $claim;
+			}
+			if ( is_array( $claim ) && 'claimed' === $claim['state'] ) {
+				$attempt = $claim['attempt'];
+			} else {
+				return self::existing_image_attempt_error( $claim, $user_id, $client_request_id, $request_hash );
+			}
+		}
+
+		if ( is_array( $attempt ) ) {
+			$storage_check = Image_Attempts::verify_transactional_storage();
+			if ( is_wp_error( $storage_check ) ) {
+				$storage_code = $storage_check->get_error_code();
+				if ( 0 === strpos( $storage_code, 'image_ledger_engine_' ) ) {
+					$classification = Image_Attempts::classify_error( $storage_code );
+					$updated = Image_Attempts::mark_error( $attempt, $classification );
+					$attempt = is_array( $updated ) ? $updated : Image_Attempts::latest_raw( $user_id, $client_request_id );
+				}
+				return self::safe_image_error( 'image_storage_unavailable', 503, $user_id, $client_request_id, $attempt );
+			}
+		}
+
+		$rate_error = self::check_rate_limit( $user_id, 'images' );
+		if ( $rate_error ) {
+			return self::preflight_image_error( $rate_error, $attempt, $user_id, $client_request_id );
+		}
+		$quota_error = self::check_monthly_quota( $user_id );
+		if ( $quota_error ) {
+			return self::preflight_image_error( $quota_error, $attempt, $user_id, $client_request_id );
+		}
+
+		$plan_error = self::enforce_user_plan_access( $user_id, 'image', $model );
+		if ( $plan_error ) {
+			return self::preflight_image_error( $plan_error, $attempt, $user_id, $client_request_id );
+		}
 		$request_signature = '' !== $client_request_id
 			? hash( 'sha256', wp_json_encode( array( $user_id, 'image', 'client_request_id', $client_request_id ) ) )
-			: hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $output_format, $background, $n, md5( wp_json_encode( $reference_images ) ), $time_bucket ) ) );
-		if ( Ledger::signature_exists( $request_signature ) ) {
+			: hash( 'sha256', wp_json_encode( array( $user_id, 'image', $prompt, $size, $model, $quality, $output_format, $background, $n, md5( wp_json_encode( $reference_images ) ), (int) ( time() / 300 ) ) ) );
+		if ( '' === $client_request_id && Ledger::signature_exists( $request_signature ) ) {
 			return new \WP_Error( 'duplicate_request', __( 'Duplicate request.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 
@@ -1291,7 +1395,7 @@ class REST_Proxy {
 		$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
 		$balance  = Ledger::get_balance( $user_id );
 		if ( $balance < $cost ) {
-			return self::insufficient_credits_error(
+			$insufficient = self::insufficient_credits_error(
 				$user_id,
 				'image',
 				array(
@@ -1302,23 +1406,39 @@ class REST_Proxy {
 					'available_uc' => $balance,
 				)
 			);
+			return self::preflight_image_error( $insufficient, $attempt, $user_id, $client_request_id );
 		}
 
-		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images, array( 'background' => $background ) );
+		if ( is_array( $attempt ) ) {
+			$attempt = Image_Attempts::mark_possibly_sent( $attempt );
+			if ( ! is_array( $attempt ) ) {
+				return self::safe_image_error( 'image_attempt_state_conflict', 409, $user_id, $client_request_id, Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+			}
+		}
+		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images, array( 'background' => $background, 'aspect_ratio' => $aspect_ratio, 'provider_options' => $provider_options ) );
 		if ( is_wp_error( $response ) ) {
-			return $response;
+			if ( is_array( $attempt ) ) {
+				$classification = Image_Attempts::classify_error( $response->get_error_code(), $response->get_error_data() );
+				$updated_attempt = Image_Attempts::mark_error( $attempt, $classification );
+				return self::safe_image_error( 'image_provider_error', 502, $user_id, $client_request_id, is_array( $updated_attempt ) ? $updated_attempt : Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+			}
+			return new \WP_Error( 'image_provider_error', __( 'The image provider request could not be completed.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
+		}
+		if ( ! is_array( $response ) || empty( $response['data'] ) || ! is_array( $response['data'] ) ) {
+			$response_error = new \WP_Error( 'invalid_image_response', __( 'The image provider returned no usable image result.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
+			if ( is_array( $attempt ) ) {
+				$updated_attempt = Image_Attempts::mark_error( $attempt, Image_Attempts::classify_error( $response_error->get_error_code(), $response_error->get_error_data() ) );
+				return self::safe_image_error( 'image_provider_error', 502, $user_id, $client_request_id, is_array( $updated_attempt ) ? $updated_attempt : Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+			}
+			return new \WP_Error( 'image_provider_error', __( 'The image provider returned no usable image result.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
 		}
 		$usage_api_cost = Cost_Matrix::calculate_image_usage_cost( $model, isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array() );
+		$provider_cost_usd = null;
 		if ( null !== $usage_api_cost ) {
 			$api_cost = $usage_api_cost;
 			$cost     = Cost_Matrix::apply_user_cost( $api_cost, $model );
+			$provider_cost_usd = number_format( (float) $usage_api_cost / 1000000, 8, '.', '' );
 		}
-
-		Ledger::insert_transaction( $user_id, 'image_deduction', $model_name_img, -$cost, null, null, null, $request_signature, $api_cost );
-		do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
-		$response['cost_uc']      = $cost;
-		$response['cost_credits'] = User_Display::uc_to_credits( $cost );
-		$response['cost_usd']     = User_Display::uc_to_usd( $cost );
 		$response['provider_size'] = $size;
 		$response['quality']       = $quality;
 		$response['output_format'] = $output_format;
@@ -1326,7 +1446,151 @@ class REST_Proxy {
 		if ( '' !== $client_request_id ) {
 			$response['client_request_id'] = $client_request_id;
 		}
+		if ( is_array( $attempt ) ) {
+			$attempt = Image_Attempts::mark_succeeded( $attempt, $response, $provider_cost_usd );
+			if ( ! is_array( $attempt ) ) {
+				return self::safe_image_error( 'image_attempt_persist_failed', 503, $user_id, $client_request_id, Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+			}
+
+			$storage_check = Image_Attempts::verify_transactional_storage();
+			if ( is_wp_error( $storage_check ) ) {
+				return self::safe_image_error( 'image_billing_pending', 503, $user_id, $client_request_id, $attempt );
+			}
+
+			global $wpdb;
+			if ( false === $wpdb->query( 'START TRANSACTION' ) ) {
+				return self::safe_image_error( 'image_billing_pending', 503, $user_id, $client_request_id, $attempt );
+			}
+			$ledger_id = Ledger::insert_transaction( $user_id, 'image_deduction', $model_name_img, -$cost, null, null, null, $request_signature, $api_cost );
+			if ( ! $ledger_id ) {
+				$wpdb->query( 'ROLLBACK' );
+				return self::safe_image_error( 'image_billing_pending', 503, $user_id, $client_request_id, $attempt );
+			}
+			$response['cost_uc'] = $cost;
+			$response['cost_credits'] = User_Display::uc_to_credits( $cost );
+			$response['cost_usd'] = User_Display::uc_to_usd( $cost );
+			$attempt = Image_Attempts::mark_billing_recorded( $attempt, $response, User_Display::uc_to_usd( $cost ), $provider_cost_usd );
+			if ( ! is_array( $attempt ) || false === $wpdb->query( 'COMMIT' ) ) {
+				$wpdb->query( 'ROLLBACK' );
+				return self::safe_image_error( 'image_billing_pending', 503, $user_id, $client_request_id, Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+			}
+			do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
+		} else {
+			Ledger::insert_transaction( $user_id, 'image_deduction', $model_name_img, -$cost, null, null, null, $request_signature, $api_cost );
+			$response['cost_uc'] = $cost;
+			$response['cost_credits'] = User_Display::uc_to_credits( $cost );
+			$response['cost_usd'] = User_Display::uc_to_usd( $cost );
+			do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
+		}
 		return rest_ensure_response( $response );
+	}
+
+	/** Read the owner-scoped stored evidence projection; never creates storage. */
+	public static function image_attempt_lookup_handler( $request ) {
+		$client_request_id = Image_Attempts::sanitize_client_request_id( $request->get_param( 'client_request_id' ) );
+		$evidence = Image_Attempts::lookup( get_current_user_id(), $client_request_id );
+		if ( is_wp_error( $evidence ) ) {
+			return $evidence;
+		}
+		if ( ! is_array( $evidence ) ) {
+			return new \WP_Error( 'image_attempt_not_found', __( 'The image attempt was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+		return rest_ensure_response( $evidence );
+	}
+
+	/** Return a stored success only when all owner/evidence/hash bindings match. */
+	public static function image_attempt_result_handler( $request ) {
+		$result = Image_Attempts::read_result(
+			get_current_user_id(),
+			$request->get_param( 'client_request_id' ),
+			$request->get_param( 'evidence_id' ),
+			$request->get_param( 'request_hash' )
+		);
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		if ( ! is_array( $result ) ) {
+			return new \WP_Error( 'image_attempt_result_not_found', __( 'The stored image result was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+		return rest_ensure_response( $result );
+	}
+
+	/** Import owner-confirmed evidence signed by a server-pinned provider key. */
+	public static function image_attempt_reconcile_handler( $request ) {
+		$params = $request->get_json_params();
+		$params = is_array( $params ) ? $params : array();
+		$revision = $params['expected_revision'] ?? null;
+		if ( ! is_int( $revision ) && ( ! is_string( $revision ) || ! preg_match( '/^\d{1,10}$/', $revision ) ) ) {
+			return new \WP_Error( 'image_attestation_revision_invalid', __( 'The image attempt revision is invalid.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+		$result = Image_Attestation::reconcile(
+			get_current_user_id(),
+			$request->get_param( 'client_request_id' ),
+			(int) $revision,
+			(string) ( $params['idempotency_key'] ?? '' ),
+			is_array( $params['envelope'] ?? null ) ? $params['envelope'] : array(),
+			(string) ( $params['signature'] ?? '' ),
+			true === ( $params['confirmed'] ?? false )
+		);
+		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
+	}
+
+	private static function claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash ) {
+		$existing = Image_Attempts::lookup( $user_id, $client_request_id );
+		if ( is_wp_error( $existing ) ) {
+			return $existing;
+		}
+		if ( is_array( $existing ) && 'gateway_ledger_v1' === ( $existing['source'] ?? '' ) ) {
+			return array( 'state' => 'legacy', 'attempt' => $existing );
+		}
+		return Image_Attempts::claim( $user_id, $client_request_id, $request_hash, $client_request_hash );
+	}
+
+	private static function existing_image_attempt_error( $claim, $user_id, $client_request_id, $request_hash ) {
+		$state = is_array( $claim ) ? (string) ( $claim['state'] ?? 'blocked' ) : 'blocked';
+		$attempt = is_array( $claim ) ? ( $claim['attempt'] ?? null ) : null;
+		if ( 'succeeded' === $state && is_array( $attempt ) ) {
+			$cached = Image_Attempts::read_result( $user_id, $client_request_id, $attempt['evidence_id'] ?? '', $request_hash );
+			if ( is_array( $cached ) ) {
+				return rest_ensure_response( $cached );
+			}
+		}
+		return self::safe_image_error( 'image_attempt_already_recorded', 409, $user_id, $client_request_id, $attempt );
+	}
+
+	private static function preflight_image_error( $error, $attempt, $user_id, $client_request_id ) {
+		if ( ! is_array( $attempt ) ) {
+			return new \WP_Error( 'image_request_rejected', __( 'The image request was rejected before dispatch.', 'alorbach-ai-gateway' ), array( 'status' => is_wp_error( $error ) ? absint( $error->get_error_data()['status'] ?? 422 ) : 422 ) );
+		}
+		$updated = Image_Attempts::mark_error( $attempt, array( 'dispatch_status' => 'not_sent', 'outcome' => 'rejected', 'source' => 'gateway_preflight_v1', 'cost_usd' => '0.00000000', 'provider_cost_usd' => '0.00000000', 'billing_status' => 'not_charged', 'failure_class' => 'local_configuration' ) );
+		return self::safe_image_error( 'image_request_rejected', is_wp_error( $error ) ? absint( $error->get_error_data()['status'] ?? 422 ) : 422, $user_id, $client_request_id, is_array( $updated ) ? $updated : Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+	}
+
+	private static function safe_image_error( $code, $status, $user_id, $client_request_id, $attempt ) {
+		$evidence = is_array( $attempt ) ? Image_Attempts::public_evidence( $attempt ) : Image_Attempts::lookup( $user_id, $client_request_id );
+		$data = array( 'status' => max( 400, min( 599, absint( $status ) ) ) );
+		if ( is_array( $evidence ) ) {
+			$data['image_attempt'] = $evidence;
+		}
+		$message = 'image_attempt_already_recorded' === $code
+			? __( 'This image request has already been recorded and will not be sent again.', 'alorbach-ai-gateway' )
+			: __( 'The image request could not be completed safely.', 'alorbach-ai-gateway' );
+		return new \WP_Error( sanitize_key( $code ), $message, $data );
+	}
+
+	private static function normalize_direct_provider_options( $options ) {
+		if ( ! is_array( $options ) ) {
+			return array();
+		}
+		$clean = array();
+		foreach ( array_slice( $options, 0, 16, true ) as $key => $value ) {
+			$key = sanitize_key( (string) $key );
+			if ( '' !== $key && is_scalar( $value ) ) {
+				$clean[ $key ] = is_bool( $value ) || is_int( $value ) ? $value : sanitize_text_field( (string) $value );
+			}
+		}
+		ksort( $clean, SORT_STRING );
+		return $clean;
 	}
 
 	/**
