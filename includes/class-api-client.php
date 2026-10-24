@@ -886,17 +886,13 @@ class API_Client {
 		$raw_body = wp_remote_retrieve_body( $response );
 		$body_response = json_decode( $raw_body, true );
 		if ( $code >= 400 ) {
-			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
-			$err_data = array( 'status' => $code );
-			$retry_after = wp_remote_retrieve_header( $response, 'retry-after' );
-			if ( '' !== (string) $retry_after ) {
-				$err_data['retry_after'] = (string) $retry_after;
-			}
-			$api_error_code = is_array( $body_response ) && ! empty( $body_response['error']['code'] ) ? (string) $body_response['error']['code'] : '';
-			if ( '' !== $api_error_code ) {
-				$err_data['error_code'] = $api_error_code;
-			}
-			return new \WP_Error( 'api_error', $msg, $err_data );
+			$err_data = self::image_http_error_data(
+				$code,
+				$body_response,
+				self::image_response_request_headers( $response ),
+				wp_remote_retrieve_header( $response, 'retry-after' )
+			);
+			return new \WP_Error( 'api_error', __( 'Image provider returned an HTTP error.', 'alorbach-ai-gateway' ), $err_data );
 		}
 		if ( ! empty( $request['response_format'] ) && 'responses_image_generation' === $request['response_format'] ) {
 			return self::normalize_responses_image_generation_response( $body_response, $raw_body );
@@ -922,6 +918,33 @@ class API_Client {
 			$body_response = array( 'data' => $data );
 		}
 		return $body_response;
+	}
+
+	/** Build an allowlisted error projection while the provider response is available. */
+	private static function image_http_error_data( $status, $payload, $headers = array(), $retry_after = null ) {
+		$data = array_merge(
+			array( 'status' => min( 599, max( 100, absint( $status ) ) ) ),
+			Image_Error_Diagnostics::from_payload( $payload, is_array( $headers ) ? $headers : array() )
+		);
+		if ( null !== $data['provider_error_code'] ) {
+			$data['error_code'] = $data['provider_error_code'];
+		}
+		if ( is_string( $retry_after ) && preg_match( '/^\d{1,6}$/D', $retry_after ) ) {
+			$data['retry_after'] = (string) min( 3600, absint( $retry_after ) );
+		}
+		return $data;
+	}
+
+	/** Read only known provider request ID headers from a WordPress HTTP response. */
+	private static function image_response_request_headers( $response ) {
+		$headers = array();
+		foreach ( array( 'x-request-id', 'apim-request-id', 'x-ms-request-id' ) as $name ) {
+			$value = wp_remote_retrieve_header( $response, $name );
+			if ( is_string( $value ) ) {
+				$headers[ $name ] = $value;
+			}
+		}
+		return $headers;
 	}
 
 	/**
@@ -990,8 +1013,13 @@ class API_Client {
 		$raw_body      = wp_remote_retrieve_body( $response );
 		$body_response = json_decode( $raw_body, true );
 		if ( $code >= 400 ) {
-			$msg = self::extract_api_error_message( $body_response, $raw_body, $code );
-			return new \WP_Error( 'api_error', $msg, array( 'status' => $code ) );
+			$data = self::image_http_error_data(
+				$code,
+				$body_response,
+				self::image_response_request_headers( $response ),
+				wp_remote_retrieve_header( $response, 'retry-after' )
+			);
+			return new \WP_Error( 'api_error', __( 'Image provider returned an HTTP error.', 'alorbach-ai-gateway' ), $data );
 		}
 
 		$event_id = is_array( $body_response ) ? (string) ( $body_response['event_id'] ?? $body_response['id'] ?? '' ) : '';
@@ -1015,12 +1043,13 @@ class API_Client {
 		$poll_body = wp_remote_retrieve_body( $poll_response );
 		if ( $poll_code >= 400 ) {
 			$decoded = json_decode( $poll_body, true );
-			$msg = self::extract_api_error_message( $decoded, $poll_body, $poll_code );
-			return new \WP_Error(
-				'api_error',
-				sprintf( __( 'Gradio polling failed: %s', 'alorbach-ai-gateway' ), $msg ),
-				array( 'status' => $poll_code )
+			$data = self::image_http_error_data(
+				$poll_code,
+				$decoded,
+				self::image_response_request_headers( $poll_response ),
+				wp_remote_retrieve_header( $poll_response, 'retry-after' )
 			);
+			return new \WP_Error( 'api_error', __( 'Image provider polling returned an HTTP error.', 'alorbach-ai-gateway' ), $data );
 		}
 
 		return self::normalize_gradio_image_response( $poll_body );
@@ -1073,10 +1102,11 @@ class API_Client {
 		}
 
 		if ( $saw_error_event ) {
+			$diagnostics = Image_Error_Diagnostics::from_payload( $error_payload );
 			return new \WP_Error(
 				'api_error',
-				sprintf( __( 'Hugging Face Space returned a Gradio error event: %s', 'alorbach-ai-gateway' ), self::extract_gradio_error_message( $error_payload ) ),
-				array( 'status' => 502 )
+				__( 'Image provider returned a Gradio error event.', 'alorbach-ai-gateway' ),
+				array_merge( array( 'status' => 502 ), $diagnostics )
 			);
 		}
 
@@ -1139,34 +1169,6 @@ class API_Client {
 		);
 	}
 
-	/**
-	 * Extract a human-readable error message from Gradio error payloads.
-	 *
-	 * @param mixed $payload Error payload.
-	 * @return string
-	 */
-	private static function extract_gradio_error_message( $payload ) {
-		if ( is_string( $payload ) && '' !== trim( $payload ) ) {
-			return trim( $payload );
-		}
-
-		if ( is_array( $payload ) ) {
-			foreach ( array( 'message', 'error', 'detail' ) as $key ) {
-				if ( isset( $payload[ $key ] ) && is_string( $payload[ $key ] ) && '' !== trim( $payload[ $key ] ) ) {
-					return trim( $payload[ $key ] );
-				}
-			}
-			if ( isset( $payload[0] ) && is_string( $payload[0] ) && '' !== trim( $payload[0] ) ) {
-				return trim( $payload[0] );
-			}
-		}
-
-		if ( null === $payload || '' === $payload || array() === $payload ) {
-			return __( 'Hugging Face Space returned an empty Gradio error event. The Space backend likely failed or is temporarily overloaded.', 'alorbach-ai-gateway' );
-		}
-
-		return __( 'Gradio API request failed.', 'alorbach-ai-gateway' );
-	}
 
 	/**
 	 * Stream image generation and emit partial previews when available.
@@ -1286,17 +1288,8 @@ class API_Client {
 
 		if ( $code >= 400 ) {
 			$body_response = json_decode( $state['raw'], true );
-			$msg = self::extract_api_error_message( $body_response, $state['raw'], $code );
-			$err_data = array( 'status' => $code );
-			$retry_after = $response_headers['retry-after'] ?? '';
-			if ( '' !== $retry_after ) {
-				$err_data['retry_after'] = $retry_after;
-			}
-			$api_error_code = is_array( $body_response ) && ! empty( $body_response['error']['code'] ) ? (string) $body_response['error']['code'] : '';
-			if ( '' !== $api_error_code ) {
-				$err_data['error_code'] = $api_error_code;
-			}
-			return new \WP_Error( 'api_error', $msg, $err_data );
+			$err_data = self::image_http_error_data( $code, $body_response, $response_headers, $response_headers['retry-after'] ?? null );
+			return new \WP_Error( 'api_error', __( 'Image provider returned an HTTP error.', 'alorbach-ai-gateway' ), $err_data );
 		}
 
 		if ( empty( $state['final_images'] ) ) {

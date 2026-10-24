@@ -42,3 +42,13 @@ honor the claim transaction, dispatch fails closed without fabricated evidence.
 A post-handoff storage failure remains unresolved; it never becomes zero-cost
 preflight evidence. An operator must diagnose/repair unsupported storage through
 an approved database maintenance procedure before new paid work can start.
+
+## Safe provider HTTP diagnostics
+
+New direct-image attempts retain a bounded provider-error-diagnostics.v1 record when an upstream HTTP or structured Gradio error is available. The public evidence may include a canonical provider error code, one of invalid_parameter, unsupported_parameter, content_policy_violation, invalid_size, invalid_quality, model_unavailable, rate_limit, provider_rejected, or unknown, and a request-field path from the fixed allowlist (size, quality, prompt, n, model, output_format, response_format, background, moderation, image, mask, output_compression). Reasons come only from structured allowlisted provider codes and allowlisted field paths; free-form message wording is used only for an optional fingerprint and never determines a cause. Bare HTTP status codes do not establish a cause and use unknown.
+
+Only validated IDs from x-request-id, apim-request-id, or x-ms-request-id are included. A provider-message SHA-256 fingerprint may be recorded for correlation; the message, prompt, credentials, and response body are never persisted or returned. Old rows without the nullable diagnostics field remain readable and project null diagnostic fields.
+
+The optional nullable diagnostics column is added lazily during a mutating image-storage preflight, before provider handoff and outside a claim transaction. Owner GET evidence and result reads never create or upgrade schema. If the storage capability cannot be verified before dispatch, the request fails closed. HTTP errors after handoff remain possibly_sent / unknown, with unknown costs, unresolved billing, and no safe retry regardless of diagnostic detail.
+
+The offline diagnostic catalog regression command is php tests/image-error-diagnostics-test.php; it makes no provider request or billing write.

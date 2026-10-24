@@ -23,6 +23,7 @@ class Image_Attempts {
 	const MAX_RESULT_BYTES = 67108864;
 
 	private static $table_ready = null;
+	private static $diagnostics_column_ready = null;
 
 	/** Return a canonical hash for the normalized request sent to the provider. */
 	public static function request_hash( $owner_id, $client_request_id, array $request ) {
@@ -86,11 +87,12 @@ class Image_Attempts {
 		if ( 'api_error' === $error_code && isset( $error_data['status'] ) && is_numeric( $error_data['status'] ) ) {
 			$diagnostic['failure_class'] = 'provider_http_error';
 			$diagnostic['upstream_status'] = min( 599, max( 100, absint( $error_data['status'] ) ) );
-			$safe_provider_codes = array( 'invalid_request_error', 'rate_limit_exceeded', 'insufficient_quota', 'model_not_found', 'content_policy_violation', 'invalid_api_key', 'unsupported_value', 'server_error', 'temporarily_unavailable' );
-			$provider_code = sanitize_key( (string) ( $error_data['error_code'] ?? '' ) );
-			if ( in_array( $provider_code, $safe_provider_codes, true ) ) {
-				$diagnostic['provider_error_code'] = $provider_code;
-			}
+			$safe_fields = Image_Error_Diagnostics::normalize_fields( $error_data );
+			$diagnostic['provider_error_code'] = $safe_fields['provider_error_code'];
+			$diagnostic['provider_error_reason'] = $safe_fields['provider_error_reason'];
+			$diagnostic['provider_error_param'] = $safe_fields['provider_error_param'];
+			$diagnostic['provider_request_id'] = $safe_fields['provider_request_id'];
+			$diagnostic['provider_error_message_sha256'] = $safe_fields['provider_error_message_sha256'];
 			$retry_after = $error_data['retry_after'] ?? null;
 			if ( is_scalar( $retry_after ) && preg_match( '/^\d{1,6}$/', (string) $retry_after ) ) {
 				$diagnostic['retry_after_seconds'] = min( 3600, absint( $retry_after ) );
@@ -234,9 +236,13 @@ class Image_Attempts {
 		) );
 	}
 
-	/** Save a conclusive provider rejection or a confirmed pre-dispatch rejection. */
+	/** Save an unresolved provider error or a confirmed pre-dispatch rejection. */
 	public static function mark_error( array $attempt, array $classification ) {
-		return self::update_attempt( $attempt, array(
+		if ( ! self::ensure_storage() ) {
+			return new \WP_Error( 'image_attempt_storage_unavailable', __( 'This image attempt could not be recorded safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+		}
+
+		$values = array(
 			'dispatch_status' => in_array( (string) ( $classification['dispatch_status'] ?? '' ), array( 'not_sent', 'possibly_sent' ), true ) ? $classification['dispatch_status'] : 'possibly_sent',
 			'outcome'         => in_array( (string) ( $classification['outcome'] ?? '' ), array( 'rejected', 'unknown' ), true ) ? $classification['outcome'] : 'unknown',
 			'cost_usd'        => self::normalize_cost( $classification['cost_usd'] ?? null ),
@@ -249,7 +255,27 @@ class Image_Attempts {
 			'source'          => sanitize_key( (string) ( $classification['source'] ?? self::SOURCE ) ),
 			'revision'        => absint( $attempt['revision'] ?? 0 ) + 1,
 			'updated_at'      => current_time( 'mysql', true ),
-		) );
+		);
+
+		if ( array_key_exists( 'provider_error_reason', $classification ) ) {
+			$fields = Image_Error_Diagnostics::normalize_fields( $classification );
+			$stored = array(
+				'schema' => 'provider-error-diagnostics.v1',
+				'provider_error_reason' => $fields['provider_error_reason'],
+			);
+			foreach ( array( 'provider_error_param', 'provider_request_id', 'provider_error_message_sha256' ) as $key ) {
+				if ( null !== $fields[ $key ] ) {
+					$stored[ $key ] = $fields[ $key ];
+				}
+			}
+			$json = wp_json_encode( $stored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+			if ( ! is_string( $json ) || strlen( $json ) > 2048 ) {
+				return new \WP_Error( 'image_attempt_storage_unavailable', __( 'This image attempt could not be recorded safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+			}
+			$values['provider_error_diagnostics'] = $json;
+		}
+
+		return self::update_attempt( $attempt, $values );
 	}
 
 	/** Persist the complete successful response before returning it to the caller. */
@@ -370,6 +396,7 @@ class Image_Attempts {
 		$conflict = ! empty( $row['conflict_status'] );
 		$retry_safe = ! $conflict && 'rejected' === $outcome && ( ( 'not_sent' === $dispatch && 'not_charged' === $billing && null !== $cost && 0.0 === (float) $cost && null !== $provider_cost && 0.0 === (float) $provider_cost ) || ( 'gateway_signed_attestation_v1' === $source && null !== $cost && null !== $provider_cost && in_array( $billing, array( 'recorded', 'attested' ), true ) ) );
 		$evidence_status = 'gateway_ledger_v1' === $source ? 'cost_only' : ( in_array( $source, array( 'gateway_signed_attestation_v1', 'gateway_attestation_conflict_v1' ), true ) ? 'attestation_verified' : 'attempt_bound' );
+		$provider_error_diagnostics = self::public_provider_error_diagnostics( $row['provider_error_diagnostics'] ?? null );
 
 		return array(
 			'schema'              => self::SCHEMA,
@@ -390,6 +417,10 @@ class Image_Attempts {
 			'failure_class'       => in_array( (string) ( $row['failure_class'] ?? '' ), array( 'local_configuration', 'transport_error', 'provider_http_error', 'invalid_response' ), true ) ? (string) $row['failure_class'] : null,
 			'upstream_status'     => isset( $row['upstream_status'] ) && is_numeric( $row['upstream_status'] ) ? absint( $row['upstream_status'] ) : null,
 			'provider_error_code' => self::safe_provider_error_code( $row['provider_error_code'] ?? null ),
+			'provider_error_reason' => $provider_error_diagnostics['provider_error_reason'],
+			'provider_error_param' => $provider_error_diagnostics['provider_error_param'],
+			'provider_request_id' => $provider_error_diagnostics['provider_request_id'],
+			'provider_error_message_sha256' => $provider_error_diagnostics['provider_error_message_sha256'],
 			'retry_after_seconds' => isset( $row['retry_after_seconds'] ) && is_numeric( $row['retry_after_seconds'] ) ? min( 3600, absint( $row['retry_after_seconds'] ) ) : null,
 		);
 	}
@@ -577,13 +608,13 @@ class Image_Attempts {
 	private static function ensure_table() {
 		global $wpdb;
 		if ( true === self::$table_ready ) {
-			return true;
+			return self::ensure_diagnostics_column();
 		}
 		$table = self::get_table_name();
 		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 		if ( is_string( $found ) && $table === $found ) {
 			self::$table_ready = true;
-			return true;
+			return self::ensure_diagnostics_column();
 		}
 		$charset_collate = $wpdb->get_charset_collate();
 		$sql = "CREATE TABLE {$table} (
@@ -603,6 +634,7 @@ class Image_Attempts {
 			failure_class varchar(32) DEFAULT NULL,
 			upstream_status smallint(5) unsigned DEFAULT NULL,
 			provider_error_code varchar(64) DEFAULT NULL,
+			provider_error_diagnostics longtext DEFAULT NULL,
 			retry_after_seconds smallint(5) unsigned DEFAULT NULL,
 			evidence_id char(36) NOT NULL,
 			source varchar(64) NOT NULL,
@@ -618,7 +650,65 @@ class Image_Attempts {
 		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 		dbDelta( $sql );
 		self::$table_ready = self::table_exists();
-		return self::$table_ready;
+		return self::$table_ready && self::ensure_diagnostics_column();
+	}
+
+	/**
+	 * Add the optional diagnostics column during a mutating storage preflight.
+	 * Read-only evidence endpoints never call this method.
+	 */
+	private static function ensure_diagnostics_column() {
+		global $wpdb;
+		if ( true === self::$diagnostics_column_ready ) {
+			return true;
+		}
+		$table = self::get_table_name();
+		if ( ! self::table_exists() ) {
+			return false;
+		}
+
+		$wpdb->last_error = '';
+		$column = $wpdb->get_row( $wpdb->prepare( "SHOW COLUMNS FROM {$table} LIKE %s", 'provider_error_diagnostics' ), ARRAY_A );
+		if ( '' !== (string) $wpdb->last_error ) {
+			return false;
+		}
+		if ( is_array( $column ) && 'provider_error_diagnostics' === ( $column['Field'] ?? '' ) ) {
+			self::$diagnostics_column_ready = true;
+			return true;
+		}
+
+		$wpdb->last_error = '';
+		$wpdb->query( "ALTER TABLE {$table} ADD COLUMN provider_error_diagnostics longtext DEFAULT NULL" );
+		$wpdb->last_error = '';
+		$column = $wpdb->get_row( $wpdb->prepare( "SHOW COLUMNS FROM {$table} LIKE %s", 'provider_error_diagnostics' ), ARRAY_A );
+		if ( '' !== (string) $wpdb->last_error || ! is_array( $column ) || 'provider_error_diagnostics' !== ( $column['Field'] ?? '' ) ) {
+			return false;
+		}
+		self::$diagnostics_column_ready = true;
+		return true;
+	}
+
+	private static function public_provider_error_diagnostics( $raw ) {
+		$empty = array(
+			'provider_error_reason' => null,
+			'provider_error_param' => null,
+			'provider_request_id' => null,
+			'provider_error_message_sha256' => null,
+		);
+		if ( ! is_string( $raw ) || strlen( $raw ) > 2048 ) {
+			return $empty;
+		}
+		$decoded = json_decode( $raw, true );
+		if ( ! is_array( $decoded ) || 'provider-error-diagnostics.v1' !== ( $decoded['schema'] ?? '' ) ) {
+			return $empty;
+		}
+		$fields = Image_Error_Diagnostics::normalize_fields( $decoded );
+		return array(
+			'provider_error_reason' => $fields['provider_error_reason'],
+			'provider_error_param' => $fields['provider_error_param'],
+			'provider_request_id' => $fields['provider_request_id'],
+			'provider_error_message_sha256' => $fields['provider_error_message_sha256'],
+		);
 	}
 
 	private static function normalize_hash_or_null( $value ) {
@@ -639,9 +729,7 @@ class Image_Attempts {
 	}
 
 	private static function safe_provider_error_code( $value ) {
-		$value = sanitize_key( (string) $value );
-		$allowed = array( 'invalid_request_error', 'rate_limit_exceeded', 'insufficient_quota', 'model_not_found', 'content_policy_violation', 'invalid_api_key', 'unsupported_value', 'server_error', 'temporarily_unavailable' );
-		return in_array( $value, $allowed, true ) ? $value : null;
+		return Image_Error_Diagnostics::normalize_code( $value );
 	}
 
 	private static function canonicalize( $value ) {
