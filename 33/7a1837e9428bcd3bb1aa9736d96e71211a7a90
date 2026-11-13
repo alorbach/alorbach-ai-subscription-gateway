@@ -1,0 +1,29 @@
+DEVELOPER-GUIDE.md
+  s_437c8198d77097::t_729e84bfa22685 628-643,833
+includes/class-ai-bridge.php
+  s_31cc7de9b87ae7::t_b0f5123ab5f87c 27-33,365-368,892,1113-1121,1148-1161,1165-1181,1578-1581,1583-1584,1587-1591
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "337a1837e9428bcd3bb1aa9736d96e71211a7a90",
+  "prompts": {},
+  "sessions": {
+    "s_31cc7de9b87ae7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a17d30-51bb-7303-9abc-6da6436b2450",
+        "model": "gpt-6.1-terra"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    },
+    "s_437c8198d77097": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16c55-5ef7-7e51-9325-9e9a8486bd61",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
