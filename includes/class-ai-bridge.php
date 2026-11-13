@@ -24,7 +24,13 @@ class AI_Bridge {
 	const LOCAL_ASR_MODEL    = 'local-asr';
 	const LOCAL_ASR_PREFIX   = 'local-asr:';
 	const LOCAL_UPSCALE_PREFIX = 'model-relay:local-upscale:';
-	const LOCAL_UPSCALE_MODELS = array( 'model-relay:local-upscale:swinir-classical-x2', 'model-relay:local-upscale:realesrgan-x2plus' );
+	const LOCAL_UPSCALE_MODELS = array( 'model-relay:local-upscale:swinir-classical-x2', 'model-relay:local-upscale:realesrgan-x2plus', 'model-relay:local-upscale:hat-s-classical-x4', 'model-relay:local-upscale:realesrgan-x4plus' );
+	const LOCAL_UPSCALE_PROFILES = array(
+		'model-relay:local-upscale:swinir-classical-x2' => array( 'native_scale' => 2, 'output_policy' => 'retain_native_x2', 'maximum_output_bytes' => 67108864 ),
+		'model-relay:local-upscale:realesrgan-x2plus' => array( 'native_scale' => 2, 'output_policy' => 'retain_native_x2', 'maximum_output_bytes' => 67108864 ),
+		'model-relay:local-upscale:hat-s-classical-x4' => array( 'native_scale' => 4, 'output_policy' => 'retain_native_x4', 'maximum_output_bytes' => 268435456 ),
+		'model-relay:local-upscale:realesrgan-x4plus' => array( 'native_scale' => 4, 'output_policy' => 'retain_native_x4', 'maximum_output_bytes' => 268435456, 'maximum_output_pixels' => 64000000 ),
+	);
 	const RELAY_IMAGE_MODELS = array(
 		'model-relay:codex:image'            => 'Codex Image',
 		'model-relay:grok-cli:image'         => 'Grok Imagine',
@@ -355,6 +361,10 @@ class AI_Bridge {
 		}
 		if ( is_wp_error( $validation ) ) {
 			return $validation;
+		}
+		if ( 'upscale' === $type ) {
+			$payload = self::normalize_upscale_payload( $payload );
+			if ( is_wp_error( $payload ) ) return $payload;
 		}
 		if ( 'image' === $type ) {
 			$delivery                = self::apply_native_relay_output_format( $payload );
@@ -879,7 +889,7 @@ class AI_Bridge {
 	public static function is_supported_model_for_capability( $model, $capability ) {
 		$model = (string) $model;
 		if ( 'local_upscale' === $capability ) {
-			return in_array( $model, self::LOCAL_UPSCALE_MODELS, true );
+			return isset( self::LOCAL_UPSCALE_PROFILES[ $model ] ) && in_array( $model, self::LOCAL_UPSCALE_MODELS, true );
 		}
 		if ( self::matches_relay_model( $model ) ) {
 			$known_capability = self::known_relay_model_capability( $model );
@@ -1100,8 +1110,15 @@ class AI_Bridge {
 	/** Validate metadata only; source and result PNG bytes use the paired Relay binary route. */
 	private static function validate_upscale_payload( $payload ) {
 		$model = isset( $payload['model'] ) ? (string) $payload['model'] : '';
-		if ( ! self::is_supported_model_for_capability( $model, 'local_upscale' ) ) return new \WP_Error( 'invalid_local_upscale_model', __( 'Choose a supported local CUDA upscale model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
-		if ( 2 !== (int) ( $payload['scale'] ?? 0 ) || 'png' !== strtolower( (string) ( $payload['output_format'] ?? '' ) ) ) return new \WP_Error( 'invalid_local_upscale_payload', __( 'Local upscaling requires exactly ×2 PNG output.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$profile = self::LOCAL_UPSCALE_PROFILES[ $model ] ?? null;
+		if ( ! is_array( $profile ) || ! self::is_supported_model_for_capability( $model, 'local_upscale' ) ) return new \WP_Error( 'invalid_local_upscale_model', __( 'Choose a supported local CUDA upscale model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$native_scale = (int) ( $profile['native_scale'] ?? 0 );
+		$raw_scale = $payload['scale'] ?? null;
+		$scale = is_int( $raw_scale ) || ( is_string( $raw_scale ) && preg_match( '/^[0-9]+$/', $raw_scale ) ) ? (int) $raw_scale : 0;
+		$raw_payload_native_scale = $payload['native_scale'] ?? null;
+		$payload_native_scale_matches = is_int( $raw_payload_native_scale ) || ( is_string( $raw_payload_native_scale ) && preg_match( '/^[0-9]+$/', $raw_payload_native_scale ) ) ? (int) $raw_payload_native_scale === $native_scale : false;
+		$payload_native_scale_required = 4 === $native_scale;
+		if ( $native_scale < 1 || $scale !== $native_scale || 'png' !== strtolower( (string) ( $payload['output_format'] ?? '' ) ) || ( $payload_native_scale_required && ! $payload_native_scale_matches ) || ( array_key_exists( 'native_scale', $payload ) && ! $payload_native_scale_matches ) ) return new \WP_Error( 'invalid_local_upscale_payload', sprintf( __( 'Local upscaling requires the signed native ×%1$d PNG profile.', 'alorbach-ai-gateway' ), max( 1, $native_scale ) ), array( 'status' => 400 ) );
 		if ( ! is_numeric( $payload['source_asset_id'] ?? null ) || ! wp_is_uuid( (string) ( $payload['source_asset_uuid'] ?? '' ) ) || ! preg_match( '/^[a-f0-9]{64}$/', strtolower( (string) ( $payload['source_checksum'] ?? '' ) ) ) ) return new \WP_Error( 'invalid_local_upscale_source', __( 'Local upscaling requires an immutable source asset manifest.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		$source = isset( $payload['source_dimensions'] ) && is_array( $payload['source_dimensions'] ) ? $payload['source_dimensions'] : array();
 		$target = isset( $payload['target_print'] ) && is_array( $payload['target_print'] ) ? $payload['target_print'] : array();
@@ -1128,8 +1145,38 @@ class AI_Bridge {
 		$left = (int) ( $crop_pixels['left'] ?? -1 ); $top = (int) ( $crop_pixels['top'] ?? -1 ); $right = (int) ( $crop_pixels['right'] ?? -1 ); $bottom = (int) ( $crop_pixels['bottom'] ?? -1 );
 		$crop_width = (int) ( $crop_pixels['width'] ?? 0 ); $crop_height = (int) ( $crop_pixels['height'] ?? 0 );
 		$output_width = (int) ( $output['width'] ?? 0 ); $output_height = (int) ( $output['height'] ?? 0 );
-		if ( 'retain_native_x2' !== (string) ( $payload['output_policy'] ?? '' ) || $left !== (int) round( $x * $source_width ) || $top !== (int) round( $y * $source_height ) || $right !== (int) round( ( $x + $width ) * $source_width ) || $bottom !== (int) round( ( $y + $height ) * $source_height ) || $left < 0 || $top < 0 || $right <= $left || $bottom <= $top || $right > $source_width || $bottom > $source_height || $crop_width !== $right - $left || $crop_height !== $bottom - $top || $output_width !== $crop_width * 2 || $output_height !== $crop_height * 2 || $output_width < $target_width || $output_height < $target_height ) return new \WP_Error( 'invalid_local_upscale_output_contract', __( 'Local upscaling requires an approved native ×2 output derived from the reviewed crop.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		// Apply optional model-owned native output bounds before multiplying crop dimensions.
+		$maximum_output_pixels = (int) ( $profile['maximum_output_pixels'] ?? 0 );
+		if ( $maximum_output_pixels > 0 ) {
+			$maximum_source_pixels = intdiv( intdiv( $maximum_output_pixels, $native_scale ), $native_scale );
+			if ( $crop_width < 1 || $crop_height < 1 || $crop_width > intdiv( $maximum_source_pixels, $crop_height ) ) return new \WP_Error( 'invalid_local_upscale_pixel_limit', __( 'Local upscaling exceeds its server-owned native output pixel limit.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		$expected_output = array( 'width' => $crop_width * $native_scale, 'height' => $crop_height * $native_scale );
+		$dimension_fields_valid = true;
+		foreach ( array( 'output_print', 'final_output_print', 'upscaled_dimensions' ) as $field ) {
+			if ( ! array_key_exists( $field, $payload ) ) continue;
+			$dimensions = is_array( $payload[ $field ] ) ? $payload[ $field ] : array();
+			if ( (int) ( $dimensions['width'] ?? 0 ) !== $expected_output['width'] || (int) ( $dimensions['height'] ?? 0 ) !== $expected_output['height'] ) $dimension_fields_valid = false;
+		}
+		if ( (string) ( $profile['output_policy'] ?? '' ) !== (string) ( $payload['output_policy'] ?? '' ) || $left !== (int) round( $x * $source_width ) || $top !== (int) round( $y * $source_height ) || $right !== (int) round( ( $x + $width ) * $source_width ) || $bottom !== (int) round( ( $y + $height ) * $source_height ) || $left < 0 || $top < 0 || $right <= $left || $bottom <= $top || $right > $source_width || $bottom > $source_height || $crop_width !== $right - $left || $crop_height !== $bottom - $top || $output_width !== $expected_output['width'] || $output_height !== $expected_output['height'] || ! $dimension_fields_valid || $output_width < $target_width || $output_height < $target_height ) return new \WP_Error( 'invalid_local_upscale_output_contract', sprintf( __( 'Local upscaling requires the exact native ×%1$d output derived from the reviewed crop.', 'alorbach-ai-gateway' ), $native_scale ), array( 'status' => 400 ) );
 		return true;
+	}
+
+	/** Bind the server-owned output byte cap into the signed local-upscale request. */
+	private static function normalize_upscale_payload( $payload ) {
+		$payload = is_array( $payload ) ? $payload : array();
+		$model = (string) ( $payload['model'] ?? '' );
+		$profile = self::LOCAL_UPSCALE_PROFILES[ $model ] ?? null;
+		if ( ! is_array( $profile ) ) return new \WP_Error( 'invalid_local_upscale_model', __( 'Choose a supported local CUDA upscale model.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$maximum_output_bytes = (int) ( $profile['maximum_output_bytes'] ?? 0 );
+		if ( $maximum_output_bytes < 1 ) return new \WP_Error( 'invalid_local_upscale_profile', __( 'The local upscale output limit is unavailable.', 'alorbach-ai-gateway' ), array( 'status' => 500 ) );
+		if ( array_key_exists( 'maximum_output_bytes', $payload ) ) {
+			$raw_limit = $payload['maximum_output_bytes'];
+			$valid_limit = is_int( $raw_limit ) || ( is_string( $raw_limit ) && preg_match( '/^[0-9]+$/', $raw_limit ) );
+			if ( ! $valid_limit || (int) $raw_limit !== $maximum_output_bytes ) return new \WP_Error( 'invalid_local_upscale_output_limit', __( 'The local upscale output limit must match its server-owned model profile.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		$payload['maximum_output_bytes'] = $maximum_output_bytes;
+		return $payload;
 	}
 
 	/** @return array<string,mixed>|null */
@@ -1528,12 +1575,20 @@ class AI_Bridge {
 		$output = isset( $response['output'] ) && is_array( $response['output'] ) ? $response['output'] : array();
 		$provenance = isset( $response['provenance'] ) && is_array( $response['provenance'] ) ? $response['provenance'] : array();
 		$output_print = isset( $job['payload']['output_print'] ) && is_array( $job['payload']['output_print'] ) ? $job['payload']['output_print'] : array();
+		$model = (string) ( $job['model'] ?? '' );
+		$profile = self::LOCAL_UPSCALE_PROFILES[ $model ] ?? null;
+		$native_scale = is_array( $profile ) ? (int) ( $profile['native_scale'] ?? 0 ) : 0;
+		$maximum_output_bytes = is_array( $profile ) ? (int) ( $profile['maximum_output_bytes'] ?? 0 ) : 0;
 		$checksum = strtolower( trim( (string) ( $output['checksum'] ?? '' ) ) );
-		if ( 'image/png' !== strtolower( trim( (string) ( $output['mime_type'] ?? '' ) ) ) || ! preg_match( '/^[a-f0-9]{64}$/', $checksum ) || 'retain_native_x2' !== (string) ( $job['payload']['output_policy'] ?? '' ) || (int) ( $output['width'] ?? 0 ) !== (int) ( $output_print['width'] ?? 0 ) || (int) ( $output['height'] ?? 0 ) !== (int) ( $output_print['height'] ?? 0 ) || (int) ( $output['byte_size'] ?? 0 ) < 1 || (int) ( $output['byte_size'] ?? 0 ) > 67108864 ) return new \WP_Error( 'invalid_local_upscale_result', __( 'AI Model Relay local upscale output did not match the signed native ×2 PNG manifest.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		$output_bytes = (int) ( $output['byte_size'] ?? 0 );
+		if ( ! is_array( $profile ) || $native_scale < 1 || 'image/png' !== strtolower( trim( (string) ( $output['mime_type'] ?? '' ) ) ) || ! preg_match( '/^[a-f0-9]{64}$/', $checksum ) || (string) ( $profile['output_policy'] ?? '' ) !== (string) ( $job['payload']['output_policy'] ?? '' ) || (int) ( $output['width'] ?? 0 ) !== (int) ( $output_print['width'] ?? 0 ) || (int) ( $output['height'] ?? 0 ) !== (int) ( $output_print['height'] ?? 0 ) || $output_bytes < 1 || $output_bytes > $maximum_output_bytes ) return new \WP_Error( 'invalid_local_upscale_result', __( 'AI Model Relay local upscale output did not match the signed native PNG manifest.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
 		$required = array( 'model_id', 'model_version', 'weight_checksum', 'cuda_device', 'precision', 'downsampler', 'processing_started_at', 'processing_finished_at' );
 		foreach ( $required as $field ) if ( '' === trim( (string) ( $provenance[ $field ] ?? '' ) ) ) return new \WP_Error( 'invalid_local_upscale_provenance', __( 'AI Model Relay local upscale provenance is incomplete.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
-		if ( (string) $job['model'] !== (string) $provenance['model_id'] || ! preg_match( '/^[a-f0-9]{64}$/', strtolower( (string) $provenance['weight_checksum'] ) ) || 'none' !== strtolower( (string) $provenance['downsampler'] ) || false === strtotime( (string) $provenance['processing_started_at'] ) || false === strtotime( (string) $provenance['processing_finished_at'] ) ) return new \WP_Error( 'invalid_local_upscale_provenance', __( 'AI Model Relay local upscale provenance did not match the signed native ×2 request.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
-		return array( 'output' => array( 'mime_type' => 'image/png', 'checksum' => $checksum, 'width' => (int) $output['width'], 'height' => (int) $output['height'], 'byte_size' => (int) $output['byte_size'] ), 'provenance' => $provenance, 'model' => (string) $job['model'], 'local_unmetered' => true );
+		$raw_native_scale = $provenance['native_scale'] ?? null;
+		$native_scale_matches = is_int( $raw_native_scale ) || ( is_string( $raw_native_scale ) && preg_match( '/^[0-9]+$/', $raw_native_scale ) ) ? (int) $raw_native_scale === $native_scale : false;
+		$native_scale_required = 4 === $native_scale;
+		if ( $model !== (string) $provenance['model_id'] || ! preg_match( '/^[a-f0-9]{64}$/', strtolower( (string) $provenance['weight_checksum'] ) ) || 'none' !== strtolower( (string) $provenance['downsampler'] ) || false === strtotime( (string) $provenance['processing_started_at'] ) || false === strtotime( (string) $provenance['processing_finished_at'] ) || ( $native_scale_required && ! $native_scale_matches ) || ( array_key_exists( 'native_scale', $provenance ) && ! $native_scale_matches ) ) return new \WP_Error( 'invalid_local_upscale_provenance', __( 'AI Model Relay local upscale provenance did not match the signed native model and scale.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		return array( 'output' => array( 'mime_type' => 'image/png', 'checksum' => $checksum, 'width' => (int) $output['width'], 'height' => (int) $output['height'], 'byte_size' => $output_bytes ), 'provenance' => $provenance, 'model' => $model, 'local_unmetered' => true );
 	}
 
 	/**

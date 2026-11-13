@@ -625,6 +625,22 @@ Codex image output is natively PNG, and Grok Imagine output is natively JPEG. Ei
 
 Chat results use OpenAI-compatible `choices` and usage. Image results contain `b64_json`; transcription requires word timing; video results contain validated `b64_video` and MIME data and should be rendered through a browser Blob URL.
 
+### Local native image upscaling
+
+The signed `upscale` job type is a paired-Relay, binary-transfer workflow for local print derivatives. It is separate from provider image generation. `GET /ai-bridge/config` advertises the exact supported IDs in `local_upscale.models` and reports `enabled`, `binary_transfer`, and `unmetered` capability flags.
+
+Each model has a server-owned native profile:
+
+| Model ID | Native scale | Required output policy | Maximum PNG manifest size |
+| --- | ---: | --- | ---: |
+| `model-relay:local-upscale:swinir-classical-x2` | 2 | `retain_native_x2` | 67,108,864 bytes |
+| `model-relay:local-upscale:realesrgan-x2plus` | 2 | `retain_native_x2` | 67,108,864 bytes |
+| `model-relay:local-upscale:hat-s-classical-x4` | 4 | `retain_native_x4` | 268,435,456 bytes |
+
+The signed job payload must name a listed model and use its exact scale and output policy. Source ID, UUID, checksum and dimensions, the reviewed crop rectangle, and output dimensions are part of that signed request. Output dimensions must equal the checked crop pixel dimensions multiplied by the server-owned native scale. Any supplied `output_print`, `final_output_print`, or `upscaled_dimensions` fields must agree. The Gateway does not accept a caller-provided byte limit as authority.
+
+Completion must return a PNG manifest whose dimensions match the signed job, whose checksum field is a well-formed SHA-256 value, and whose declared byte size is within that model's limit. The consumer of the transferred PNG bytes must compare their actual checksum with the manifest before accepting the asset. The Gateway validates reported provenance fields for the requested model, model version, weights checksum, device, precision, downsampler, and processing timestamps; this contract does not cryptographically verify a Relay signature over those fields. A downsampler other than `none` is rejected. HAT-S results also require `native_scale: 4`. Older x2 completions may omit `native_scale`; when present it must equal 2. Upscale jobs remain unmetered and bypass provider billing, account credits, plan usage and the ledger.
+
 ---
 
 ## Building a Custom Image Generator
@@ -809,12 +825,12 @@ if ( alorbach_user_can_access_capability( 'image', 'gpt-image-1', $user_id ) ) {
 
 ## Documentation Map
 
-- [Image request parameter handling](docs/image-request-parameters.md): provider-specific image `size` and `aspect_ratio` serialization reference
 Use the docs in these places for these purposes:
 
 - `README.md`: public plugin overview and high-level endpoint summary
 - `DEVELOPER-GUIDE.md`: external integration and REST API reference
 - `AI Gateway -> Developer` in wp-admin: interactive developer/admin reference and test tooling
+- [Image request parameter handling](docs/image-request-parameters.md): provider-specific image `size` and `aspect_ratio` serialization reference
 
 ## Scope note
 
