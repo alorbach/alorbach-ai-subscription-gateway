@@ -35,7 +35,7 @@ function alorbach_server_chat_require( $condition, $message ) {
 
 /** @param array $contract @param string $label */
 function alorbach_server_chat_check_contract( array $contract, $label ) {
-	$required = array( 'gateway_model_key', 'label', 'provider', 'transport', 'chat_contract_version', 'eligible', 'disabled_reason', 'admin_enabled', 'server_dispatch_evidenced', 'dispatch_entry_exclusive', 'pricing_evidenced', 'requires_browser_pairing', 'supported_languages', 'operation_slugs', 'structured_output', 'provider_cancel', 'provider_resume', 'text_cost_estimate' );
+	$required = array( 'gateway_model_key', 'label', 'provider', 'transport', 'chat_contract_version', 'eligible', 'disabled_reason', 'admin_enabled', 'server_dispatch_evidenced', 'dispatch_entry_exclusive', 'pricing_evidenced', 'requires_browser_pairing', 'supported_languages', 'operation_slugs', 'structured_output', 'provider_cancel', 'provider_resume', 'text_cost_estimate', 'image_parts_proven', 'max_images', 'max_image_bytes', 'image_part_formats' );
 	foreach ( $required as $key ) {
 		alorbach_server_chat_require( array_key_exists( $key, $contract ), sprintf( '%s is missing "%s".', $label, $key ) );
 	}
@@ -103,13 +103,13 @@ try {
 	$unpriced    = '62f21a64-9a37-42f7-bde4-f7627bed9b3b::gpt-6-luna';
 	$text_models = array( $azure_key => 'gpt-5.6-luna (Azure / Prod)', $openai_key => 'gpt-4.1-mini', $unpriced => 'gpt-6-luna (Azure / Prod)', 'model-relay:codex:auto' => 'Codex CLI (auto)' );
 	$settings    = array(
-		$azure_key  => array( 'enabled' => true, 'supported_languages' => array( 'de-DE', 'en-US' ), 'operation_slugs' => array( 'story_create', 'book_title_create', 'page_scene_create' ) ),
+		$azure_key  => array( 'enabled' => true, 'supported_languages' => array( 'de-DE', 'en-US' ), 'operation_slugs' => array( 'story_create', 'book_title_create', 'page_scene_create' ), 'vision_enabled' => true ),
 		$openai_key => array( 'enabled' => true, 'supported_languages' => array( 'en-US' ), 'operation_slugs' => array( 'story_create' ) ),
 		$unpriced   => array( 'enabled' => true, 'supported_languages' => array( 'de-DE' ), 'operation_slugs' => array( 'story_create' ) ),
 	);
 	$evidence = static function ( $key ) use ( $azure_key, $openai_key, $unpriced ) {
 		$map = array(
-			$azure_key  => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => true, 'provider' => 'azure' ),
+			$azure_key  => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => true, 'provider' => 'azure', 'image_parts' => true ),
 			$openai_key => array( 'dispatch' => false, 'exclusive' => false, 'pricing' => true, 'provider' => 'openai' ),
 			$unpriced   => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => false, 'provider' => 'azure' ),
 		);

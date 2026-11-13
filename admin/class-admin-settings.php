@@ -220,6 +220,7 @@ class Admin_Settings {
 				'enabled'             => ! empty( $row['enabled'] ),
 				'supported_languages' => isset( $row['supported_languages'] ) && is_string( $row['supported_languages'] ) ? sanitize_text_field( $row['supported_languages'] ) : '',
 				'operation_slugs'     => isset( $row['operation_slugs'] ) && is_string( $row['operation_slugs'] ) ? sanitize_textarea_field( $row['operation_slugs'] ) : '',
+				'vision_enabled'      => ! empty( $row['vision_enabled'] ),
 			);
 		}
 		return $map;
@@ -263,6 +264,7 @@ class Admin_Settings {
 						<th scope="col"><?php esc_html_e( 'Model', 'alorbach-ai-gateway' ); ?></th>
 						<th scope="col" style="width:18%"><?php esc_html_e( 'Languages', 'alorbach-ai-gateway' ); ?></th>
 						<th scope="col" style="width:30%"><?php esc_html_e( 'Operation slugs', 'alorbach-ai-gateway' ); ?></th>
+						<th scope="col" style="width:6%"><?php esc_html_e( 'Vision', 'alorbach-ai-gateway' ); ?></th>
 						<th scope="col" style="width:18%"><?php esc_html_e( 'Evidence', 'alorbach-ai-gateway' ); ?></th>
 					</tr>
 				</thead>
@@ -289,6 +291,7 @@ class Admin_Settings {
 						</td>
 						<td><input type="text" name="<?php echo esc_attr( $field ); ?>[supported_languages]" value="<?php echo esc_attr( implode( ', ', (array) $row['supported_languages'] ) ); ?>" placeholder="de-DE, en-US" class="code" /></td>
 						<td><textarea name="<?php echo esc_attr( $field ); ?>[operation_slugs]" class="code" rows="3"><?php echo esc_textarea( implode( "\n", (array) $row['operation_slugs'] ) ); ?></textarea></td>
+						<td><input type="checkbox" name="<?php echo esc_attr( $field ); ?>[vision_enabled]" id="<?php echo esc_attr( $id ); ?>-vision" value="1" <?php checked( ! empty( $row['vision_enabled'] ) ); ?> aria-label="<?php esc_attr_e( 'Allow image input (vision) for this model', 'alorbach-ai-gateway' ); ?>" /></td>
 						<td class="alorbach-server-chat-evidence">
 							<?php if ( null === $contract ) : ?>
 								<span><?php esc_html_e( 'Not configured', 'alorbach-ai-gateway' ); ?></span>
@@ -296,6 +299,7 @@ class Admin_Settings {
 								<span class="<?php echo ! empty( $contract['server_dispatch_evidenced'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['server_dispatch_evidenced'] ) ? esc_html__( 'Dispatch: credentials present', 'alorbach-ai-gateway' ) : esc_html__( 'Dispatch: credentials missing', 'alorbach-ai-gateway' ); ?></span><br />
 								<span class="<?php echo ! empty( $contract['dispatch_entry_exclusive'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['dispatch_entry_exclusive'] ) ? esc_html__( 'Dispatch entry: exclusive', 'alorbach-ai-gateway' ) : esc_html__( 'Dispatch entry: not exclusive', 'alorbach-ai-gateway' ); ?></span><br />
 								<span class="<?php echo ! empty( $contract['pricing_evidenced'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['pricing_evidenced'] ) ? esc_html__( 'Pricing: explicit row', 'alorbach-ai-gateway' ) : esc_html__( 'Pricing: no explicit row', 'alorbach-ai-gateway' ); ?></span><br />
+								<span class="<?php echo ! empty( $contract['image_parts_proven'] ) ? 'ok' : 'missing'; ?>"><?php echo ! empty( $contract['image_parts_proven'] ) ? esc_html__( 'Vision: image parts proven', 'alorbach-ai-gateway' ) : esc_html__( 'Vision: not published', 'alorbach-ai-gateway' ); ?></span><br />
 								<?php if ( ! empty( $contract['eligible'] ) ) : ?>
 									<strong class="ok"><?php esc_html_e( 'Published as eligible', 'alorbach-ai-gateway' ); ?></strong>
 								<?php else : ?>

@@ -37,6 +37,11 @@ class Google_Provider extends Provider_Base {
 		return true;
 	}
 
+	/** `image_url` data-URL parts are mapped to Gemini `inline_data` parts. */
+	public function supports_chat_image_parts( $model = '' ) {
+		return true;
+	}
+
 	/**
 	 * {@inheritdoc}
 	 */
@@ -107,6 +112,9 @@ class Google_Provider extends Provider_Base {
 		$model = $body['model'] ?? 'gemini-pro';
 		$body  = self::normalize_chat_body( $body, $model );
 		$body  = self::messages_to_contents( $body );
+		if ( is_wp_error( $body ) ) {
+			return $body;
+		}
 		$url   = 'https://generativelanguage.googleapis.com/v1beta/models/' . $model . ':generateContent?key=' . $api_key;
 		return array(
 			'url'     => $url,
@@ -118,10 +126,58 @@ class Google_Provider extends Provider_Base {
 	}
 
 	/**
+	 * Map one OpenAI message `content` value to Gemini parts.
+	 *
+	 * @param mixed $content String or list of content parts.
+	 * @return array<int,array<string,mixed>>|\WP_Error
+	 */
+	private static function content_to_parts( $content ) {
+		if ( ! is_array( $content ) ) {
+			return array( array( 'text' => (string) $content ) );
+		}
+		$parts = array();
+		foreach ( $content as $part ) {
+			if ( is_string( $part ) ) {
+				$parts[] = array( 'text' => $part );
+				continue;
+			}
+			if ( ! is_array( $part ) ) {
+				continue;
+			}
+			$type = (string) ( $part['type'] ?? '' );
+			if ( 'text' === $type || ( '' === $type && isset( $part['text'] ) ) ) {
+				$parts[] = array( 'text' => (string) ( $part['text'] ?? '' ) );
+				continue;
+			}
+			if ( 'image_url' === $type ) {
+				$url = is_array( $part['image_url'] ?? null ) ? (string) ( $part['image_url']['url'] ?? '' ) : (string) ( $part['image_url'] ?? '' );
+				// Match only the short header with PCRE; the (possibly multi-megabyte) payload is cut with substr.
+				if ( 1 === preg_match( '#^data:(image/[a-z0-9.+-]{1,40});base64,#i', substr( $url, 0, 120 ), $match ) && strlen( $url ) > strlen( $match[0] ) ) {
+					$parts[] = array(
+						'inline_data' => array(
+							'mime_type' => strtolower( $match[1] ),
+							'data'      => preg_replace( '/\s+/', '', substr( $url, strlen( $match[0] ) ) ),
+						),
+					);
+					continue;
+				}
+				return new \WP_Error( 'unsupported_image_url', __( 'Gemini chat accepts only base64 data URLs as image_url parts.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+			}
+			return new \WP_Error( 'unsupported_content_part', __( 'Unsupported chat content part for this provider.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+		return empty( $parts ) ? array( array( 'text' => '' ) ) : $parts;
+	}
+
+	/**
 	 * Convert OpenAI-style messages to Gemini contents format.
 	 *
+	 * String content becomes one text part. Array content (OpenAI chat content
+	 * parts) is mapped part by part: `text` to a text part and an `image_url`
+	 * data URL to an `inline_data` part. A remote (non-data) image URL cannot be
+	 * inlined by the Gateway and is rejected with `unsupported_image_url`.
+	 *
 	 * @param array $body Request body with messages.
-	 * @return array Body with contents (and generationConfig for maxOutputTokens).
+	 * @return array|\WP_Error Body with contents (and generationConfig for maxOutputTokens).
 	 */
 	private static function messages_to_contents( $body ) {
 		$messages = $body['messages'] ?? array();
@@ -132,19 +188,25 @@ class Google_Provider extends Provider_Base {
 		foreach ( $messages as $msg ) {
 			$role = isset( $msg['role'] ) ? $msg['role'] : 'user';
 			$content = isset( $msg['content'] ) ? $msg['content'] : '';
+			$parts   = self::content_to_parts( $content );
+			if ( is_wp_error( $parts ) ) {
+				return $parts;
+			}
 			if ( $role === 'system' ) {
 				if ( ! isset( $body['systemInstruction'] ) ) {
-					$body['systemInstruction'] = array( 'parts' => array( array( 'text' => $content ) ) );
+					$body['systemInstruction'] = array( 'parts' => $parts );
 				} else {
 					// Append additional system messages into the same systemInstruction.
-					$body['systemInstruction']['parts'][] = array( 'text' => $content );
+					foreach ( $parts as $part ) {
+						$body['systemInstruction']['parts'][] = $part;
+					}
 				}
 				continue;
 			}
 			$gemini_role = ( $role === 'assistant' ) ? 'model' : 'user';
 			$contents[] = array(
 				'role'  => $gemini_role,
-				'parts' => array( array( 'text' => $content ) ),
+				'parts' => $parts,
 			);
 		}
 		unset( $body['messages'] );

@@ -346,7 +346,8 @@ class REST_Proxy {
 				return is_user_logged_in();
 			},
 			'args'                => array(
-				'prompt'  => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				// The prompt is kept byte for byte (newlines survive); Image_Validation::validate_prompt() runs in the handler.
+				'prompt'  => array( 'required' => true, 'sanitize_callback' => array( __CLASS__, 'passthrough_prompt' ) ),
 				'size'    => array( 'default' => '1024x1024', 'sanitize_callback' => 'sanitize_text_field' ),
 				'n'       => array( 'default' => 1, 'sanitize_callback' => 'absint' ),
 				'quality' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
@@ -354,6 +355,8 @@ class REST_Proxy {
 				'output_format' => array( 'default' => 'png', 'sanitize_callback' => 'sanitize_text_field' ),
 				'aspect_ratio' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'reference_images' => array( 'required' => false ),
+				'mask_image' => array( 'required' => false ),
+				'async' => array( 'default' => false, 'sanitize_callback' => 'rest_sanitize_boolean' ),
 				'client_request_id' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'client_request_hash' => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'model'   => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
@@ -379,8 +382,19 @@ class REST_Proxy {
 			},
 			'args' => array(
 				'client_request_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
-				'evidence_id' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
-				'request_hash' => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
+				// Required for synchronous attempts (enforced in the handler); optional for async attempts.
+				'evidence_id' => array( 'required' => false, 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+				'request_hash' => array( 'required' => false, 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
+			),
+		) );
+
+		register_rest_route( 'alorbach/v1', '/internal/images/attempts/process', array(
+			'methods'             => 'POST',
+			'callback'            => array( __CLASS__, 'images_attempt_process_handler' ),
+			'permission_callback' => '__return_true',
+			'args'                => array(
+				'attempt_id' => array( 'required' => true, 'sanitize_callback' => 'absint' ),
+				'token'      => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
 			),
 		) );
 
@@ -687,6 +701,16 @@ class REST_Proxy {
 			}
 		}
 
+		// Image parts (vision): only for a model whose contract proves image parts; then count and size limits.
+		$vision_check = Server_Chat_Models::enforce_chat_vision( $messages, (string) $model, (array) ( $config['capabilities']['models'] ?? array() ) );
+		if ( is_wp_error( $vision_check ) ) {
+			return $vision_check;
+		}
+		$image_part_check = Server_Chat_Models::validate_chat_image_parts( $messages );
+		if ( is_wp_error( $image_part_check ) ) {
+			return $image_part_check;
+		}
+
 		// Clamp max_tokens to the model's maximum supported output length.
 		$model_max = Cost_Matrix::get_max_tokens( $model );
 		if ( (int) $max_tokens > $model_max ) {
@@ -778,7 +802,7 @@ class REST_Proxy {
 				'endpoint'        => 'chat',
 				'model'           => $model,
 				'prompt'          => self::debug_prompt_from_messages( $messages ),
-				'original_prompt' => wp_json_encode( $messages ),
+				'original_prompt' => wp_json_encode( self::redact_image_parts( $messages ) ),
 				'error'           => $response,
 				'request_signature' => $request_signature,
 			) );
@@ -795,7 +819,7 @@ class REST_Proxy {
 				'endpoint'        => 'chat',
 				'model'           => $model,
 				'prompt'          => self::debug_prompt_from_messages( $messages ),
-				'original_prompt' => wp_json_encode( $messages ),
+				'original_prompt' => wp_json_encode( self::redact_image_parts( $messages ) ),
 				'response'        => $response,
 				'cost_uc'         => 0,
 				'request_signature' => $request_signature,
@@ -836,7 +860,7 @@ class REST_Proxy {
 			'endpoint'        => 'chat',
 			'model'           => $model,
 			'prompt'          => self::debug_prompt_from_messages( $messages ),
-			'original_prompt' => wp_json_encode( $messages ),
+			'original_prompt' => wp_json_encode( self::redact_image_parts( $messages ) ),
 			'response'        => $response,
 			'provider_usage'  => isset( $response['usage'] ) && is_array( $response['usage'] ) ? $response['usage'] : array(),
 			'cost_uc'         => $uc_cost,
@@ -1241,14 +1265,57 @@ class REST_Proxy {
 	}
 
 	/**
-	 * DALL-E images handler.
+	 * Images handler (synchronous, or asynchronous with `async=1`; image contract 1.1.0).
 	 *
 	 * @param \WP_REST_Request $request Request.
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public static function images_handler( $request ) {
+		$prepared = self::prepare_image_request( $request );
+		if ( ! is_array( $prepared ) || ! isset( $prepared['ctx'] ) ) {
+			return $prepared;
+		}
+		$ctx = $prepared['ctx'];
+		if ( ! empty( $ctx['async'] ) ) {
+			return self::enqueue_async_image_request( $ctx );
+		}
+		try {
+			$result = self::dispatch_image_request( $ctx );
+		} catch ( \Throwable $error ) {
+			self::release_unsent_image_attempt( (int) $ctx['user_id'], (string) $ctx['client_request_id'] );
+			throw $error;
+		}
+		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
+	}
+
+	/**
+	 * `prompt` argument sanitizer for POST /images: the text is kept byte for byte
+	 * (newlines survive); validate_prompt() rejects unusable input in the handler.
+	 *
+	 * @param mixed $value Raw prompt.
+	 * @return mixed
+	 */
+	public static function passthrough_prompt( $value ) {
+		// A numeric prompt (JSON number) is still a valid prompt; every other non-string stays invalid.
+		return is_int( $value ) || is_float( $value ) ? (string) $value : $value;
+	}
+
+	/**
+	 * Validate and claim one image request, up to and including the balance check.
+	 * Returns array( 'ctx' => ... ) when the request may be dispatched (now or by
+	 * the async worker), otherwise the response or error to return.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return array|\WP_REST_Response|\WP_Error
+	 */
+	private static function prepare_image_request( $request ) {
 		$user_id = get_current_user_id();
-		$prompt  = $request->get_param( 'prompt' );
+		$prompt  = self::passthrough_prompt( $request->get_param( 'prompt' ) );
+		$prompt_check = Image_Validation::validate_prompt( $prompt );
+		if ( is_wp_error( $prompt_check ) ) {
+			return $prompt_check;
+		}
+		$async = rest_sanitize_boolean( $request->get_param( 'async' ) );
 		$size    = $request->get_param( 'size' ) ?: '1024x1024';
 		$n       = (int) $request->get_param( 'n' );
 		$n       = min( 10, max( 1, $n ) );
@@ -1264,8 +1331,20 @@ class REST_Proxy {
 		if ( '' !== $client_request_hash_raw && null === $client_request_hash ) {
 			return new \WP_Error( 'invalid_client_request_hash', __( 'The saved request binding is invalid.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
 		}
+		if ( $async && '' === $client_request_id ) {
+			return new \WP_Error( 'async_requires_client_request_id', __( 'async=1 requires a client_request_id.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
 		$reference_images = $request->get_param( 'reference_images' );
 		$reference_images = is_array( $reference_images ) ? $reference_images : array();
+		$mask_b64 = '';
+		$mask_raw = $request->get_param( 'mask_image' );
+		if ( null !== $mask_raw && '' !== $mask_raw && array() !== $mask_raw ) {
+			$mask_check = Image_Validation::validate_mask( $mask_raw, $reference_images );
+			if ( is_wp_error( $mask_check ) ) {
+				return $mask_check;
+			}
+			$mask_b64 = $mask_check['b64'];
+		}
 		$model   = $request->get_param( 'model' ) ?: get_option( 'alorbach_image_default_model', 'dall-e-3' );
 		// Separate compound key (for entry-aware cost lookups) from plain model name.
 		$model_parsed_img = Cost_Matrix::parse_model_key( $model );
@@ -1287,7 +1366,7 @@ class REST_Proxy {
 			'aspect_ratio' => $aspect_ratio,
 			'provider_options' => $provider_options,
 			'reference_images' => $reference_images,
-			'mask_image' => $request->get_param( 'mask_image' ),
+			'mask_image' => '' !== $mask_b64 ? $mask_b64 : null,
 			'input_reference' => $request->get_param( 'input_reference' ),
 			'input_reference_data_url' => $request->get_param( 'input_reference_data_url' ),
 			'frames' => $request->get_param( 'frames' ),
@@ -1312,8 +1391,14 @@ class REST_Proxy {
 					'frames'                   => $request_binding['frames'],
 				)
 			),
-			$aspect_ratio
+			$aspect_ratio,
+			'' !== $mask_b64 ? 'image_inpaint' : ''
 		);
+		if ( '' !== $mask_b64 && ! is_wp_error( $direct_options ) && ! is_array( $direct_options ) ) {
+			// A mask is accepted only for a request that resolves to an eligible direct-image contract
+			// whose mask_supported is true (plain model names and other transports have no such evidence).
+			$direct_options = new \WP_Error( 'direct_image_mask_unsupported', __( 'The selected image model does not support edit masks.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
 		if ( is_wp_error( $direct_options ) ) {
 			if ( '' !== $client_request_id ) {
 				$claim = self::claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash );
@@ -1326,8 +1411,15 @@ class REST_Proxy {
 						$attempt = is_array( $attempt ) ? $attempt : $claim['attempt'];
 						return self::safe_image_error( 'image_request_rejected', 422, $user_id, $client_request_id, $attempt );
 					}
+					if ( $async && in_array( (string) ( $claim['state'] ?? '' ), array( 'succeeded', 'rejected', 'blocked' ), true ) ) {
+						// Idempotent replay of an async request (here: rejected at validation): report the stored attempt.
+						return self::image_attempt_status_response( $user_id, $client_request_id, 200, true );
+					}
 					return self::existing_image_attempt_error( $claim, $user_id, $client_request_id, $request_hash );
 				}
+			}
+			if ( 'direct_image_mask_unsupported' === $direct_options->get_error_code() ) {
+				return $direct_options;
 			}
 			return new \WP_Error( 'image_request_rejected', __( 'The image request did not pass Gateway validation.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
 		}
@@ -1346,13 +1438,35 @@ class REST_Proxy {
 			$request_hash = '' !== $client_request_id ? Image_Attempts::request_hash( $user_id, $client_request_id, $request_binding ) : '';
 		}
 
+		if ( $async ) {
+			// Refuse a request the queue could never store before the id is claimed (a claimed id is never reused).
+			$too_large = Image_Attempt_Worker::payload_too_large( array( 'user_id' => $user_id, 'client_request_id' => $client_request_id, 'request_hash' => $request_hash, 'prompt' => (string) $prompt, 'size' => $size, 'n' => $n, 'quality' => $quality, 'billable_quality' => $billable_quality, 'output_format' => $output_format, 'background' => $background, 'aspect_ratio' => $aspect_ratio, 'provider_options' => $provider_options, 'reference_images' => $reference_images, 'mask_image' => $mask_b64, 'model' => $model, 'model_name_img' => $model_name_img ) );
+			if ( is_wp_error( $too_large ) ) {
+				return $too_large;
+			}
+		}
+
 		if ( '' !== $client_request_id ) {
-			$claim = self::claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash );
+			$before_commit = null;
+			if ( $async ) {
+				// The queue row is reserved inside the claim transaction (it is created before the claim, as DDL would commit it),
+				// so the attempt is never visible without it: a concurrent replay reads "queued", not "outcome unknown".
+				if ( ! Image_Attempt_Worker::ensure_storage() ) {
+					return new \WP_Error( 'image_queue_unavailable', __( 'The image queue is unavailable.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+				}
+				$before_commit = static function ( $row ) use ( $user_id ) {
+					return Image_Attempt_Worker::reserve( $user_id, $row );
+				};
+			}
+			$claim = self::claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash, $before_commit );
 			if ( is_wp_error( $claim ) ) {
 				return $claim;
 			}
 			if ( is_array( $claim ) && 'claimed' === $claim['state'] ) {
 				$attempt = $claim['attempt'];
+			} elseif ( $async && is_array( $claim ) && in_array( (string) ( $claim['state'] ?? '' ), array( 'succeeded', 'rejected', 'blocked' ), true ) ) {
+				// Idempotent replay of an async request: report the stored attempt, never dispatch again.
+				return self::image_attempt_status_response( $user_id, $client_request_id, 200, true );
 			} else {
 				return self::existing_image_attempt_error( $claim, $user_id, $client_request_id, $request_hash );
 			}
@@ -1366,6 +1480,10 @@ class REST_Proxy {
 					$classification = Image_Attempts::classify_error( $storage_code );
 					$updated = Image_Attempts::mark_error( $attempt, $classification );
 					$attempt = is_array( $updated ) ? $updated : Image_Attempts::latest_raw( $user_id, $client_request_id );
+				} else {
+					// Never sent: close the claim (an async reservation must not read as queued).
+					self::release_unsent_image_attempt( $user_id, $client_request_id );
+					$attempt = Image_Attempts::latest_raw( $user_id, $client_request_id );
 				}
 				return self::safe_image_error( 'image_storage_unavailable', 503, $user_id, $client_request_id, $attempt );
 			}
@@ -1409,18 +1527,105 @@ class REST_Proxy {
 			return self::preflight_image_error( $insufficient, $attempt, $user_id, $client_request_id );
 		}
 
+		return array(
+			'ctx' => array(
+				'user_id'            => $user_id,
+				'client_request_id'  => $client_request_id,
+				'request_hash'       => $request_hash,
+				'attempt'            => $attempt,
+				'async'              => $async && is_array( $attempt ),
+				'prompt'             => (string) $prompt,
+				'size'               => $size,
+				'n'                  => $n,
+				'quality'            => $quality,
+				'billable_quality'   => $billable_quality,
+				'output_format'      => $output_format,
+				'background'         => $background,
+				'aspect_ratio'       => $aspect_ratio,
+				'provider_options'   => $provider_options,
+				'reference_images'   => $reference_images,
+				'mask_image'         => $mask_b64,
+				'model'              => $model,
+				'model_name_img'     => $model_name_img,
+				'request_signature'  => $request_signature,
+				'api_cost'           => $api_cost,
+				'cost'               => $cost,
+			),
+		);
+	}
+
+	/**
+	 * Dispatch a prepared image request to the provider, persist the result and
+	 * bill it. Shared by the synchronous handler and the async worker. Returns the
+	 * response array, or a WP_Error (with Gateway evidence for keyed requests).
+	 *
+	 * @param array $ctx          Prepared request context (see prepare_image_request()).
+	 * @param bool  $recheck_funds Re-check the balance first (async worker: time has passed).
+	 * @return array|\WP_Error
+	 */
+	public static function dispatch_image_request( $ctx, $recheck_funds = false ) {
+		$user_id           = (int) $ctx['user_id'];
+		$client_request_id = (string) $ctx['client_request_id'];
+		$attempt           = is_array( $ctx['attempt'] ?? null ) ? $ctx['attempt'] : null;
+		$prompt            = (string) $ctx['prompt'];
+		$size              = $ctx['size'];
+		$n                 = $ctx['n'];
+		$quality           = $ctx['quality'];
+		$output_format     = $ctx['output_format'];
+		$background        = $ctx['background'];
+		$aspect_ratio      = $ctx['aspect_ratio'];
+		$provider_options  = $ctx['provider_options'];
+		$reference_images  = $ctx['reference_images'];
+		$model             = $ctx['model'];
+		$model_name_img    = $ctx['model_name_img'];
+		$request_signature = $ctx['request_signature'];
+		$api_cost          = $ctx['api_cost'];
+		$cost              = $ctx['cost'];
+
+		if ( $recheck_funds ) {
+			$balance = Ledger::get_balance( $user_id );
+			if ( $balance < $cost ) {
+				$insufficient = self::insufficient_credits_error(
+					$user_id,
+					'image',
+					array(
+						'model'        => $model,
+						'size'         => $size,
+						'quality'      => $quality,
+						'required_uc'  => $cost,
+						'available_uc' => $balance,
+					)
+				);
+				return self::preflight_image_error( $insufficient, $attempt, $user_id, $client_request_id );
+			}
+		}
+
 		if ( is_array( $attempt ) ) {
 			$attempt = Image_Attempts::mark_possibly_sent( $attempt );
 			if ( ! is_array( $attempt ) ) {
 				return self::safe_image_error( 'image_attempt_state_conflict', 409, $user_id, $client_request_id, Image_Attempts::latest_raw( $user_id, $client_request_id ) );
 			}
 		}
-		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images, array( 'background' => $background, 'aspect_ratio' => $aspect_ratio, 'provider_options' => $provider_options ) );
+		$image_options = array( 'background' => $background, 'aspect_ratio' => $aspect_ratio, 'provider_options' => $provider_options );
+		if ( '' !== (string) ( $ctx['mask_image'] ?? '' ) ) {
+			$image_options['mask_image'] = (string) $ctx['mask_image'];
+		}
+		$response = API_Client::images( $prompt, $size, $n, $model, $quality, $output_format, $reference_images, $image_options );
 		if ( is_wp_error( $response ) ) {
+			$classification = Image_Attempts::classify_error( $response->get_error_code(), $response->get_error_data() );
+			// A conclusive pre-dispatch refusal keeps its classified code and status (nothing was sent).
+			$not_sent_code   = 'not_sent' === ( $classification['dispatch_status'] ?? '' ) ? sanitize_key( (string) $response->get_error_code() ) : '';
+			$response_data   = $response->get_error_data();
+			$not_sent_status = is_array( $response_data ) && isset( $response_data['status'] ) && (int) $response_data['status'] >= 400 && (int) $response_data['status'] <= 599 ? (int) $response_data['status'] : 502;
 			if ( is_array( $attempt ) ) {
-				$classification = Image_Attempts::classify_error( $response->get_error_code(), $response->get_error_data() );
 				$updated_attempt = Image_Attempts::mark_error( $attempt, $classification );
-				return self::safe_image_error( 'image_provider_error', 502, $user_id, $client_request_id, is_array( $updated_attempt ) ? $updated_attempt : Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+				$updated_attempt = is_array( $updated_attempt ) ? $updated_attempt : Image_Attempts::latest_raw( $user_id, $client_request_id );
+				return '' !== $not_sent_code
+					? self::safe_image_error( $not_sent_code, $not_sent_status, $user_id, $client_request_id, $updated_attempt )
+					: self::safe_image_error( 'image_provider_error', 502, $user_id, $client_request_id, $updated_attempt );
+			}
+			if ( '' !== $not_sent_code ) {
+				return new \WP_Error( $not_sent_code, $response->get_error_message(), array( 'status' => $not_sent_status ) );
 			}
 			return new \WP_Error( 'image_provider_error', __( 'The image provider request could not be completed.', 'alorbach-ai-gateway' ), array( 'status' => 502 ) );
 		}
@@ -1482,37 +1687,183 @@ class REST_Proxy {
 			$response['cost_usd'] = User_Display::uc_to_usd( $cost );
 			do_action( 'alorbach_after_deduction', $user_id, 'image', $model, $cost, $api_cost );
 		}
-		return rest_ensure_response( $response );
+		return $response;
 	}
 
-	/** Read the owner-scoped stored evidence projection; never creates storage. */
-	public static function image_attempt_lookup_handler( $request ) {
-		$client_request_id = Image_Attempts::sanitize_client_request_id( $request->get_param( 'client_request_id' ) );
-		$evidence = Image_Attempts::lookup( get_current_user_id(), $client_request_id );
-		if ( is_wp_error( $evidence ) ) {
-			return $evidence;
+	/**
+	 * Queue a prepared, claimed request for the Gateway worker and answer 202.
+	 *
+	 * @param array $ctx Prepared request context.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	private static function enqueue_async_image_request( $ctx ) {
+		$user_id           = (int) $ctx['user_id'];
+		$client_request_id = (string) $ctx['client_request_id'];
+		$attempt           = $ctx['attempt'];
+		$payload           = $ctx;
+		unset( $payload['attempt'], $payload['async'] );
+		$queued = Image_Attempt_Worker::enqueue( $user_id, $attempt, $payload );
+		if ( is_wp_error( $queued ) ) {
+			return self::reject_unqueued_image_attempt( $user_id, $client_request_id, $attempt );
 		}
-		if ( ! is_array( $evidence ) ) {
+		return self::image_attempt_status_response(
+			$user_id,
+			$client_request_id,
+			202,
+			false,
+			array(
+				'estimated_cost_uc'      => (int) $ctx['cost'],
+				'estimated_cost_credits' => User_Display::uc_to_credits( (int) $ctx['cost'] ),
+				'estimated_cost_usd'     => User_Display::uc_to_usd( (int) $ctx['cost'] ),
+			)
+		);
+	}
+
+	/** Close a claimed async attempt that could not be queued as a zero-cost, conclusive rejection (503). */
+	private static function reject_unqueued_image_attempt( $user_id, $client_request_id, $attempt ) {
+		$updated = Image_Attempts::mark_error( $attempt, array( 'dispatch_status' => 'not_sent', 'outcome' => 'rejected', 'source' => 'gateway_preflight_v1', 'cost_usd' => '0.00000000', 'provider_cost_usd' => '0.00000000', 'billing_status' => 'not_charged', 'failure_class' => 'local_configuration' ) );
+		return self::safe_image_error( 'image_queue_unavailable', 503, $user_id, $client_request_id, is_array( $updated ) ? $updated : Image_Attempts::latest_raw( $user_id, $client_request_id ) );
+	}
+
+	/**
+	 * A keyed attempt that never reached mark_possibly_sent() was not sent: close it as a
+	 * conclusive zero-cost rejection instead of leaving it "unknown". No-op once the provider
+	 * handoff was marked.
+	 *
+	 * @param int    $user_id           Owner.
+	 * @param string $client_request_id Attempt key.
+	 * @return bool Whether the attempt was released.
+	 */
+	public static function release_unsent_image_attempt( $user_id, $client_request_id ) {
+		$row = '' !== (string) $client_request_id ? Image_Attempts::latest_raw( $user_id, $client_request_id ) : null;
+		if ( is_array( $row ) && 'not_sent' === (string) ( $row['dispatch_status'] ?? '' ) && 'unknown' === (string) ( $row['outcome'] ?? '' ) ) {
+			return is_array( Image_Attempts::mark_error( $row, array( 'dispatch_status' => 'not_sent', 'outcome' => 'rejected', 'source' => 'gateway_preflight_v1', 'cost_usd' => '0.00000000', 'provider_cost_usd' => '0.00000000', 'billing_status' => 'not_charged', 'failure_class' => 'local_configuration' ) ) );
+		}
+		return false;
+	}
+
+	/**
+	 * Build a status response (202 after queueing, 200 for a replay).
+	 *
+	 * @param int    $user_id           Owner.
+	 * @param string $client_request_id Attempt key.
+	 * @param int    $http_status       HTTP status.
+	 * @param bool   $replayed          Whether an existing attempt answered an async request.
+	 * @param array  $extra             Extra fields.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	private static function image_attempt_status_response( $user_id, $client_request_id, $http_status, $replayed, $extra = array() ) {
+		$payload = self::image_attempt_status_payload( $user_id, $client_request_id );
+		if ( is_wp_error( $payload ) ) {
+			return $payload;
+		}
+		if ( ! is_array( $payload ) ) {
 			return new \WP_Error( 'image_attempt_not_found', __( 'The image attempt was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
 		}
-		return rest_ensure_response( $evidence );
+		$payload['replayed'] = (bool) $replayed;
+		return new \WP_REST_Response( array_merge( $payload, $extra ), $http_status );
 	}
 
-	/** Return a stored success only when all owner/evidence/hash bindings match. */
+	/**
+	 * Evidence plus lifecycle status for one attempt. Reaps an expired worker lease
+	 * and re-dispatches a stalled queued job; it never creates storage.
+	 *
+	 * @param int    $user_id           Owner.
+	 * @param string $client_request_id Attempt key.
+	 * @return array|\WP_Error|null
+	 */
+	private static function image_attempt_status_payload( $user_id, $client_request_id ) {
+		$row = Image_Attempts::latest_raw( $user_id, $client_request_id );
+		if ( is_wp_error( $row ) ) {
+			return $row;
+		}
+		$row = is_array( $row ) ? $row : null;
+		$job = Image_Attempt_Worker::get_job_for_attempt( $row );
+		if ( is_array( $job ) && Image_Attempt_Worker::maintain( $row, $job ) ) {
+			$row = Image_Attempts::latest_raw( $user_id, $client_request_id );
+			$row = is_array( $row ) ? $row : null;
+			$job = Image_Attempt_Worker::get_job_for_attempt( $row );
+		}
+		$evidence = Image_Attempts::lookup( $user_id, $client_request_id );
+		if ( is_wp_error( $evidence ) || ! is_array( $evidence ) ) {
+			return $evidence;
+		}
+		return array_merge( $evidence, Image_Attempt_Worker::describe( $evidence, $row, $job ) );
+	}
+
+	/** Read the owner-scoped stored evidence and lifecycle status; never creates storage. */
+	public static function image_attempt_lookup_handler( $request ) {
+		$client_request_id = Image_Attempts::sanitize_client_request_id( $request->get_param( 'client_request_id' ) );
+		$payload = self::image_attempt_status_payload( get_current_user_id(), $client_request_id );
+		if ( is_wp_error( $payload ) ) {
+			return $payload;
+		}
+		if ( ! is_array( $payload ) ) {
+			return new \WP_Error( 'image_attempt_not_found', __( 'The image attempt was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+		return rest_ensure_response( $payload );
+	}
+
+	/**
+	 * Return a stored success only when all owner/evidence/hash bindings match.
+	 * For async attempts `evidence_id` and `request_hash` are optional (the owner
+	 * scope applies and a supplied value must still match); bytes are released only
+	 * after the user cost is settled.
+	 */
 	public static function image_attempt_result_handler( $request ) {
-		$result = Image_Attempts::read_result(
-			get_current_user_id(),
-			$request->get_param( 'client_request_id' ),
-			$request->get_param( 'evidence_id' ),
-			$request->get_param( 'request_hash' )
-		);
+		$user_id           = get_current_user_id();
+		$client_request_id = Image_Attempts::sanitize_client_request_id( $request->get_param( 'client_request_id' ) );
+		$evidence_id       = trim( (string) $request->get_param( 'evidence_id' ) );
+		$request_hash      = trim( (string) $request->get_param( 'request_hash' ) );
+		$row               = Image_Attempts::latest_raw( $user_id, $client_request_id );
+		$row               = is_array( $row ) ? $row : null;
+		$job               = Image_Attempt_Worker::get_job_for_attempt( $row );
+		$status            = null;
+		if ( ! is_array( $row ) ) {
+			// Unknown key or another owner's key: indistinguishable, never a binding hint.
+			return new \WP_Error( 'image_attempt_result_not_found', __( 'The stored image result was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+		}
+		if ( is_array( $job ) ) {
+			$payload = self::image_attempt_status_payload( $user_id, $client_request_id );
+			$status  = is_array( $payload ) ? (string) ( $payload['status'] ?? '' ) : '';
+			if ( in_array( $status, array( 'queued', 'running' ), true ) ) {
+				return new \WP_Error( 'image_attempt_result_pending', __( 'The image result is not ready yet.', 'alorbach-ai-gateway' ), array( 'status' => 409, 'attempt_status' => $status ) );
+			}
+			$row = Image_Attempts::latest_raw( $user_id, $client_request_id );
+			if ( is_array( $row ) ) {
+				$evidence_id  = '' === $evidence_id ? (string) $row['evidence_id'] : $evidence_id;
+				$request_hash = '' === $request_hash ? (string) $row['request_hash'] : $request_hash;
+			}
+		} elseif ( '' === $evidence_id || '' === $request_hash ) {
+			return new \WP_Error( 'rest_missing_callback_param', __( 'evidence_id and request_hash are required.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
+		$result = Image_Attempts::read_result( $user_id, $client_request_id, $evidence_id, $request_hash );
 		if ( is_wp_error( $result ) ) {
 			return $result;
 		}
 		if ( ! is_array( $result ) ) {
-			return new \WP_Error( 'image_attempt_result_not_found', __( 'The stored image result was not found.', 'alorbach-ai-gateway' ), array( 'status' => 404 ) );
+			$data = array( 'status' => 404 );
+			if ( null !== $status ) {
+				$data['attempt_status'] = $status;
+			}
+			return new \WP_Error( 'image_attempt_result_not_found', __( 'The stored image result was not found.', 'alorbach-ai-gateway' ), $data );
+		}
+		if ( is_array( $job ) ) {
+			$result['attempt_id'] = $client_request_id;
+			$result['status']     = 'succeeded';
 		}
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Loopback endpoint that runs one queued async image attempt in its own request.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function images_attempt_process_handler( $request ) {
+		$outcome = Image_Attempt_Worker::process_loopback( (int) $request->get_param( 'attempt_id' ), (string) $request->get_param( 'token' ) );
+		return is_wp_error( $outcome ) ? $outcome : rest_ensure_response( $outcome );
 	}
 
 	/** Import owner-confirmed evidence signed by a server-pinned provider key. */
@@ -1535,7 +1886,7 @@ class REST_Proxy {
 		return is_wp_error( $result ) ? $result : rest_ensure_response( $result );
 	}
 
-	private static function claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash ) {
+	private static function claim_image_attempt( $user_id, $client_request_id, $request_hash, $client_request_hash, $before_commit = null ) {
 		$existing = Image_Attempts::lookup( $user_id, $client_request_id );
 		if ( is_wp_error( $existing ) ) {
 			return $existing;
@@ -1543,7 +1894,7 @@ class REST_Proxy {
 		if ( is_array( $existing ) && 'gateway_ledger_v1' === ( $existing['source'] ?? '' ) ) {
 			return array( 'state' => 'legacy', 'attempt' => $existing );
 		}
-		return Image_Attempts::claim( $user_id, $client_request_id, $request_hash, $client_request_hash );
+		return Image_Attempts::claim( $user_id, $client_request_id, $request_hash, $client_request_hash, $before_commit );
 	}
 
 	private static function existing_image_attempt_error( $claim, $user_id, $client_request_id, $request_hash ) {
@@ -2567,7 +2918,7 @@ class REST_Proxy {
 					'endpoint'        => 'chat multi-step',
 					'model'           => $model,
 					'prompt'          => self::debug_prompt_from_messages( $messages ),
-					'original_prompt' => wp_json_encode( $messages ),
+					'original_prompt' => wp_json_encode( self::redact_image_parts( $messages ) ),
 					'steps_count'     => count( $steps ),
 					'error'           => $response,
 					'cost_uc'         => $total_uc_cost,
@@ -2639,7 +2990,7 @@ class REST_Proxy {
 				'endpoint'        => 'chat multi-step',
 				'model'           => $model,
 				'prompt'          => self::debug_prompt_from_messages( $messages ),
-				'original_prompt' => wp_json_encode( $messages ),
+				'original_prompt' => wp_json_encode( self::redact_image_parts( $messages ) ),
 				'steps_count'     => count( $steps ),
 				'error'           => $error,
 				'request_signature' => $base_signature,
@@ -2678,7 +3029,7 @@ class REST_Proxy {
 			'endpoint'        => 'chat multi-step',
 			'model'           => $model,
 			'prompt'          => self::debug_prompt_from_messages( $messages ),
-			'original_prompt' => wp_json_encode( $messages ),
+			'original_prompt' => wp_json_encode( self::redact_image_parts( $messages ) ),
 			'response'        => $last_response,
 			'output'          => $combined_content,
 			'provider_usage'  => isset( $last_response['usage'] ) && is_array( $last_response['usage'] ) ? $last_response['usage'] : array(),
@@ -2693,6 +3044,31 @@ class REST_Proxy {
 	}
 
 	/**
+	 * Replace inline image data in chat messages with a size marker so queue
+	 * diagnostics never store image bytes. The request itself is not modified.
+	 *
+	 * @param array $messages Chat messages.
+	 * @return array
+	 */
+	public static function redact_image_parts( $messages ) {
+		if ( ! is_array( $messages ) ) {
+			return array();
+		}
+		foreach ( $messages as $index => $message ) {
+			if ( ! is_array( $message ) || ! is_array( $message['content'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $message['content'] as $part_index => $part ) {
+				if ( is_array( $part ) && 'image_url' === ( $part['type'] ?? '' ) ) {
+					$url = is_array( $part['image_url'] ?? null ) ? (string) ( $part['image_url']['url'] ?? '' ) : (string) ( $part['image_url'] ?? '' );
+					$messages[ $index ]['content'][ $part_index ] = array( 'type' => 'image_url', 'image_url' => array( 'url' => 0 === stripos( $url, 'data:' ) ? '[inline image, ' . strlen( $url ) . ' chars]' : '[remote image]' ) );
+				}
+			}
+		}
+		return $messages;
+	}
+
+	/**
 	 * Build a compact human-readable prompt summary from chat messages.
 	 *
 	 * @param array $messages Chat messages.
@@ -2702,6 +3078,7 @@ class REST_Proxy {
 		if ( ! is_array( $messages ) ) {
 			return '';
 		}
+		$messages = self::redact_image_parts( $messages );
 
 		$lines = array();
 		foreach ( $messages as $message ) {

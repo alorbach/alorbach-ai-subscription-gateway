@@ -18,6 +18,8 @@ namespace Alorbach\AIGateway\Providers {
 		private $chat;
 		public function __construct( bool $chat ) { $this->chat = $chat; }
 		public function supports_chat(): bool { return $this->chat; }
+		/** Image parts reach azure and openai models unchanged in the fixture. */
+		public function supports_chat_image_parts( $model = '' ): bool { return $this->chat; }
 	}
 
 	class Provider_Registry {
@@ -133,6 +135,15 @@ namespace {
 	}
 	function sanitize_text_field( $value ) { return trim( strip_tags( (string) $value ) ); }
 	function __( $text, $domain = null ) { return $text; }
+	if ( ! class_exists( 'WP_Error' ) ) {
+		class WP_Error {
+			private $code;
+			private $data;
+			public function __construct( $code = '', $message = '', $data = '' ) { $this->code = $code; $this->data = $data; }
+			public function get_error_code() { return $this->code; }
+			public function get_error_data() { return $this->data; }
+		}
+	}
 
 	require_once dirname( __DIR__ ) . '/includes/class-cost-matrix.php';
 	require_once dirname( __DIR__ ) . '/includes/class-server-chat-models.php';
@@ -171,9 +182,9 @@ namespace {
 
 	$evidence = static function ( string $key ) use ( $azure_key, $openai_key, $unpriced ): array {
 		$map = array(
-			$azure_key  => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => true, 'provider' => 'azure' ),
-			$openai_key => array( 'dispatch' => false, 'exclusive' => false, 'pricing' => true, 'provider' => 'openai' ),
-			$unpriced   => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => false, 'provider' => 'azure' ),
+			$azure_key  => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => true, 'provider' => 'azure', 'image_parts' => true ),
+			$openai_key => array( 'dispatch' => false, 'exclusive' => false, 'pricing' => true, 'provider' => 'openai', 'image_parts' => true ),
+			$unpriced   => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => false, 'provider' => 'azure', 'image_parts' => true ),
 		);
 		return $map[ $key ] ?? array( 'dispatch' => true, 'exclusive' => true, 'pricing' => true, 'provider' => 'ai_bridge' );
 	};
@@ -207,8 +218,8 @@ namespace {
 
 	// 3. Contract shape and evidence gates.
 	$settings = array(
-		$azure_key  => array( 'enabled' => true, 'supported_languages' => array( 'de-DE', 'en-US' ), 'operation_slugs' => array( 'story_create', 'book_title_create', 'page_scene_create' ) ),
-		$openai_key => array( 'enabled' => true, 'supported_languages' => array( 'en-US' ), 'operation_slugs' => array( 'story_create' ) ),
+		$azure_key  => array( 'enabled' => true, 'supported_languages' => array( 'de-DE', 'en-US' ), 'operation_slugs' => array( 'story_create', 'book_title_create', 'page_scene_create' ), 'vision_enabled' => true ),
+		$openai_key => array( 'enabled' => true, 'supported_languages' => array( 'en-US' ), 'operation_slugs' => array( 'story_create' ), 'vision_enabled' => true ),
 		$unpriced   => array( 'enabled' => true, 'supported_languages' => array( 'de-DE' ), 'operation_slugs' => array( 'story_create' ) ),
 		'missing::model' => array( 'enabled' => true, 'supported_languages' => array( 'de-DE' ), 'operation_slugs' => array( 'story_create' ) ),
 	);
@@ -224,9 +235,16 @@ namespace {
 	check( false === $by_key[ $unpriced ]['eligible'] && $SCM::REASON_PRICING_UNPROVEN === $by_key[ $unpriced ]['disabled_reason'], 'missing explicit price blocks eligibility' );
 	check( array( $azure_key ) === $SCM::eligible_keys( $contracts ), 'eligible_keys lists exactly the eligible contract' );
 
-	$expected_keys = array( 'gateway_model_key', 'label', 'provider', 'transport', 'chat_contract_version', 'eligible', 'disabled_reason', 'admin_enabled', 'server_dispatch_evidenced', 'dispatch_entry_exclusive', 'pricing_evidenced', 'requires_browser_pairing', 'supported_languages', 'operation_slugs', 'structured_output', 'provider_cancel', 'provider_resume', 'text_cost_estimate' );
+	$expected_keys = array( 'gateway_model_key', 'label', 'provider', 'transport', 'chat_contract_version', 'eligible', 'disabled_reason', 'admin_enabled', 'server_dispatch_evidenced', 'dispatch_entry_exclusive', 'pricing_evidenced', 'requires_browser_pairing', 'supported_languages', 'operation_slugs', 'structured_output', 'provider_cancel', 'provider_resume', 'text_cost_estimate', 'image_parts_proven', 'max_images', 'max_image_bytes', 'image_part_formats' );
 	check( $expected_keys === array_keys( $by_key[ $azure_key ] ), 'contract exposes exactly the documented fields in order' );
-	check( 'sync_chat' === $by_key[ $azure_key ]['transport'] && '1.0.0' === $by_key[ $azure_key ]['chat_contract_version'], 'transport and version are fixed' );
+	check( 'sync_chat' === $by_key[ $azure_key ]['transport'] && '1.1.0' === $by_key[ $azure_key ]['chat_contract_version'], 'transport and version are fixed' );
+	check( true === $by_key[ $azure_key ]['image_parts_proven'] && 8 === $by_key[ $azure_key ]['max_images'] && 8388608 === $by_key[ $azure_key ]['max_image_bytes'] && array( 'image_url' ) === $by_key[ $azure_key ]['image_part_formats'], 'vision: eligible + vision switch + provider path publishes image_parts_proven with limits' );
+	check( false === $by_key[ $openai_key ]['image_parts_proven'] && 0 === $by_key[ $openai_key ]['max_images'] && 0 === $by_key[ $unpriced ]['max_image_bytes'], 'vision: an ineligible contract never publishes image parts' );
+	$vision_off = $SCM::build_contracts( $text_models, array( $azure_key => array_merge( $settings[ $azure_key ], array( 'vision_enabled' => false ) ) ), $evidence );
+	check( false === $vision_off[0]['image_parts_proven'] && true === $vision_off[0]['eligible'], 'vision: without the administrator switch image parts are not published' );
+	$vision_noprov = $SCM::build_contracts( $text_models, array( $azure_key => $settings[ $azure_key ] ), static fn( string $key ): array => array( 'dispatch' => true, 'exclusive' => true, 'pricing' => true, 'provider' => 'azure' ) );
+	check( false === $vision_noprov[0]['image_parts_proven'] && true === $vision_noprov[0]['eligible'], 'vision: without a proven provider path image parts are not published' );
+	check( true === $SCM::sanitize_settings( array( $azure_key => array( 'enabled' => 1, 'vision_enabled' => '1' ) ) )[ $azure_key ]['vision_enabled'] && false === $SCM::sanitize_settings( array( $azure_key => array( 'enabled' => 1, 'vision_enabled' => '0' ) ) )[ $azure_key ]['vision_enabled'], 'vision switch is sanitized as a boolean' );
 	check( false === $by_key[ $azure_key ]['requires_browser_pairing'] && false === $by_key[ $azure_key ]['provider_cancel'] && false === $by_key[ $azure_key ]['provider_resume'] && false === $by_key[ $azure_key ]['text_cost_estimate'] && false === $by_key[ $azure_key ]['structured_output'], 'unproven capabilities stay false' );
 
 	// 3b. Exclusivity gate: a missing "exclusive" defaults to false and yields the ambiguity reason after dispatch.
@@ -262,7 +280,7 @@ namespace {
 
 	// 7. Settings round trip through the (stubbed) option store.
 	$SCM::update_settings( array( $azure_key => array( 'enabled' => '1', 'supported_languages' => 'de-DE', 'operation_slugs' => 'story_create' ) ) );
-	check( array( $azure_key => array( 'enabled' => true, 'supported_languages' => array( 'de-DE' ), 'operation_slugs' => array( 'story_create' ) ) ) === $SCM::get_settings(), 'settings round trip' );
+	check( array( $azure_key => array( 'enabled' => true, 'supported_languages' => array( 'de-DE' ), 'operation_slugs' => array( 'story_create' ), 'vision_enabled' => false ) ) === $SCM::get_settings(), 'settings round trip' );
 	$merged = array_merge( $SCM::get_settings(), array( $openai_key => array( 'enabled' => '1', 'supported_languages' => 'en-US', 'operation_slugs' => 'story_create' ) ) );
 	$SCM::update_settings( $merged );
 	check( array( $azure_key, $openai_key ) === array_keys( $SCM::get_settings() ), 'merging posted rows into stored settings keeps configuration of rows not rendered in the form' );
@@ -365,11 +383,12 @@ namespace {
 
 	// 11. Filter output validation (fail closed).
 	$good = array(
-		'gateway_model_key' => $azure_key, 'label' => 'gpt-5.6-luna (Azure / Prod)', 'provider' => 'azure', 'transport' => 'sync_chat', 'chat_contract_version' => '1.0.0',
+		'gateway_model_key' => $azure_key, 'label' => 'gpt-5.6-luna (Azure / Prod)', 'provider' => 'azure', 'transport' => 'sync_chat', 'chat_contract_version' => '1.1.0',
 		'eligible' => true, 'disabled_reason' => null,
 		'admin_enabled' => true, 'server_dispatch_evidenced' => true, 'dispatch_entry_exclusive' => true, 'pricing_evidenced' => true,
 		'requires_browser_pairing' => false, 'supported_languages' => array( 'de-DE' ), 'operation_slugs' => array( 'story_create' ),
 		'structured_output' => false, 'provider_cancel' => false, 'provider_resume' => false, 'text_cost_estimate' => false,
+		'image_parts_proven' => false, 'max_images' => 0, 'max_image_bytes' => 0, 'image_part_formats' => array(),
 	);
 	$built = array( $good );
 	check( array() === $SCM::validate_contracts( 'nope', $built ), 'non-array filter output publishes nothing' );
@@ -386,6 +405,30 @@ namespace {
 	check( 2 === count( $no_lists ) && false === $no_lists[0]['eligible'] && false === $no_lists[1]['eligible'], 'empty or non-array languages/operation slugs are forced ineligible' );
 	$kept_reason = $SCM::validate_contracts( array( array_merge( $good, array( 'eligible' => false, 'disabled_reason' => 'pricing_missing' ) ) ), $built );
 	check( 'pricing_missing' === $kept_reason[0]['disabled_reason'], 'an existing disabled_reason is kept' );
+	// A filter can never grant vision: only what the Gateway proved for this call survives.
+	$granted = $SCM::validate_contracts( array( array_merge( $good, array( 'image_parts_proven' => true, 'max_images' => 9999, 'max_image_bytes' => 999999999, 'image_part_formats' => array( 'file' ) ) ) ), $built );
+	check( false === $granted[0]['image_parts_proven'] && 0 === $granted[0]['max_images'] && 0 === $granted[0]['max_image_bytes'] && array() === $granted[0]['image_part_formats'], 'a filter cannot grant vision to a contract the Gateway did not prove' );
+	$vision_built = array( array_merge( $good, array( 'image_parts_proven' => true, 'max_images' => 8, 'max_image_bytes' => 8388608, 'image_part_formats' => array( 'image_url' ) ) ) );
+	$clamped      = $SCM::validate_contracts( array( array_merge( $vision_built[0], array( 'max_images' => 9999, 'max_image_bytes' => 999999999, 'image_part_formats' => array( 'file' ) ) ) ), $vision_built );
+	check( true === $clamped[0]['image_parts_proven'] && 64 === $clamped[0]['max_images'] && 33554432 === $clamped[0]['max_image_bytes'] && array( 'image_url' ) === $clamped[0]['image_part_formats'], 'a filter may only keep proven vision within hard limits' );
+	$demoted = $SCM::validate_contracts( array( array_merge( $vision_built[0], array( 'eligible' => false, 'disabled_reason' => 'pricing_missing' ) ) ), $vision_built );
+	check( false === $demoted[0]['image_parts_proven'] && 0 === $demoted[0]['max_images'], 'vision is withdrawn when the contract is no longer eligible' );
+
+	// 11a. Chat image parts: limits and shapes (POST /chat enforcement helper).
+	$png_data_url = 'data:image/png;base64,' . base64_encode( str_repeat( 'a', 600 ) );
+	$vision_msg   = static fn( array $parts ): array => array( array( 'role' => 'user', 'content' => $parts ) );
+	check( true === $SCM::validate_chat_image_parts( $vision_msg( array( array( 'type' => 'text', 'text' => 'hi' ), array( 'type' => 'image_url', 'image_url' => array( 'url' => $png_data_url ) ) ) ) ), 'chat: text plus one data-URL image passes' );
+	check( true === $SCM::validate_chat_image_parts( array( array( 'role' => 'user', 'content' => 'plain string' ) ) ), 'chat: string content is not inspected' );
+	check( true === $SCM::validate_chat_image_parts( $vision_msg( array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'https://example.com/a.png' ) ) ) ) ), 'chat: https image URL passes' );
+	$http_err = $SCM::validate_chat_image_parts( $vision_msg( array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'http://example.com/a.png' ) ) ) ) );
+	check( $http_err instanceof \WP_Error && 'invalid_image_part' === $http_err->get_error_code(), 'chat: plain http image URL is rejected' );
+	$bad_data = $SCM::validate_chat_image_parts( $vision_msg( array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'data:text/html;base64,AAAA' ) ) ) ) );
+	check( $bad_data instanceof \WP_Error && 'invalid_image_part' === $bad_data->get_error_code(), 'chat: non-image data URL is rejected' );
+	$too_many = $SCM::validate_chat_image_parts( $vision_msg( array_fill( 0, 9, array( 'type' => 'image_url', 'image_url' => array( 'url' => $png_data_url ) ) ) ) );
+	check( $too_many instanceof \WP_Error && 'too_many_images' === $too_many->get_error_code(), 'chat: more than max_images is rejected' );
+	check( true === $SCM::validate_chat_image_parts( $vision_msg( array_fill( 0, 8, array( 'type' => 'image_url', 'image_url' => array( 'url' => $png_data_url ) ) ) ) ), 'chat: exactly max_images passes' );
+	$huge = $SCM::validate_chat_image_parts( $vision_msg( array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'data:image/jpeg;base64,' . str_repeat( 'A', 11500000 ) ) ) ) ) );
+	check( $huge instanceof \WP_Error && 'image_part_too_large' === $huge->get_error_code(), 'chat: an image above max_image_bytes is rejected without decoding' );
 	$flags = $SCM::validate_contracts( array( array_merge( $good, array( 'requires_browser_pairing' => true, 'structured_output' => true, 'provider_cancel' => true, 'provider_resume' => true, 'text_cost_estimate' => true ) ) ), $built );
 	check( false === $flags[0]['requires_browser_pairing'] && false === $flags[0]['structured_output'] && false === $flags[0]['provider_cancel'] && false === $flags[0]['provider_resume'] && false === $flags[0]['text_cost_estimate'], 'capability flags a filter may not grant are forced to false' );
 	$dirty = array(
@@ -463,6 +506,39 @@ namespace {
 	check( 1 === count( $numeric ) && '12345' === $numeric[0]['gateway_model_key'] && true === $numeric[0]['eligible'], 'numeric-only model key is published as a string and stays eligible' );
 	$validated_numeric = \Alorbach\AIGateway\Server_Chat_Models::validate_contracts( $numeric, $numeric ); check( 1 === count( $validated_numeric ) && '12345' === $validated_numeric[0]['gateway_model_key'], 'numeric-only key survives contract validation' );
 
+	// Vision gate for POST /chat: unknown part types and unproven models.
+	$gate_contracts = array(
+		array( 'transport' => 'sync_chat', 'gateway_model_key' => 'e1::vision-model', 'image_parts_proven' => true ),
+		array( 'transport' => 'sync_chat', 'gateway_model_key' => 'e1::text-model', 'image_parts_proven' => false ),
+		array( 'transport' => 'direct_image', 'gateway_model_key' => 'e1::image-model', 'image_parts_proven' => true ),
+	);
+	$gate_image = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'text', 'text' => 'what is this' ), array( 'type' => 'image_url', 'image_url' => array( 'url' => 'data:image/png;base64,AAAA' ) ) ) ) );
+	$gate_text  = array( array( 'role' => 'user', 'content' => 'plain string' ), array( 'role' => 'user', 'content' => array( array( 'type' => 'text', 'text' => 'parts' ) ) ) );
+	$gate_code  = static function ( $value ) { return $value instanceof \WP_Error ? $value->get_error_code() : true; };
+	check( true === $SCM::enforce_chat_vision( $gate_text, 'e1::text-model', $gate_contracts ), 'vision gate: text-only chat (string and text parts) is unaffected for any model' );
+	check( true === $SCM::enforce_chat_vision( $gate_image, 'e1::vision-model', $gate_contracts ) && true === $SCM::enforce_chat_vision( $gate_image, 'e1:vision-model', $gate_contracts ), 'vision gate: image parts pass for a model with image_parts_proven (compound and single-colon key)' );
+	check( 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_image, 'e1::text-model', $gate_contracts ) ), 'vision gate: image parts are refused for a model without image_parts_proven (422)' );
+	check( 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_image, 'unknown-model', $gate_contracts ) ) && 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_image, 'vision-model', $gate_contracts ) ), 'vision gate: unknown models and plain names that do not match a proven contract are refused' );
+	check( 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_image, 'e1::image-model', $gate_contracts ) ), 'vision gate: only sync_chat contracts count' );
+	$gate_unknown = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'input_audio', 'input_audio' => array() ), 'bare string part' ) ) );
+	check( true === $SCM::enforce_chat_vision( $gate_unknown, 'e1::text-model', $gate_contracts ), 'vision gate: without image parts any array content passes through as before (no part-type allowlist)' );
+	$gate_mixed = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'data:image/png;base64,AAAA' ) ), array( 'type' => 'input_audio', 'input_audio' => array() ) ) ) );
+	check( 'unsupported_content_part' === $gate_code( $SCM::enforce_chat_vision( $gate_mixed, 'e1::vision-model', $gate_contracts ) ) && 'unsupported_content_part' === $gate_code( $SCM::enforce_chat_vision( array( array( 'role' => 'user', 'content' => array( $gate_image[0]['content'][1], 'bare string part' ) ) ), 'e1::vision-model', $gate_contracts ) ), 'vision gate: with image parts only text and image_url parts are allowed (422 unsupported_content_part)' );
+
+	$gate_input_image = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'text', 'text' => 'x' ), array( 'type' => 'input_image', 'image_url' => 'data:image/png;base64,AAAA' ) ) ) );
+	check( 'unsupported_content_part' === $gate_code( $SCM::enforce_chat_vision( $gate_input_image, 'e1::vision-model', $gate_contracts ) ), 'vision gate: an input_image part on a proven model is an image-like but unsupported part type (422 unsupported_content_part)' );
+	check( 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_input_image, 'e1::text-model', $gate_contracts ) ), 'vision gate: an input_image part counts as an image part for the proven-model check' );
+	$gate_url_only = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'file', 'url' => 'data:image/png;base64,AAAA' ) ) ) );
+	check( 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_url_only, 'e1::text-model', $gate_contracts ) ), 'vision gate: any part carrying a data:image/ URL is an image part' );
+	$gate_big = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'input_image', 'image_url' => 'data:image/png;base64,' . str_repeat( 'A', 12000000 ) ) ) ) );
+	check( 'image_part_too_large' === $gate_code( $SCM::validate_chat_image_parts( $gate_big ) ), 'vision limits: size limits also apply to input_image parts' );
+	$gate_multi_url = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'https://example.com/a.png' ), 'url' => 'data:image/png;base64,' . str_repeat( 'A', 12000000 ) ) ) ) );
+	check( 'image_part_too_large' === $gate_code( $SCM::validate_chat_image_parts( $gate_multi_url ) ), 'vision limits: every URL candidate is checked (https image_url.url plus a large data URL in url is capped)' );
+	$gate_two = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'image_url', 'image_url' => array( 'url' => 'data:image/png;base64,AAAA' ), 'url' => 'data:image/png;base64,AAAA' ) ) ) );
+	check( true === $SCM::validate_chat_image_parts( $gate_two ), 'vision limits: a part with several candidates counts as one image' );
+	$gate_text_data = array( array( 'role' => 'user', 'content' => array( array( 'type' => 'text', 'text' => 'x', 'url' => 'data:image/png;base64,AAAA' ) ) ) );
+	check( 'vision_not_supported' === $gate_code( $SCM::enforce_chat_vision( $gate_text_data, 'e1::text-model', $gate_contracts ) ), 'vision gate: a text part carrying a data:image URL is detected and refused on an unproven model' );
+	check( 'invalid_image_part' === $gate_code( $SCM::validate_chat_image_parts( array( array( 'role' => 'user', 'content' => array( array( 'type' => 'image_url', 'image_url' => array( 'url' => array( 'x' ) ) ) ) ) ) ) ), 'vision limits: a non-string URL is not cast and the part is invalid' );
 	if ( $failures > 0 ) {
 		fwrite( STDOUT, "\n$failures check(s) failed.\n" );
 		exit( 1 );

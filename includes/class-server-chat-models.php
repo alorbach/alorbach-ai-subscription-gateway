@@ -33,8 +33,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Server_Chat_Models {
 
-	/** Semantic version of the published per-model `sync_chat` contract. */
-	const CONTRACT_VERSION = '1.0.0';
+	/**
+	 * Semantic version of the published per-model `sync_chat` contract.
+	 * 1.1.0 adds the vision fields (image_parts_proven, max_images, max_image_bytes,
+	 * image_part_formats); every 1.0.0 field is unchanged.
+	 */
+	const CONTRACT_VERSION = '1.1.0';
+
+	/** Default vision limits published for models with proven image parts (filter: alorbach_chat_vision_limits). */
+	const VISION_MAX_IMAGES      = 8;
+	const VISION_MAX_IMAGE_BYTES = 8388608;
 
 	/** Downstream transport name (matches the async_image / direct_image vocabulary). */
 	const TRANSPORT = 'sync_chat';
@@ -67,6 +75,7 @@ class Server_Chat_Models {
 		'gateway_model_key', 'label', 'provider', 'transport', 'chat_contract_version', 'eligible', 'disabled_reason',
 		'admin_enabled', 'server_dispatch_evidenced', 'dispatch_entry_exclusive', 'pricing_evidenced', 'requires_browser_pairing',
 		'supported_languages', 'operation_slugs', 'structured_output', 'provider_cancel', 'provider_resume', 'text_cost_estimate',
+		'image_parts_proven', 'max_images', 'max_image_bytes', 'image_part_formats',
 	);
 
 	const MAX_LANGUAGES  = 20;
@@ -144,6 +153,7 @@ class Server_Chat_Models {
 				'enabled'             => ! empty( $row['enabled'] ) && 'false' !== $row['enabled'] && '0' !== $row['enabled'],
 				'supported_languages' => self::sanitize_languages( $row['supported_languages'] ?? array() ),
 				'operation_slugs'     => self::sanitize_operation_slugs( $row['operation_slugs'] ?? array() ),
+				'vision_enabled'      => ! empty( $row['vision_enabled'] ) && 'false' !== $row['vision_enabled'] && '0' !== $row['vision_enabled'],
 			);
 		}
 		return $settings;
@@ -251,6 +261,12 @@ class Server_Chat_Models {
 			foreach ( array( 'requires_browser_pairing', 'structured_output', 'provider_cancel', 'provider_resume', 'text_cost_estimate' ) as $flag ) {
 				$merged[ $flag ] = false;
 			}
+			// Vision: a filter can only keep what the Gateway proved for this call; it never grants it.
+			$vision_proven = $proven && true === $merged['image_parts_proven'] && true === ( $origin['image_parts_proven'] ?? false );
+			$merged['image_parts_proven'] = $vision_proven;
+			$merged['max_images']         = $vision_proven ? max( 1, min( 64, (int) $merged['max_images'] ) ) : 0;
+			$merged['max_image_bytes']    = $vision_proven ? max( 1, min( 33554432, (int) $merged['max_image_bytes'] ) ) : 0;
+			$merged['image_part_formats'] = $vision_proven ? array( 'image_url' ) : array();
 			foreach ( array( 'admin_enabled', 'server_dispatch_evidenced', 'dispatch_entry_exclusive', 'pricing_evidenced' ) as $flag ) {
 				$merged[ $flag ] = true === $merged[ $flag ];
 			}
@@ -332,6 +348,11 @@ class Server_Chat_Models {
 				$reason = self::REASON_OPERATIONS_MISSING;
 			}
 
+			// Vision: the administrator switch, an otherwise eligible contract and a provider path
+			// that passes (or maps) image parts. Nothing is inferred from the model name.
+			$vision = null === $reason && ! empty( $row['vision_enabled'] ) && ! empty( $proof['image_parts'] );
+			$limits = self::vision_limits();
+
 			$contracts[] = array(
 				'gateway_model_key'          => $key,
 				'label'                      => sanitize_text_field( (string) $text_models[ $key ] ),
@@ -351,9 +372,158 @@ class Server_Chat_Models {
 				'provider_cancel'            => false,
 				'provider_resume'            => false,
 				'text_cost_estimate'         => false,
+				'image_parts_proven'         => $vision,
+				'max_images'                 => $vision ? $limits['max_images'] : 0,
+				'max_image_bytes'            => $vision ? $limits['max_image_bytes'] : 0,
+				'image_part_formats'         => $vision ? array( 'image_url' ) : array(),
 			);
 		}
 		return $contracts;
+	}
+
+	/**
+	 * Published vision limits (also enforced by POST /chat for requests with image parts).
+	 *
+	 * @return array{max_images:int,max_image_bytes:int}
+	 */
+	public static function vision_limits() {
+		$limits = apply_filters(
+			'alorbach_chat_vision_limits',
+			array( 'max_images' => self::VISION_MAX_IMAGES, 'max_image_bytes' => self::VISION_MAX_IMAGE_BYTES )
+		);
+		$limits = is_array( $limits ) ? $limits : array();
+		return array(
+			'max_images'      => max( 1, min( 64, (int) ( $limits['max_images'] ?? self::VISION_MAX_IMAGES ) ) ),
+			'max_image_bytes' => max( 1, min( 33554432, (int) ( $limits['max_image_bytes'] ?? self::VISION_MAX_IMAGE_BYTES ) ) ),
+		);
+	}
+
+	/**
+	 * Vision gate for POST /chat: a request with image parts needs a published `sync_chat`
+	 * contract of the requested model with `image_parts_proven`, and may then contain only
+	 * `text` and `image_url` parts. Requests without image parts are not inspected.
+	 *
+	 * @param mixed  $messages  Chat messages.
+	 * @param string $model_key Requested compound or plain model key.
+	 * @param array  $contracts Published contracts (`capabilities.models` of the integration config).
+	 * @return true|\WP_Error 422 unsupported_content_part | vision_not_supported.
+	 */
+	public static function enforce_chat_vision( $messages, $model_key, $contracts ) {
+		if ( ! is_array( $messages ) ) {
+			return true;
+		}
+		$has_image = false;
+		$has_other = false;
+		foreach ( $messages as $message ) {
+			if ( ! is_array( $message ) || ! is_array( $message['content'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $message['content'] as $part ) {
+				$type = is_array( $part ) ? ( $part['type'] ?? '' ) : '';
+				if ( self::is_image_part( $part ) ) {
+					$has_image = true;
+					if ( 'image_url' !== $type ) {
+						$has_other = true; // Image-like (input_image, image, data:image URL) but not a forwarded part type.
+					}
+				} elseif ( 'text' !== $type ) {
+					$has_other = true;
+				}
+			}
+		}
+		if ( ! $has_image ) {
+			return true; // Requests without image parts pass through exactly as before (any array content).
+		}
+		foreach ( (array) $contracts as $contract ) {
+			if ( is_array( $contract ) && self::TRANSPORT === ( $contract['transport'] ?? '' ) && true === ( $contract['image_parts_proven'] ?? false ) && is_string( $contract['gateway_model_key'] ?? null )
+				&& in_array( (string) $model_key, Cost_Matrix::gateway_model_key_aliases( $contract['gateway_model_key'] ), true ) ) {
+				return $has_other ? new \WP_Error( 'unsupported_content_part', __( 'Chat requests with images may only contain text and image_url parts.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) ) : true;
+			}
+		}
+		return new \WP_Error( 'vision_not_supported', __( 'The selected chat model does not accept image parts.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+	}
+
+	/** Whether a content part is image-like: type image_url, input_image or image, or any part with a data:image/ URL candidate. */
+	private static function is_image_part( $part ) {
+		if ( ! is_array( $part ) ) {
+			return false;
+		}
+		if ( in_array( $part['type'] ?? '', array( 'image_url', 'input_image', 'image' ), true ) ) {
+			return true;
+		}
+		foreach ( self::image_part_urls( $part ) as $url ) {
+			if ( 0 === stripos( $url, 'data:image/' ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Every URL candidate of a part (image_url.url, image_url as a string, url); non-empty strings only.
+	 *
+	 * @return string[]
+	 */
+	private static function image_part_urls( $part ) {
+		$candidates = array(
+			is_array( $part['image_url'] ?? null ) ? ( $part['image_url']['url'] ?? null ) : ( $part['image_url'] ?? null ),
+			$part['url'] ?? null,
+		);
+		$urls = array();
+		foreach ( $candidates as $candidate ) {
+			if ( is_string( $candidate ) && '' !== $candidate ) {
+				$urls[] = $candidate;
+			}
+		}
+		return $urls;
+	}
+
+	/**
+	 * Validate OpenAI-style chat messages that carry image parts against the
+	 * vision limits. Only `data:` base64 URLs and https URLs are accepted; the
+	 * decoded size of each data URL is checked without decoding it.
+	 *
+	 * @param mixed $messages Chat messages.
+	 * @return true|\WP_Error
+	 */
+	public static function validate_chat_image_parts( $messages ) {
+		if ( ! is_array( $messages ) ) {
+			return true;
+		}
+		$limits = self::vision_limits();
+		$count  = 0;
+		foreach ( $messages as $message ) {
+			if ( ! is_array( $message ) || ! is_array( $message['content'] ?? null ) ) {
+				continue;
+			}
+			foreach ( $message['content'] as $part ) {
+				if ( ! self::is_image_part( $part ) ) {
+					continue;
+				}
+				$count++; // One image part is counted once, however many URL candidates it carries.
+				if ( $count > $limits['max_images'] ) {
+					return new \WP_Error( 'too_many_images', __( 'The request carries more images than allowed.', 'alorbach-ai-gateway' ), array( 'status' => 422, 'max_images' => $limits['max_images'] ) );
+				}
+				$urls = self::image_part_urls( $part );
+				if ( empty( $urls ) ) {
+					return new \WP_Error( 'invalid_image_part', __( 'Image parts must be base64 image data URLs or https URLs.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+				}
+				foreach ( $urls as $url ) {
+					if ( 0 === stripos( $url, 'data:' ) ) {
+						$comma = strpos( $url, ',' );
+						if ( false === $comma || 1 !== preg_match( '#^data:image/[a-z0-9.+-]{1,40};base64$#i', substr( $url, 0, $comma ) ) ) {
+							return new \WP_Error( 'invalid_image_part', __( 'Image parts must be base64 image data URLs or https URLs.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+						}
+						$decoded = (int) floor( ( strlen( $url ) - $comma - 1 ) * 3 / 4 );
+						if ( $decoded > $limits['max_image_bytes'] ) {
+							return new \WP_Error( 'image_part_too_large', __( 'An image in the request exceeds the maximum size.', 'alorbach-ai-gateway' ), array( 'status' => 422, 'max_image_bytes' => $limits['max_image_bytes'] ) );
+						}
+					} elseif ( 0 !== stripos( $url, 'https://' ) ) {
+						return new \WP_Error( 'invalid_image_part', __( 'Image parts must be base64 image data URLs or https URLs.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+					}
+				}
+			}
+		}
+		return true;
 	}
 
 	/**
@@ -486,7 +656,9 @@ class Server_Chat_Models {
 			$pricing = self::has_explicit_pricing( $key );
 		}
 
-		return array( 'dispatch' => $dispatch, 'exclusive' => $exclusive, 'pricing' => $pricing, 'provider' => $provider );
+		$image_parts = method_exists( $handler, 'supports_chat_image_parts' ) && $handler->supports_chat_image_parts( (string) $parsed['model'] );
+
+		return array( 'dispatch' => $dispatch, 'exclusive' => $exclusive, 'pricing' => $pricing, 'provider' => $provider, 'image_parts' => $image_parts );
 	}
 
 	/**

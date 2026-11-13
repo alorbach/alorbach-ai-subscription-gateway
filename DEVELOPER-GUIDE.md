@@ -94,6 +94,8 @@ Typical response:
 - `usage`
 - cost fields when applicable
 
+Vision (image input): a message `content` may be an array of OpenAI-style parts, `{"type":"text","text":"..."}` and `{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}`. OpenAI and Azure OpenAI receive the messages unchanged; Google Gemini receives each `image_url` data URL as an `inline_data` part (a remote URL cannot be inlined there and is refused with `unsupported_image_url`). The Gateway accepts only `data:image/...;base64,` URLs and `https://` URLs, enforces `max_images` (default 8) and `max_image_bytes` (default 8 MiB decoded per image) from the model's contract (errors `too_many_images`, `image_part_too_large`, `invalid_image_part`, all HTTP 422), and estimates the pre-flight hold with a flat 1105 tokens per image instead of tokenizing base64; the provider-reported usage is what is billed. A downstream product should send image parts only to a model whose contract has `image_parts_proven: true` (see `GET /integration/config`). Inline image bytes are replaced by a size marker in the admin queue diagnostics. The whole JSON body must fit PHP `post_max_size` (and any web server or proxy limit in front of it); base64 inflates images by about 4/3, so 8 images of 8 MiB need roughly 86 MB. Raise `post_max_size` and the proxy body limit when images are large.
+
 ### `GET /me/balance`
 
 Returns the current user's balance.
@@ -194,25 +196,39 @@ Useful for WordPress plugins, themes, or custom frontends that need balance/hist
 
 ### `POST /images`
 
-Synchronous image generation endpoint.
+Image generation endpoint. Synchronous by default; with `client_request_id` and `async=1` it queues the request for a Gateway worker (image contract 1.1.0, see [Image contract 1.1.0](docs/image-contract-1.1.0.md)).
 
 Request fields:
 
-- `prompt` required string
+- `prompt` required string; kept byte for byte (newlines survive) and validated instead of sanitized: valid UTF-8, no control characters except tab/LF/CR, at most 32000 characters (`invalid_prompt`, `prompt_too_long`, HTTP 422)
 - `size` optional string
 - `n` optional integer
 - `quality` optional string (`low`, `medium`, `high`; GPT Image 2.5 also accepts `xhigh` and `max`)
 - `background` optional string for GPT Image models (`auto`, `opaque`, `transparent`)
 - `output_format` optional string (`png`, `jpeg`)
 - `model` optional string
+- `reference_images` optional array of `{b64_json, mime_type}`; the first image is the edit target
+- `mask_image` optional base64 PNG (raw base64, data URL or `{b64_json}`) with an alpha channel and exactly the pixel size of the first reference image; transparent pixels mark the area to edit (inpainting; only for models whose contract has `mask_supported: true`)
+- `client_request_id` optional string, at most 128 characters; makes the request an idempotent attempt
+- `async` optional boolean; with `client_request_id` answers `202` and runs the work in a Gateway worker
 
 Transparent backgrounds require PNG (JPEG is coerced to PNG).
+
+Async flow: `POST /images` with `async=1` -> `202 {attempt_id, status:"queued"}`; poll `GET /images/attempts/<client_request_id>` until `status` is `succeeded` or `failed`; then `GET /images/attempts/<client_request_id>/result` for the bytes. The same `client_request_id` with the same request replays the stored attempt and never dispatches or charges twice.
 
 Use this when:
 
 - you want a simple blocking request
 - you do not need streamed preview images
 - you are maintaining backward compatibility with older callers
+
+### `GET /images/attempts/<client_request_id>`
+
+Owner-scoped evidence and lifecycle of a keyed image attempt (synchronous or async). Besides the evidence fields documented in [Direct image attempt recovery](docs/image-attempt-recovery.md) it returns `attempt_id` (equal to the `client_request_id`), `status` (`queued`, `running`, `succeeded`, `failed`; `unknown` only for legacy ledger-only evidence), `execution_mode` (`async`, `sync`, `legacy`), `result_available`, `error` (`{code, message}` or null), `queued_at`, `started_at`, `finished_at` and `poll_after_ms`. Polling re-dispatches a queued job that was not picked up and closes a job whose worker lease expired (`worker_lost`); a request that may already have reached the provider is never sent again.
+
+### `GET /images/attempts/<client_request_id>/result`
+
+Returns the saved provider response (`data[].b64_json`, `provider_size`, cost fields) only after billing is recorded. For async attempts `evidence_id` and `request_hash` are optional (a supplied value must match); for synchronous attempts they are required. `409 image_attempt_result_pending` while the job is queued or running; `404 image_attempt_result_not_found` when no releasable result exists (failed, unbilled, other owner).
 
 ### `POST /images/jobs`
 
@@ -347,9 +363,11 @@ Direct, server-dispatched image models are published in both `capabilities.image
 }
 ```
 
+Image contract 1.1.0 (`image_contract_version`) adds these fields to every `direct_image` contract (existing fields are unchanged): `disabled_reason`, `server_dispatch_evidenced`, `dispatch_entry_exclusive`, `operation_kinds` (`text_to_image`, `image_edit`, `image_inpaint`), `size_rules` (`mode`, `max_edge`, `min_edge`, `min_pixels`, `max_pixels`, `multiple_of`, `aspect_min`, `aspect_max`, `presets`), `qualities`, `candidate_count_max`, `reference_images_max`, `mask_supported`, `async_supported` and `request_limits` (`max_prompt_chars`, `max_mask_bytes`, `max_body_bytes`). A contract is eligible only when billing and dispatch run on the one entry named by the key: the entry's provider type dispatches the request, its credentials are used, and an entry-bound key is never rerouted to another configured provider. Plain model names keep the legacy provider resolution (including the Foundry reroute to OpenAI with reference images), but never send an imported entry's credentials to a different provider. Prompt change: `POST /images` no longer runs the prompt through `sanitize_text_field`; it is validated (control characters, more than 32000 characters or a non-string answer 422; numbers are cast to strings) and used unchanged, so keyed attempts claimed before the upgrade may answer `409 image_attempt_already_recorded` on replay (no legacy-hash fallback). Masks are accepted only for eligible direct-image contracts with `mask_supported`; chat image parts need `image_parts_proven`. See [Image contract 1.1.0](docs/image-contract-1.1.0.md).
+
 Azure `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` use the same Direct transport with additional qualities (`xhigh`, `max`), `supported_backgrounds` (`auto`, `opaque`, `transparent`), and a published image-edit contract (`contract_version` 1, `reference_images_max` 16, `candidate_count_max` 1). The Azure Images edits path accepts up to 16 reference images; quality such as `high` is independent of that limit. Prefer `capabilities.image_model_capabilities[gateway_model_key]` — both `entry-id::gpt-image-2.5-flare` and the UUID alias `entry-id:gpt-image-2.5-flare` resolve to the same contract.
 
-Server-dispatched chat models are published in `capabilities.models` with `transport: "sync_chat"` (contract version `capabilities.server_chat_contract_version`, currently `1.0.0`), and their eligible keys additionally in `capabilities.server_chat_models`. They exist for downstream products that call `POST /chat` from their own server without a browser. Only models that an administrator has saved under AI Gateway > Settings > Server Chat Models are published at all. A model that was saved with the switch off appears with `eligible: false` and `disabled_reason: "disabled_by_admin"`; a model that was never saved does not appear. Prefixed AI Model Relay and local keys are never stored or published; a non-prefixed model name that sits under an AI Model Relay or local Codex provider entry is skipped entirely. A contract has this shape:
+Server-dispatched chat models are published in `capabilities.models` with `transport: "sync_chat"` (contract version `capabilities.server_chat_contract_version`, currently `1.1.0`), and their eligible keys additionally in `capabilities.server_chat_models`. They exist for downstream products that call `POST /chat` from their own server without a browser. Only models that an administrator has saved under AI Gateway > Settings > Server Chat Models are published at all. A model that was saved with the switch off appears with `eligible: false` and `disabled_reason: "disabled_by_admin"`; a model that was never saved does not appear. Prefixed AI Model Relay and local keys are never stored or published; a non-prefixed model name that sits under an AI Model Relay or local Codex provider entry is skipped entirely. A contract has this shape:
 
 ```json
 {
@@ -357,7 +375,7 @@ Server-dispatched chat models are published in `capabilities.models` with `trans
   "label": "gpt-5.6-luna (Azure / Prod)",
   "provider": "azure",
   "transport": "sync_chat",
-  "chat_contract_version": "1.0.0",
+  "chat_contract_version": "1.1.0",
   "eligible": true,
   "disabled_reason": null,
   "admin_enabled": true,
@@ -370,7 +388,11 @@ Server-dispatched chat models are published in `capabilities.models` with `trans
   "structured_output": false,
   "provider_cancel": false,
   "provider_resume": false,
-  "text_cost_estimate": false
+  "text_cost_estimate": false,
+  "image_parts_proven": true,
+  "max_images": 8,
+  "max_image_bytes": 8388608,
+  "image_part_formats": ["image_url"]
 }
 ```
 
@@ -387,7 +409,9 @@ A seventh value, `filter_invalid`, is set when a contract leaves the `alorbach_s
 
 `server_dispatch_evidenced` reports the dispatch gate and `dispatch_entry_exclusive` reports the entry gate (the provider type has exactly one enabled entry, counting keyless entries too, and for a compound key it is the entry named by the key). Dispatch credentials and `free_pass_through` are both read from that sole entry. Pricing is evidenced by an explicit cost-matrix row with positive input and output prices for exactly this model and entry, or by `free_pass_through` enabled on the sole dispatch entry; catalog defaults never count. Pricing evidence in detail: for a compound key a cost-matrix row for that model and that entry, for a plain key the first cost-matrix row for that model name, in both cases with positive input and output prices; or `free_pass_through` on the sole enabled entry of the type. The administrator confirms that a saved model is a chat model (the text catalog is built from all cost-matrix rows, so the Gateway cannot tell chat models from others). `eligible: true` does not guarantee success: `POST /chat` still applies login, plan access, balance, rate limit, monthly quota and duplicate checks. Plan access on `POST /chat` is checked by model name, so a plan that allows one entry's model also admits the same model name under another entry; a server-side consumer must therefore send only a `gateway_model_key` it received as an eligible contract. `supported_languages` are BCP-47 content locales in the form `xx-XX` or `xxx-XX` (for example `de-DE`, `fil-PH`); input is case-normalized (`en-us` becomes `en-US`) and other values are dropped. `operation_slugs` are lowercase `snake_case` names owned by the downstream product; the Gateway publishes them without interpreting them. Send `gateway_model_key` verbatim as `model` to `POST /chat`. No credential, endpoint or price internals are ever included.
 
-The payload gains two fields in `capabilities`: `server_chat_models` (the `gateway_model_key` values of all eligible contracts) and `server_chat_contract_version` (currently `1.0.0`). Existing fields keep their meaning; `capabilities.models` additionally contains the `sync_chat` entries, so a client that reads that list must check `transport`. If a `sync_chat` key would equal the key of a relay or direct image contract, the `sync_chat` contract is not published. Anonymous callers receive the unfiltered set of configured contracts; for a logged-in caller a contract is present only when its key is in the plan-filtered `capabilities.chat_models`, and `server_chat_models` is recomputed from the filtered list.
+Vision (contract 1.1.0): `image_parts_proven` is `true` only for an otherwise eligible contract whose model the administrator switched on under "Vision" in the Server Chat Models tab and whose provider path passes (OpenAI, Azure OpenAI) or maps (Google Gemini) `image_url` parts; then `max_images`, `max_image_bytes` and `image_part_formats` (`["image_url"]`) state the limits `POST /chat` enforces. Otherwise they are `false`, `0`, `0` and `[]`. A filter can never grant vision.
+
+The payload gains two fields in `capabilities`: `server_chat_models` (the `gateway_model_key` values of all eligible contracts) and `server_chat_contract_version` (currently `1.1.0`). Existing fields keep their meaning; `capabilities.models` additionally contains the `sync_chat` entries, so a client that reads that list must check `transport`. If a `sync_chat` key would equal the key of a relay or direct image contract, the `sync_chat` contract is not published. Anonymous callers receive the unfiltered set of configured contracts; for a logged-in caller a contract is present only when its key is in the plan-filtered `capabilities.chat_models`, and `server_chat_models` is recomputed from the filtered list.
 
 Sites can adjust the published list with the filter `alorbach_server_chat_model_contracts( array $contracts, array $text_models )`, which receives the built contracts and the configured text catalog (`compound key => label`). The returned value is validated and fails closed: The filter may only remove contracts or change documented fields of contracts the Gateway built for this call: contracts with a `gateway_model_key` that was not built (added keys), contracts whose `provider` is a relay provider, and duplicate keys are discarded, and each kept contract is rebuilt from the documented fields only, in documented order (unknown fields such as `api_key` or `endpoint` are discarded; missing fields fall back to the built value). When a contract stays eligible, `disabled_reason` is forced to `null`. Further: a non-array publishes nothing, and entries that are not arrays, lack a string `gateway_model_key`, do not have `transport: "sync_chat"`, or carry a relay or local key are dropped; the list is re-indexed. A contract stays eligible only when `eligible` is strictly `true`, `admin_enabled`, `server_dispatch_evidenced`, `dispatch_entry_exclusive` and `pricing_evidenced` are strictly `true`, and `supported_languages` and `operation_slugs` are non-empty arrays; otherwise it is forced to `eligible: false` with `disabled_reason: "filter_invalid"` (an existing reason is kept). `requires_browser_pairing`, `structured_output`, `provider_cancel`, `provider_resume` and `text_cost_estimate` are forced to `false`.
 
@@ -831,6 +855,8 @@ Use the docs in these places for these purposes:
 - `DEVELOPER-GUIDE.md`: external integration and REST API reference
 - `AI Gateway -> Developer` in wp-admin: interactive developer/admin reference and test tooling
 - [Image request parameter handling](docs/image-request-parameters.md): provider-specific image `size` and `aspect_ratio` serialization reference
+- [Image contract 1.1.0](docs/image-contract-1.1.0.md): direct image evidence, async idempotent attempts, prompt preservation, inpainting masks, vision
+- [Direct image attempt recovery](docs/image-attempt-recovery.md): owner evidence, result release and signed reconciliation
 
 ## Scope note
 

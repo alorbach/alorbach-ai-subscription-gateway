@@ -4,6 +4,10 @@ Keyed direct image requests send `client_request_id` and, for BuchWerk dispatch,
 
 Read owner evidence with `GET /wp-json/alorbach/v1/images/attempts/{client_request_id}`. The endpoint is authenticated and read-only. It does not create tables. A protected result can be read with `/result` only when the owner, `evidence_id`, and canonical Gateway `request_hash` match. Successful output is saved before billing, and the saved output omits cost fields until the Gateway ledger charge commits. The result endpoint releases bytes only after `billing_status=recorded` with a known user cost, or after a verified signed attestation settles that cost; pending or conflicted rows return no bytes.
 
+## Asynchronous attempts (image contract 1.1.0)
+
+A keyed request with `async=1` is claimed like any keyed request and then run by a Gateway worker; the lookup endpoint additionally reports `status` (`queued`, `running`, `succeeded`, `failed`), `execution_mode`, `result_available`, `error` and timestamps, and `/result` accepts the call without `evidence_id`/`request_hash` for such attempts. Polling the lookup endpoint can re-dispatch a stalled queued job or close an expired worker lease as `worker_lost` (these write only to the queue row and, for a worker that never reached the provider, record a zero-cost not-sent rejection); it never creates tables and never sends a request that may already have reached the provider. See [Image contract 1.1.0](image-contract-1.1.0.md).
+
 ## Signed historical evidence
 
 An owner can request a reconciliation through `POST /wp-json/alorbach/v1/images/attempts/{client_request_id}/reconcile` only after confirming the attempt. The request includes `confirmed: true`, the currently observed `expected_revision` (use `0` only when lookup returns the stable not-found result), an idempotency key, the signed envelope, and its base64 signature. A conflict or stale revision requires a fresh read.

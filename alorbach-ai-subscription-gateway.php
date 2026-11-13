@@ -34,6 +34,8 @@ require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-jobs.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-error-diagnostics.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-attempts.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-attestation.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-validation.php';
+require_once ALORBACH_PLUGIN_DIR . 'includes/class-image-attempt-worker.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-server-chat-models.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/class-integration-service.php';
 require_once ALORBACH_PLUGIN_DIR . 'includes/Providers/Provider_Interface.php';
@@ -60,6 +62,7 @@ add_action( 'init', array( 'Alorbach\AIGateway\Admin\Admin_Settings', 'maybe_mig
 add_action( 'init', array( 'Alorbach\AIGateway\Image_Jobs', 'ensure_cleanup_scheduled' ), 7 );
 add_action( 'admin_post_alorbach_image_job_asset', array( 'Alorbach\AIGateway\Image_Jobs', 'serve_asset_request' ) );
 add_action( \Alorbach\AIGateway\Image_Jobs::CLEANUP_HOOK, array( 'Alorbach\AIGateway\Image_Jobs', 'cleanup_expired_assets' ) );
+\Alorbach\AIGateway\Image_Attempt_Worker::init();
 
 register_activation_hook( __FILE__, 'alorbach_activate' );
 function alorbach_activate() {

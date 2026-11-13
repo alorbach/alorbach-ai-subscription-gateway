@@ -526,6 +526,38 @@ class Image_Jobs {
 	}
 
 	/**
+	 * Fire a loopback request at an internal worker route (socket first, then a
+	 * non-blocking HTTP post). Used by the async image attempt worker.
+	 *
+	 * @param string $route_suffix REST route below /alorbach/v1/.
+	 * @param string $body         JSON body.
+	 * @return bool Whether any transport accepted the request.
+	 */
+	public static function dispatch_loopback( $route_suffix, $body ) {
+		$urls = self::get_internal_process_urls( $route_suffix );
+		foreach ( $urls as $url ) {
+			if ( self::send_fire_and_forget_request( $url, $body ) ) {
+				return true;
+			}
+		}
+		foreach ( $urls as $url ) {
+			$response = wp_remote_post(
+				$url,
+				array(
+					'timeout'  => 1,
+					'blocking' => false,
+					'headers'  => array( 'Content-Type' => 'application/json' ),
+					'body'     => $body,
+				)
+			);
+			if ( ! is_wp_error( $response ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Build candidate internal loopback URLs for processing jobs.
 	 *
 	 * Web requests can usually use 127.0.0.1, but CLI runs inside wp-env hit a
@@ -533,13 +565,14 @@ class Image_Jobs {
 	 * "wordpress". We try a small ordered candidate set and let the transport
 	 * pick the first reachable target.
 	 *
+	 * @param string $route_suffix REST route below /alorbach/v1/.
 	 * @return string[]
 	 */
-	private static function get_internal_process_urls() {
+	private static function get_internal_process_urls( $route_suffix = 'internal/images/jobs/process' ) {
 		$scheme = is_ssl() ? 'https' : 'http';
 		$path   = wp_parse_url( home_url( '/' ), PHP_URL_PATH );
 		$path   = is_string( $path ) ? rtrim( $path, '/' ) : '';
-		$route  = $path . '/index.php?rest_route=/alorbach/v1/internal/images/jobs/process';
+		$route  = $path . '/index.php?rest_route=/alorbach/v1/' . ltrim( (string) $route_suffix, '/' );
 		$hosts  = array( '127.0.0.1' );
 
 		if ( defined( 'WP_CLI' ) && WP_CLI ) {

@@ -16,6 +16,9 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Tokenizer {
 
+	/** Flat pre-flight estimate for one chat image part (high-detail upper bound). */
+	const IMAGE_PART_TOKENS = 1105;
+
 	/**
 	 * Model to encoding mapping.
 	 *
@@ -93,7 +96,18 @@ class Tokenizer {
 			$role    = isset( $message['role'] ) ? (string) $message['role'] : '';
 			$content = isset( $message['content'] ) ? $message['content'] : '';
 			if ( is_array( $content ) ) {
-				$content = wp_json_encode( $content );
+				// Image parts are never tokenized as text (a base64 data URL would count as
+				// hundreds of thousands of tokens): each costs a flat conservative estimate.
+				// The provider-reported usage is what is billed after the call.
+				$text_parts = array();
+				foreach ( $content as $part ) {
+					if ( is_array( $part ) && 'image_url' === ( $part['type'] ?? '' ) ) {
+						$total += self::IMAGE_PART_TOKENS;
+						continue;
+					}
+					$text_parts[] = $part;
+				}
+				$content = wp_json_encode( $text_parts );
 			}
 			$total += 3; // per-message overhead
 			$total += self::count_tokens( $role, $model );

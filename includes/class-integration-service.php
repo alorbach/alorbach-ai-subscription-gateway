@@ -24,6 +24,21 @@ class Integration_Service {
 	const BASIC_PLAN_SLUG = 'basic';
 
 	/**
+	 * Semantic version of the published per-model `direct_image` contract.
+	 * 1.1.0 adds operation_kinds, server_dispatch_evidenced, dispatch_entry_exclusive,
+	 * size_rules, qualities, mask_supported, async_supported and request_limits
+	 * to the published contract (additive). The request behavior is NOT purely
+	 * additive: the POST /images prompt is no longer run through
+	 * sanitize_text_field (it is validated and used byte for byte, so invalid
+	 * prompts now answer 422 and request hashes of keyed attempts claimed before
+	 * the upgrade can differ on replay, answering 409), and model keys that name
+	 * an entry dispatch on exactly that entry.
+	 *
+	 * @var string
+	 */
+	const IMAGE_CONTRACT_VERSION = '1.1.0';
+
+	/**
 	 * Supported plan capability keys.
 	 *
 	 * @var string[]
@@ -455,7 +470,7 @@ class Integration_Service {
 	 * @param string $aspect_ratio Optional requested aspect ratio.
 	 * @return array<string,mixed>|null|\WP_Error
 	 */
-	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count, $background = '', $reference_count = 0, $aspect_ratio = '' ) {
+	public static function validate_direct_image_request( $user_id, $model, $size, $quality, $output_format, $candidate_count, $background = '', $reference_count = 0, $aspect_ratio = '', $operation = '' ) {
 		$model  = sanitize_text_field( (string) $model );
 		$parsed = Cost_Matrix::parse_model_key( $model );
 		$capabilities_profile = self::get_direct_azure_image_capability_profile( (string) $parsed['model'] );
@@ -476,8 +491,11 @@ class Integration_Service {
 				break;
 			}
 		}
-		if ( ! is_array( $contract ) || empty( $contract['eligible'] ) || empty( $contract['direct_dispatch_evidenced'] ) || empty( $contract['image_capabilities_evidenced'] ) ) {
+		if ( ! is_array( $contract ) || empty( $contract['eligible'] ) || empty( $contract['direct_dispatch_evidenced'] ) || empty( $contract['server_dispatch_evidenced'] ) || empty( $contract['dispatch_entry_exclusive'] ) || empty( $contract['image_capabilities_evidenced'] ) ) {
 			return new \WP_Error( 'direct_image_model_unavailable', __( 'The selected direct image model is not currently available.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
+		if ( 'image_inpaint' === (string) $operation && empty( $contract['mask_supported'] ) ) {
+			return self::direct_image_option_error( 'direct_image_mask_unsupported', __( 'The selected image model does not support edit masks.', 'alorbach-ai-gateway' ) );
 		}
 
 		$capabilities = is_array( $contract['image_capabilities'] ?? null ) ? $contract['image_capabilities'] : array();
@@ -644,19 +662,166 @@ class Integration_Service {
 			$credentials = API_Keys_Helper::get_credentials_for_entry( (string) $parsed['entry_id'] );
 			$has_dispatch = is_array( $entry ) && ! empty( $entry['enabled'] ) && 'azure' === (string) ( $entry['type'] ?? '' ) && is_array( $credentials ) && '' !== trim( (string) ( $credentials['api_key'] ?? '' ) ) && '' !== trim( (string) ( $credentials['endpoint'] ?? '' ) );
 			$has_complete_prices = self::has_complete_direct_azure_image_pricing( (string) $parsed['model'], $matrix, $capabilities );
-			$evidenced = $has_dispatch && $has_complete_prices;
+			// Image contract 1.1.0: billing and dispatch must run on the one entry named by the key.
+			$provider_handler = Providers\Provider_Registry::get( 'azure' );
+			$provider_ok      = is_object( $provider_handler ) && $provider_handler->supports_images();
+			$dispatch_plain   = API_Client::resolve_image_dispatch( $gateway_model_key, array() );
+			$dispatch_refs    = API_Client::resolve_image_dispatch( $gateway_model_key, array( array( 'b64_json' => 'probe' ) ) );
+			$exclusive        = $provider_ok
+				&& ! is_wp_error( $dispatch_plain ) && ! is_wp_error( $dispatch_refs )
+				&& $dispatch_plain === $dispatch_refs
+				&& true === $dispatch_plain['entry_bound']
+				&& 'azure' === $dispatch_plain['provider']
+				&& (string) $parsed['entry_id'] === (string) $dispatch_plain['entry_id'];
+			$server_dispatch  = $has_dispatch && $provider_ok;
+			$evidenced        = $server_dispatch && $exclusive && $has_complete_prices;
+			$disabled_reason  = null;
+			if ( ! $server_dispatch ) {
+				$disabled_reason = 'dispatch_credentials_missing';
+			} elseif ( ! $exclusive ) {
+				$disabled_reason = 'dispatch_entry_ambiguous';
+			} elseif ( ! $has_complete_prices ) {
+				$disabled_reason = 'pricing_missing';
+			}
+			$reference_max = $evidenced ? max( 0, (int) ( $capabilities['reference_images_max'] ?? 0 ) ) : 0;
+			$mask_supported = $evidenced && $reference_max > 0
+				&& is_object( $provider_handler ) && method_exists( $provider_handler, 'supports_image_mask' ) && $provider_handler->supports_image_mask( (string) $parsed['model'] )
+				&& (bool) apply_filters( 'alorbach_direct_image_mask_supported', true, $gateway_model_key );
+			$operation_kinds = array();
+			if ( $evidenced ) {
+				$operation_kinds[] = 'text_to_image';
+				if ( $reference_max > 0 ) {
+					$operation_kinds[] = 'image_edit';
+				}
+				if ( $mask_supported ) {
+					$operation_kinds[] = 'image_inpaint';
+				}
+			}
 			$contracts[] = array(
 				'gateway_model_key'             => $gateway_model_key,
 				'legacy_id'                     => '' !== (string) $parsed['entry_id'] ? (string) $parsed['entry_id'] . ':' . (string) $parsed['model'] : $gateway_model_key,
 				'label'                         => sanitize_text_field( (string) $label ),
 				'transport'                     => 'direct_image',
+				'image_contract_version'        => self::IMAGE_CONTRACT_VERSION,
 				'eligible'                      => $evidenced,
+				'disabled_reason'               => $disabled_reason,
 				'direct_dispatch_evidenced'     => $has_dispatch,
+				'server_dispatch_evidenced'     => $server_dispatch,
+				'dispatch_entry_exclusive'      => $exclusive,
 				'image_capabilities_evidenced'  => $has_complete_prices,
 				'image_capabilities'            => $evidenced ? $capabilities : array(),
+				'operation_kinds'               => $operation_kinds,
+				'size_rules'                    => $evidenced ? self::build_direct_image_size_rules( $capabilities ) : null,
+				'qualities'                     => $evidenced ? array_values( (array) ( $capabilities['supported_qualities'] ?? array() ) ) : array(),
+				'candidate_count_max'           => $evidenced ? (int) ( $capabilities['candidate_count_max'] ?? 1 ) : 0,
+				'reference_images_max'          => $reference_max,
+				'mask_supported'                => $mask_supported,
+				'async_supported'               => $evidenced,
+				'request_limits'                => $evidenced ? self::direct_image_request_limits() : null,
 			);
 		}
 		return $contracts;
+	}
+
+	/**
+	 * Machine-readable size rules of an eligible Direct image contract.
+	 *
+	 * Arbitrary mode (GPT Image 2.5): any width x height within the bounds. Preset
+	 * mode (GPT Image 2): only the listed presets; the bounds are derived from them.
+	 * aspect_min / aspect_max are width / height ratios.
+	 *
+	 * @param array<string,mixed> $capabilities Verified capability profile.
+	 * @return array<string,mixed>
+	 */
+	public static function build_direct_image_size_rules( $capabilities ) {
+		$capabilities = is_array( $capabilities ) ? $capabilities : array();
+		if ( 'arbitrary' === (string) ( $capabilities['size_mode'] ?? '' ) ) {
+			$ratio = static function ( $text, $fallback ) {
+				return 1 === preg_match( '/^(\d+):(\d+)$/', (string) $text, $m ) && (int) $m[2] > 0 ? round( (int) $m[1] / (int) $m[2], 6 ) : $fallback;
+			};
+			$multiple = max( 1, (int) ( $capabilities['edge_multiple'] ?? 1 ) );
+			return array(
+				'mode'             => 'arbitrary',
+				'max_edge'         => max( (int) ( $capabilities['max_width'] ?? 0 ), (int) ( $capabilities['max_height'] ?? 0 ) ),
+				'min_edge'         => max( $multiple, (int) ( $capabilities['min_width'] ?? 1 ), (int) ( $capabilities['min_height'] ?? 1 ) ),
+				'min_pixels'       => (int) ( $capabilities['min_pixels'] ?? 0 ),
+				'max_pixels'       => (int) ( $capabilities['max_pixels'] ?? 0 ),
+				'multiple_of'      => $multiple,
+				'aspect_min'       => $ratio( $capabilities['min_aspect_ratio'] ?? '', 0.0 ),
+				'aspect_max'       => $ratio( $capabilities['max_aspect_ratio'] ?? '', 0.0 ),
+				'presets'          => array(),
+			);
+		}
+		$presets    = array();
+		$max_edge   = 0;
+		$min_edge   = PHP_INT_MAX;
+		$min_pixels = PHP_INT_MAX;
+		$max_pixels = 0;
+		$gcd        = 0;
+		$aspect_min = PHP_FLOAT_MAX;
+		$aspect_max = 0.0;
+		foreach ( (array) ( $capabilities['supported_sizes'] ?? array() ) as $size ) {
+			if ( 1 !== preg_match( '/^(\d{1,5})x(\d{1,5})$/', (string) $size, $m ) ) {
+				continue;
+			}
+			$w = (int) $m[1];
+			$h = (int) $m[2];
+			if ( $w < 1 || $h < 1 ) {
+				continue;
+			}
+			$presets[]  = (string) $size;
+			$max_edge   = max( $max_edge, $w, $h );
+			$min_edge   = min( $min_edge, $w, $h );
+			$min_pixels = min( $min_pixels, $w * $h );
+			$max_pixels = max( $max_pixels, $w * $h );
+			$aspect_min = min( $aspect_min, $w / $h );
+			$aspect_max = max( $aspect_max, $w / $h );
+			$gcd        = self::gcd( self::gcd( $gcd, $w ), $h );
+		}
+		return array(
+			'mode'        => 'preset',
+			'max_edge'    => $max_edge,
+			'min_edge'    => empty( $presets ) ? 0 : $min_edge, // Smallest edge of any preset (not the GCD; multiple_of carries that).
+			'min_pixels'  => empty( $presets ) ? 0 : $min_pixels,
+			'max_pixels'  => $max_pixels,
+			'multiple_of' => max( 1, $gcd ),
+			'aspect_min'  => empty( $presets ) ? 0.0 : round( $aspect_min, 6 ),
+			'aspect_max'  => round( $aspect_max, 6 ),
+			'presets'     => $presets,
+		);
+	}
+
+	/** Greatest common divisor of two non-negative integers. */
+	private static function gcd( $a, $b ) {
+		$a = abs( (int) $a );
+		$b = abs( (int) $b );
+		while ( 0 !== $b ) {
+			$t = $a % $b;
+			$a = $b;
+			$b = $t;
+		}
+		return $a;
+	}
+
+	/**
+	 * Request limits of the direct image endpoint. `max_body_bytes` is the PHP
+	 * `post_max_size` of this site (null when PHP does not limit it); a web server
+	 * or proxy limit in front of PHP can be lower and is not visible here.
+	 *
+	 * @return array<string,int|null>
+	 */
+	public static function direct_image_request_limits() {
+		$ini   = trim( (string) ini_get( 'post_max_size' ) );
+		$bytes = 0;
+		if ( 1 === preg_match( '/^(\d+)\s*([kmg]?)b?$/i', $ini, $m ) ) {
+			$unit  = strtolower( $m[2] );
+			$bytes = (int) $m[1] * ( 'g' === $unit ? 1073741824 : ( 'm' === $unit ? 1048576 : ( 'k' === $unit ? 1024 : 1 ) ) );
+		}
+		return array(
+			'max_prompt_chars' => Image_Validation::MAX_PROMPT_CHARS,
+			'max_mask_bytes'   => Image_Validation::MAX_MASK_BYTES,
+			'max_body_bytes'   => $bytes > 0 ? $bytes : null,
+		);
 	}
 
 	/**

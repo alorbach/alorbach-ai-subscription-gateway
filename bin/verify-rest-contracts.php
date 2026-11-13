@@ -565,6 +565,8 @@ try {
 		$cover_response = alorbach_post_upscale_contract( $cover_payload );
 		$cover_data     = $cover_response->get_data();
 		$cover_roundtrip = json_decode( wp_json_encode( $cover_payload ), true );
+		// The Gateway binds the server-owned output byte cap of the model profile into the accepted payload.
+		$cover_roundtrip['maximum_output_bytes'] = 67108864;
 		alorbach_require( 200 === $cover_response->get_status() && 0 === (int) ( $cover_data['fee_uc'] ?? -1 ) && $cover_roundtrip === ( $cover_data['payload'] ?? null ), sprintf( 'A retain_full_frame cover upscale must accept the complete uncropped frame (status %d, code %s).', (int) $cover_response->get_status(), (string) ( $cover_data['code'] ?? 'none' ) ) );
 		$cover_cancel = alorbach_cancel_upscale_contract( $cover_data );
 		alorbach_require( 200 === $cover_cancel->get_status() && 'cancelled' === ( $cover_cancel->get_data()['status'] ?? '' ), 'The accepted cover upscale contract must be cancelled before any relay execution.' );

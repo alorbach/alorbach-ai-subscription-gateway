@@ -81,6 +81,16 @@ class Azure_Provider extends Provider_Base {
 		return parent::supports_image_request_option( $option, $model );
 	}
 
+	/** GPT Image deployments accept `mask` on images/edits (deployment and Foundry routes). */
+	public function supports_image_mask( $model = '' ) {
+		return 0 === strpos( (string) $model, 'gpt-image' );
+	}
+
+	/** Azure OpenAI chat completions accept `image_url` content parts verbatim. */
+	public function supports_chat_image_parts( $model = '' ) {
+		return true;
+	}
+
 	/**
 	 * Whether the model ID targets Azure Speech Services transcription.
 	 *
@@ -293,8 +303,10 @@ class Azure_Provider extends Provider_Base {
 
 	/**
 	 * {@inheritdoc}
+	 *
+	 * @param array $request_options Optional (image contract 1.1.0): `mask` => array( 'binary' => PNG bytes ).
 	 */
-	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '' ) {
+	public function build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $credentials, $reference_images = array(), $background = '', $request_options = array() ) {
 		$endpoint = isset( $credentials['endpoint'] ) ? rtrim( trim( $credentials['endpoint'] ), '/' ) : '';
 		$api_key  = $credentials['api_key'] ?? '';
 		if ( empty( $endpoint ) || empty( $api_key ) ) {
@@ -304,6 +316,10 @@ class Azure_Provider extends Provider_Base {
 		$reference_images = is_array( $reference_images ) ? array_values( array_filter( $reference_images, 'is_array' ) ) : array();
 		$is_foundry       = self::is_foundry_endpoint( $endpoint );
 		$background       = strtolower( trim( (string) $background ) );
+		$mask_binary      = is_array( $request_options ) && is_array( $request_options['mask'] ?? null ) ? (string) ( $request_options['mask']['binary'] ?? '' ) : '';
+		if ( '' !== $mask_binary && ( empty( $reference_images ) || 0 !== strpos( (string) $model, 'gpt-image' ) ) ) {
+			return new \WP_Error( 'mask_requires_input_image', __( 'An edit mask requires a GPT Image model and an input image.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+		}
 		if ( ! empty( $reference_images ) ) {
 			if ( strpos( $model, 'gpt-image' ) !== 0 ) {
 				return new \WP_Error( 'reference_images_unsupported', __( 'Reference-image generation is supported only for GPT Image models.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
@@ -354,6 +370,13 @@ class Azure_Provider extends Provider_Base {
 				$body .= 'Content-Disposition: form-data; name="image[]"; filename="reference-' . ( $index + 1 ) . '.' . $extension . '"' . "\r\n";
 				$body .= 'Content-Type: ' . $content_type . "\r\n\r\n";
 				$body .= $binary . "\r\n";
+			}
+
+			if ( '' !== $mask_binary ) {
+				$body .= '--' . $boundary . "\r\n";
+				$body .= 'Content-Disposition: form-data; name="mask"; filename="mask.png"' . "\r\n";
+				$body .= 'Content-Type: image/png' . "\r\n\r\n";
+				$body .= $mask_binary . "\r\n";
 			}
 
 			$body .= '--' . $boundary . '--' . "\r\n";

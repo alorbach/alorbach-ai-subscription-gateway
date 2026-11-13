@@ -140,6 +140,33 @@ abstract class Provider_Base implements Provider_Interface {
 	}
 
 	/**
+	 * Whether build_images_request() honours an edit mask for a model.
+	 *
+	 * Image contract 1.1.0. A provider that returns true accepts a tenth argument
+	 * `$request_options` on build_images_request() carrying
+	 * `array( 'mask' => array( 'binary' => <PNG bytes>, 'mime_type' => 'image/png' ) )`.
+	 * Existing providers keep their nine-argument signature and are never called with
+	 * the extra argument unless they declare mask support here.
+	 *
+	 * @param string $model Model ID.
+	 * @return bool
+	 */
+	public function supports_image_mask( $model = '' ) {
+		return false;
+	}
+
+	/**
+	 * Whether chat messages with OpenAI-style `image_url` content parts reach the
+	 * model unchanged (or are mapped to the provider's native image parts).
+	 *
+	 * @param string $model Model ID.
+	 * @return bool
+	 */
+	public function supports_chat_image_parts( $model = '' ) {
+		return false;
+	}
+
+	/**
 	 * Classify OpenAI-style model ID into type.
 	 *
 	 * @param string $model_id Model ID.

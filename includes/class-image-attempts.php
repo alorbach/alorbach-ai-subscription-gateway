@@ -68,9 +68,9 @@ class Image_Attempts {
 	public static function classify_error( $error_code, $error_data = array() ) {
 		$error_code = sanitize_key( (string) $error_code );
 		$error_data = is_array( $error_data ) ? $error_data : array();
-		$not_sent = array( 'no_provider', 'no_api_key', 'invalid_provider', 'invalid_image_request', 'reference_images_unsupported', 'invalid_reference_image', 'image_ledger_engine_unavailable', 'image_ledger_engine_unsupported' );
+		$not_sent = array( 'no_provider', 'no_api_key', 'invalid_provider', 'invalid_image_request', 'reference_images_unsupported', 'invalid_reference_image', 'image_ledger_engine_unavailable', 'image_ledger_engine_unsupported', 'image_dispatch_entry_unavailable', 'mask_unsupported', 'invalid_mask_image', 'mask_requires_input_image' );
 		if ( in_array( $error_code, $not_sent, true ) ) {
-			return array( 'dispatch_status' => 'not_sent', 'outcome' => 'rejected', 'source' => 'gateway_preflight_v1', 'cost_usd' => '0.00000000', 'provider_cost_usd' => '0.00000000', 'billing_status' => 'not_charged', 'failure_class' => in_array( $error_code, array( 'no_provider', 'no_api_key', 'invalid_provider', 'image_ledger_engine_unavailable', 'image_ledger_engine_unsupported' ), true ) ? 'local_configuration' : 'invalid_response' );
+			return array( 'dispatch_status' => 'not_sent', 'outcome' => 'rejected', 'source' => 'gateway_preflight_v1', 'cost_usd' => '0.00000000', 'provider_cost_usd' => '0.00000000', 'billing_status' => 'not_charged', 'failure_class' => in_array( $error_code, array( 'no_provider', 'no_api_key', 'invalid_provider', 'image_ledger_engine_unavailable', 'image_ledger_engine_unsupported', 'image_dispatch_entry_unavailable', 'mask_unsupported' ), true ) ? 'local_configuration' : 'invalid_response' );
 		}
 		// Upstream status codes alone do not prove that the provider did not
 		// accept or meter a request. Only the explicit local preflight errors
@@ -105,13 +105,19 @@ class Image_Attempts {
 		return $diagnostic;
 	}
 
-	/** Serialize claims by owner and client request ID before taking row locks. */
-	public static function claim( $owner_id, $client_request_id, $request_hash, $client_request_hash = null ) {
+	/**
+	 * Serialize claims by owner and client request ID before taking row locks.
+	 *
+	 * @param callable|null $before_commit Optional. Called with the new raw attempt row inside the claim
+	 *                                     transaction, before COMMIT (the async queue reservation). It must
+	 *                                     return true; anything else rolls the claim back and is returned as the error.
+	 */
+	public static function claim( $owner_id, $client_request_id, $request_hash, $client_request_hash = null, $before_commit = null ) {
 		global $wpdb;
 		$owner_id = absint( $owner_id );
 		$client_request_id = self::sanitize_client_request_id( $client_request_id );
 		if ( $owner_id < 1 || '' === $client_request_id ) {
-			return self::claim_locked( $owner_id, $client_request_id, $request_hash, $client_request_hash );
+			return self::claim_locked( $owner_id, $client_request_id, $request_hash, $client_request_hash, $before_commit );
 		}
 		if ( ! self::ensure_storage() ) {
 			return new \WP_Error( 'image_attempt_storage_unavailable', __( 'This image attempt could not be recorded safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
@@ -123,14 +129,14 @@ class Image_Attempts {
 			return new \WP_Error( 'image_attempt_busy', __( 'This image request is already being claimed. Read its evidence and try again.', 'alorbach-ai-gateway' ), array( 'status' => 409 ) );
 		}
 		try {
-			return self::claim_locked( $owner_id, $client_request_id, $request_hash, $client_request_hash );
+			return self::claim_locked( $owner_id, $client_request_id, $request_hash, $client_request_hash, $before_commit );
 		} finally {
 			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
 		}
 	}
 
 	/** Atomically create one immutable first claim; a client ID is never resent. */
-	private static function claim_locked( $owner_id, $client_request_id, $request_hash, $client_request_hash = null ) {
+	private static function claim_locked( $owner_id, $client_request_id, $request_hash, $client_request_hash = null, $before_commit = null ) {
 		global $wpdb;
 		if ( ! self::ensure_table() ) {
 			return new \WP_Error( 'image_attempt_storage_unavailable', __( 'This image attempt could not be recorded safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
@@ -216,12 +222,27 @@ class Image_Attempts {
 			return new \WP_Error( 'image_attempt_claim_failed', __( 'This image attempt could not be claimed safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
 		}
 
+		$attempt_pk = (int) $wpdb->insert_id; // The callback may insert elsewhere and change insert_id.
+		if ( is_callable( $before_commit ) ) {
+			$new_row = self::row_by_id( $attempt_pk, $owner_id );
+			try {
+				$ready = is_array( $new_row ) ? call_user_func( $before_commit, $new_row ) : false;
+			} catch ( \Throwable $error ) {
+				$wpdb->query( 'ROLLBACK' );
+				throw $error;
+			}
+			if ( true !== $ready ) {
+				$wpdb->query( 'ROLLBACK' );
+				return is_wp_error( $ready ) ? $ready : new \WP_Error( 'image_attempt_claim_failed', __( 'This image attempt could not be claimed safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
+			}
+		}
+
 		$committed = $wpdb->query( 'COMMIT' );
 		if ( false === $committed ) {
 			$wpdb->query( 'ROLLBACK' );
 			return new \WP_Error( 'image_attempt_claim_failed', __( 'This image attempt could not be claimed safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
 		}
-		$row = self::row_by_id( (int) $wpdb->insert_id, $owner_id );
+		$row = self::row_by_id( $attempt_pk, $owner_id );
 		if ( ! is_array( $row ) ) {
 			return new \WP_Error( 'image_attempt_claim_failed', __( 'This image attempt could not be claimed safely.', 'alorbach-ai-gateway' ), array( 'status' => 503 ) );
 		}
@@ -470,6 +491,11 @@ class Image_Attempts {
 			return false;
 		}
 		return self::row_by_id( $where['attempt_id'], $where['owner_id'] );
+	}
+
+	/** Expose one raw row by primary key to the trusted async worker. */
+	public static function raw_by_id( $attempt_id, $owner_id ) {
+		return self::row_by_id( absint( $attempt_id ), absint( $owner_id ) );
 	}
 
 	/** Expose a raw row only to trusted Gateway recovery code. */

@@ -765,18 +765,43 @@ class API_Client {
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
 		$background = isset( $options['background'] ) ? strtolower( trim( (string) $options['background'] ) ) : '';
 
-		$provider = self::resolve_image_provider_for_request( $model, $reference_images );
+		$dispatch = self::resolve_image_dispatch( '' !== $compound_entry ? $compound_entry . '::' . $model : $model, $reference_images );
+		if ( is_wp_error( $dispatch ) ) {
+			return $dispatch;
+		}
+		$provider = $dispatch['provider'];
 		$prov     = Provider_Registry::get( $provider );
 		if ( ! $prov || ! $prov->supports_images() ) {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
 		}
-		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
+		$entry_id = '' !== $dispatch['entry_id'] ? $dispatch['entry_id'] : self::get_entry_id_for_imported_model( $model );
+		if ( '' !== $entry_id && empty( $dispatch['entry_bound'] ) ) {
+			// Plain model name: when the resolved provider (for example the Foundry reference-image
+			// reroute to OpenAI) differs from the imported entry's provider type, that entry's
+			// credentials must never be used; the provider's own credentials apply.
+			$imported_entry = API_Keys_Helper::get_entry_by_id( $entry_id );
+			if ( is_array( $imported_entry ) && (string) ( $imported_entry['type'] ?? '' ) !== $provider ) {
+				$entry_id = '';
+			}
+		}
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			$message = in_array( $provider, array( 'ai_bridge', 'codex_local' ), true )
 				? __( 'AI Model Relay requests must be executed through the browser tray app.', 'alorbach-ai-gateway' )
 				: __( 'API key not configured.', 'alorbach-ai-gateway' );
 			return new \WP_Error( 'no_api_key', $message );
+		}
+		$request_options = array();
+		$mask_b64        = isset( $options['mask_image'] ) && is_string( $options['mask_image'] ) ? $options['mask_image'] : '';
+		if ( '' !== $mask_b64 ) {
+			if ( ! method_exists( $prov, 'supports_image_mask' ) || ! $prov->supports_image_mask( $model ) ) {
+				return new \WP_Error( 'mask_unsupported', __( 'The selected image provider path does not support edit masks.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+			}
+			$mask_binary = base64_decode( $mask_b64, true );
+			if ( false === $mask_binary || '' === $mask_binary ) {
+				return new \WP_Error( 'invalid_mask_image', __( 'mask_image is not valid base64.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+			}
+			$request_options['mask'] = array( 'binary' => $mask_binary, 'mime_type' => 'image/png' );
 		}
 		if ( in_array( $provider, array( 'huggingface', 'huggingface_spaces' ), true ) && $n > 1 ) {
 			$merged = array( 'data' => array() );
@@ -795,12 +820,46 @@ class API_Client {
 			}
 			return $merged;
 		}
-		$request = self::apply_image_request_options( $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background ), $options, $prov, $model );
+		// The tenth argument is passed only to providers that declared mask support above.
+		$built   = empty( $request_options )
+			? $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background )
+			: $prov->build_images_request( $prompt, $size, $n, $model, $quality, $output_format, $creds, $reference_images, $background, $request_options );
+		$request = self::apply_image_request_options( $built, $options, $prov, $model );
 		if ( ! $request || is_wp_error( $request ) ) {
 			return $request ?: new \WP_Error( 'no_provider', __( 'Image generation not supported.', 'alorbach-ai-gateway' ) );
 		}
 		$request['timeout'] = self::get_image_request_timeout_seconds( $provider, $model, $size, $n, $reference_images );
 		return self::execute_image_request( $request );
+	}
+
+	/**
+	 * Resolve which provider type and which API key entry will dispatch an image
+	 * request (image contract 1.1.0).
+	 *
+	 * A model key that names an entry ("entry_id::model" or the UUID single-colon
+	 * alias) dispatches on exactly that entry: its type picks the provider and the
+	 * entry's credentials are used. It is never rerouted to another configured
+	 * provider (previously a plain-name lookup could select OpenAI while the
+	 * Azure entry's credentials were attached, and Foundry endpoints with
+	 * reference images were rerouted to OpenAI). A missing or disabled entry is a
+	 * refusal, not a fallback. Plain model names keep the legacy resolution.
+	 *
+	 * @param string $model_key        Compound or plain model key.
+	 * @param array  $reference_images Optional reference images (legacy plain-name reroute only).
+	 * @return array{provider:string,entry_id:string,model:string,entry_bound:bool}|\WP_Error
+	 */
+	public static function resolve_image_dispatch( $model_key, $reference_images = array() ) {
+		$parsed   = Cost_Matrix::parse_model_key( (string) $model_key );
+		$entry_id = (string) $parsed['entry_id'];
+		$model    = (string) $parsed['model'];
+		if ( '' !== $entry_id ) {
+			$entry = API_Keys_Helper::get_entry_by_id( $entry_id );
+			if ( ! is_array( $entry ) || empty( $entry['enabled'] ) || empty( $entry['type'] ) ) {
+				return new \WP_Error( 'image_dispatch_entry_unavailable', __( 'The API key entry named by the image model is missing or disabled; the request was not sent.', 'alorbach-ai-gateway' ), array( 'status' => 422 ) );
+			}
+			return array( 'provider' => (string) $entry['type'], 'entry_id' => $entry_id, 'model' => $model, 'entry_bound' => true );
+		}
+		return array( 'provider' => self::resolve_image_provider_for_request( $model, $reference_images ), 'entry_id' => '', 'model' => $model, 'entry_bound' => false );
 	}
 
 	/**
@@ -813,7 +872,7 @@ class API_Client {
 	 * @param array  $reference_images Optional reference images.
 	 * @return int
 	 */
-	private static function get_image_request_timeout_seconds( $provider = '', $model = '', $size = '', $n = 1, $reference_images = array() ) {
+	public static function get_image_request_timeout_seconds( $provider = '', $model = '', $size = '', $n = 1, $reference_images = array() ) {
 		$timeout = (int) apply_filters(
 			'alorbach_image_request_timeout',
 			300,
@@ -1213,7 +1272,12 @@ class API_Client {
 		$quality       = $quality ?: get_option( 'alorbach_image_default_quality', 'medium' );
 		$output_format = $output_format ?: get_option( 'alorbach_image_default_output_format', 'png' );
 		$background    = isset( $options['background'] ) ? strtolower( trim( (string) $options['background'] ) ) : '';
-		$provider      = self::get_provider_for_model( $model );
+		// Same resolution as images(): an entry-bound key dispatches on exactly that entry; a missing or disabled entry is a refusal.
+		$dispatch = self::resolve_image_dispatch( '' !== $compound_entry ? $compound_entry . '::' . $model : $model, $reference_images );
+		if ( is_wp_error( $dispatch ) ) {
+			return $dispatch;
+		}
+		$provider      = $dispatch['provider'];
 
 		if ( ! empty( $reference_images ) || ! self::supports_partial_image_streaming( $model, $provider ) ) {
 			return new \WP_Error( 'stream_not_supported', __( 'Partial image streaming is not supported for this model.', 'alorbach-ai-gateway' ) );
@@ -1224,7 +1288,13 @@ class API_Client {
 			return new \WP_Error( 'no_provider', __( 'No image provider configured.', 'alorbach-ai-gateway' ) );
 		}
 
-		$entry_id = '' !== $compound_entry ? $compound_entry : self::get_entry_id_for_imported_model( $model );
+		$entry_id = '' !== $dispatch['entry_id'] ? $dispatch['entry_id'] : self::get_entry_id_for_imported_model( $model );
+		if ( empty( $dispatch['entry_bound'] ) && '' !== $entry_id ) {
+			$imported_entry = API_Keys_Helper::get_entry_by_id( $entry_id );
+			if ( is_array( $imported_entry ) && (string) ( $imported_entry['type'] ?? '' ) !== $provider ) {
+				$entry_id = '';
+			}
+		}
 		$creds = '' !== $entry_id ? API_Keys_Helper::get_credentials_for_entry( $entry_id ) : API_Keys_Helper::get_credentials_for_provider( $provider );
 		if ( ! $creds ) {
 			$message = in_array( $provider, array( 'ai_bridge', 'codex_local' ), true )
