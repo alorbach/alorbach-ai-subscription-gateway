@@ -1,0 +1,21 @@
+bin/verify-rest-contracts.php
+  s_96d2274d1b9c05::t_5de8bab7309524 271
+includes/class-integration-service.php
+  s_96d2274d1b9c05::t_1c323d16f15f6a 408-410
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a0fddbd21757d6e5dd92756b8cec4b4e55bf1914",
+  "prompts": {},
+  "sessions": {
+    "s_96d2274d1b9c05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8944ecb0-55bf-4f84-a1ad-0eec21d4b478",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
