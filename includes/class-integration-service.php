@@ -405,6 +405,9 @@ class Integration_Service {
 			'relay_prefix'     => AI_Bridge::RELAY_MODEL_PREFIX,
 			'image_capability_contract_version' => AI_Bridge::IMAGE_CAPABILITY_CONTRACT_VERSION,
 			'minimum_relay_version' => AI_Bridge::MINIMUM_RELAY_VERSION,
+			// Same local CUDA upscale advertisement as /ai-bridge/config, so integrations
+			// that read only /integration/config (e.g. Kinder Buchwerk) can offer print upscaling.
+			'local_upscale'    => array( 'enabled' => AI_Bridge::is_enabled(), 'models' => AI_Bridge::LOCAL_UPSCALE_MODELS, 'binary_transfer' => true, 'unmetered' => true ),
 			'canonical_routes' => array( 'config' => '/ai-bridge/config', 'jobs' => '/ai-bridge/jobs', 'complete' => '/ai-bridge/jobs/{job_id}/complete', 'handoff' => '/ai-bridge/jobs/{job_id}/handoff', 'receipt' => '/ai-bridge/jobs/{job_id}/receipt', 'fail' => '/ai-bridge/jobs/{job_id}/fail' ),
 			'legacy_routes'    => array( 'config' => '/local-codex/config', 'jobs' => '/local-codex/jobs', 'complete' => '/local-codex/jobs/{job_id}/complete', 'handoff' => '/local-codex/jobs/{job_id}/handoff', 'receipt' => '/local-codex/jobs/{job_id}/receipt', 'fail' => '/local-codex/jobs/{job_id}/fail' ),
 		);
