@@ -275,10 +275,10 @@ class API_Validator {
 	 * Verify video model via quick create (submits job, returns when API accepts).
 	 * Does not wait for video completion (which can take minutes).
 	 *
-	 * @param string $model Model ID (e.g. sora-2).
+	 * @param string $model Model ID (e.g. sora-2 on an Azure entry).
 	 * @return array{success: bool, message?: string, result?: string}
 	 */
-	public static function verify_video_model( $model = 'sora-2' ) {
+	public static function verify_video_model( $model = '' ) {
 		$response = API_Client::create_video( 'A simple test', $model );
 		if ( is_wp_error( $response ) ) {
 			return array( 'success' => false, 'message' => $response->get_error_message() );

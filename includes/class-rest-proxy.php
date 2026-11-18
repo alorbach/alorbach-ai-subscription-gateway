@@ -490,7 +490,7 @@ class REST_Proxy {
 			},
 			'args'                => array(
 				'prompt'            => array( 'required' => true, 'sanitize_callback' => 'sanitize_text_field' ),
-				'model'             => array( 'default' => 'sora-2', 'sanitize_callback' => 'sanitize_text_field' ),
+				'model'             => array( 'default' => '', 'sanitize_callback' => 'sanitize_text_field' ),
 				'size'              => array( 'default' => '1280x720', 'sanitize_callback' => 'sanitize_text_field' ),
 				'duration_seconds'  => array( 'default' => 8, 'sanitize_callback' => 'absint' ),
 			),
@@ -574,7 +574,7 @@ class REST_Proxy {
 			'permission_callback' => $admin_permission,
 			'args'                => array(
 				'model' => array(
-					'default'           => 'sora-2',
+					'default'           => '',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 			),
@@ -1155,7 +1155,7 @@ class REST_Proxy {
 				$cost_uc  = Cost_Matrix::apply_user_cost( $api_cost, $model );
 			}
 		} elseif ( $type === 'video' ) {
-			$model    = $request->get_param( 'model' ) ?: \Alorbach\AIGateway\Admin\Admin_Settings::get_default_video_model( array( 'sora-2' ) );
+			$model    = $request->get_param( 'model' ) ?: self::get_default_video_model();
 			$duration = max( 4, min( 12, (int) $request->get_param( 'duration_seconds' ) ) );
 			if ( ! in_array( $duration, array( 4, 8, 12 ), true ) ) {
 				$duration = 8;
@@ -2489,7 +2489,10 @@ class REST_Proxy {
 		}
 
 		$prompt  = $request->get_param( 'prompt' );
-		$model   = $request->get_param( 'model' ) ?: 'sora-2';
+		$model   = $request->get_param( 'model' ) ?: self::get_default_video_model();
+		if ( '' === $model ) {
+			return new \WP_Error( 'no_video_model', __( 'No video model is configured. Import a video model and choose a default video model in the Gateway settings.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
 		$size    = $request->get_param( 'size' ) ?: '1280x720';
 		$input_reference = self::normalize_video_input_reference( $request->get_param( 'input_reference' ) );
 		if ( is_wp_error( $input_reference ) ) {
@@ -2648,9 +2651,20 @@ class REST_Proxy {
 	 * @return \WP_REST_Response
 	 */
 	public static function admin_verify_video( $request ) {
-		$model  = self::get_json_or_query_param( $request, 'model', 'sora-2' );
+		$model  = self::get_json_or_query_param( $request, 'model', '' ) ?: self::get_default_video_model();
 		$result = API_Validator::verify_video_model( $model );
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * The site's configured default video model, or '' when none is available.
+	 *
+	 * @return string
+	 */
+	private static function get_default_video_model() {
+		return (string) \Alorbach\AIGateway\Admin\Admin_Settings::get_default_video_model(
+			\Alorbach\AIGateway\Admin\Admin_Demo_Defaults::get_video_models()
+		);
 	}
 
 	/**

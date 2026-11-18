@@ -144,7 +144,7 @@ class Admin_Settings {
 		return self::normalize_model_key(
 			(string) get_option( 'alorbach_default_video_model', '' ),
 			$video_models,
-			'sora-2'
+			''
 		);
 	}
 

@@ -516,7 +516,7 @@ class Cost_Matrix {
 	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
 	 * @return int UC cost.
 	 */
-	public static function get_video_cost( $model = 'sora-2', $duration_seconds = 8 ) {
+	public static function get_video_cost( $model = '', $duration_seconds = 8 ) {
 		$model_id = self::parse_model_key( $model )['model'];
 		$costs = get_option( 'alorbach_video_costs', array() );
 		$costs = is_array( $costs ) ? $costs : array();

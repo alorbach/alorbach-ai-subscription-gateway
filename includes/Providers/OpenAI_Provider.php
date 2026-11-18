@@ -33,9 +33,13 @@ class OpenAI_Provider extends Provider_Base {
 	/**
 	 * Video models.
 	 *
+	 * OpenAI shut down Sora and the Videos API on 24 Sep 2026, so OpenAI
+	 * entries no longer advertise video models. Sora remains available
+	 * through Azure entries.
+	 *
 	 * @var array
 	 */
-	private static $video_models = array( 'sora-2' );
+	private static $video_models = array();
 
 	/**
 	 * Audio models.
@@ -76,7 +80,8 @@ class OpenAI_Provider extends Provider_Base {
 	 * {@inheritdoc}
 	 */
 	public function supports_video() {
-		return true;
+		// The OpenAI Videos API (Sora) was shut down on 24 Sep 2026.
+		return false;
 	}
 
 	/**

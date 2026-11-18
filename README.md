@@ -13,7 +13,7 @@ A precise credit-based AI API billing layer for WordPress. Bridges fixed-price s
 - **Post-flight reconciliation** with actual token counts from the API response
 - **Immutable SQL ledger** - every credit and deduction is written as an append-only row
 - **Multi-provider support** - OpenAI, AI Model Relay, Azure OpenAI, Google Gemini, Hugging Face, Hugging Face Spaces, GitHub Models, Codex (OAuth)
-- **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora)
+- **AI capabilities** - Chat (multi-step), Image generation, Audio transcription (Whisper), Video generation (Sora on Azure, AI Model Relay)
 - **WooCommerce Subscriptions** - auto-credit on renewal, failed payment handling with retry scheduler
 - **Stripe webhook** support
 - **Async image jobs** - provider-backed progress, capability-dependent previews, and queue visibility

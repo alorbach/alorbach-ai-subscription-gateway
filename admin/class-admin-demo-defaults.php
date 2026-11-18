@@ -149,7 +149,7 @@ class Admin_Demo_Defaults {
 	 * @return array<string,string> Model key => display label.
 	 */
 	public static function get_video_models() {
-		$models = self::get_entry_scoped_models( 'alorbach_video_models', 'alorbach_video_costs', array( 'sora-2' ), 'video' );
+		$models = self::get_entry_scoped_models( 'alorbach_video_models', 'alorbach_video_costs', array(), 'video' );
 		$models = array_merge( $models, \Alorbach\AIGateway\AI_Bridge::get_video_models() );
 		asort( $models );
 		return $models;
@@ -287,7 +287,8 @@ class Admin_Demo_Defaults {
 	private static function entry_type_matches_model( $entry_type, $model ) {
 		$model_lower = strtolower( (string) $model );
 		if ( strpos( $model_lower, 'sora' ) === 0 ) {
-			return in_array( $entry_type, array( 'openai', 'azure' ), true );
+			// OpenAI retired Sora on 24 Sep 2026; only Azure still serves it.
+			return 'azure' === $entry_type;
 		}
 		if ( strpos( $model_lower, 'veo-' ) === 0 || strpos( $model_lower, 'gemini' ) === 0 ) {
 			return 'google' === $entry_type;

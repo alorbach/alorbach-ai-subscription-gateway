@@ -206,20 +206,11 @@ class API_Client {
 			return 'openai';
 		}
 
-		// Sora video: OpenAI or Azure (priority: provider with video support).
+		// Sora video: Azure only. OpenAI shut down its Videos API on 24 Sep 2026;
+		// without an Azure entry the request resolves to OpenAI and is refused
+		// with a clear "retired" error in create_video().
 		if ( strpos( strtolower( $model ), 'sora' ) === 0 ) {
-			$prov_openai = Provider_Registry::get( 'openai' );
-			$prov_azure  = Provider_Registry::get( 'azure' );
-			if ( $prov_openai && $prov_openai->supports_video() && $helper::has_provider( 'openai' ) ) {
-				return 'openai';
-			}
-			if ( $prov_azure && $prov_azure->supports_video() && $helper::has_provider( 'azure' ) ) {
-				return 'azure';
-			}
-			if ( $helper::has_provider( 'azure' ) ) {
-				return 'azure';
-			}
-			return 'openai';
+			return $helper::has_provider( 'azure' ) ? 'azure' : 'openai';
 		}
 
 		return $helper::has_provider( 'azure' ) ? 'azure' : 'openai';
@@ -294,7 +285,8 @@ class API_Client {
 				return 'google';
 			}
 			if ( strpos( strtolower( $lookup_id ), 'sora' ) === 0 ) {
-				return API_Keys_Helper::has_provider( 'openai' ) ? 'openai' : ( API_Keys_Helper::has_provider( 'azure' ) ? 'azure' : null );
+				// OpenAI retired Sora on 24 Sep 2026; only Azure still serves it.
+				return API_Keys_Helper::has_provider( 'azure' ) ? 'azure' : null;
 			}
 			if ( strpos( $lookup_id, '/' ) !== false && API_Keys_Helper::has_provider( 'huggingface' ) ) {
 				return 'huggingface';
@@ -1704,22 +1696,28 @@ class API_Client {
 	}
 
 	/**
-	 * Create video job via Sora (OpenAI or Azure) or Veo (Google). Returns job ID immediately without polling.
+	 * Create video job via a video-capable provider (e.g. Sora on Azure). Returns job ID immediately without polling.
 	 * Use for quick verification that the API accepts the request.
 	 *
 	 * @param string $prompt           Text prompt.
-	 * @param string $model           Model ID (e.g. sora-2, veo-3.1-generate-preview).
+	 * @param string $model           Model ID (e.g. sora-2 on an Azure entry). Required.
 	 * @param string $size            Size (e.g. 1280x720). Default 1280x720.
 	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
 	 * @param array  $input_reference  Optional image reference payload.
 	 * @return array|WP_Error Array with 'id' => job_id, 'provider' => provider, or WP_Error.
 	 */
-	public static function create_video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8, $input_reference = array() ) {
+	public static function create_video( $prompt, $model = '', $size = '1280x720', $duration_seconds = 8, $input_reference = array() ) {
+		if ( '' === trim( (string) $model ) ) {
+			return new \WP_Error( 'no_video_model', __( 'No video model is configured. Import a video model and choose a default video model in the Gateway settings.', 'alorbach-ai-gateway' ), array( 'status' => 400 ) );
+		}
 		$parsed   = Cost_Matrix::parse_model_key( $model );
 		$model_id = $parsed['model'];
 		$entry_id = $parsed['entry_id'];
 		$provider = self::get_provider_for_model( $model_id, $entry_id );
 		$prov     = Provider_Registry::get( $provider );
+		if ( 'openai' === $provider && strpos( strtolower( (string) $model_id ), 'sora' ) === 0 ) {
+			return new \WP_Error( 'model_retired', __( 'OpenAI shut down Sora and its Videos API on 24 Sep 2026. Use Sora through an Azure entry or choose another video model.', 'alorbach-ai-gateway' ), array( 'status' => 410 ) );
+		}
 		if ( ! $prov ) {
 			return new \WP_Error( 'no_api_key', sprintf(
 				/* translators: 1: provider name */
@@ -1772,16 +1770,16 @@ class API_Client {
 	}
 
 	/**
-	 * Generate video via Sora (OpenAI or Azure) or Veo (Google).
+	 * Generate video via a video-capable provider (e.g. Sora on Azure).
 	 *
 	 * @param string $prompt           Text prompt.
-	 * @param string $model            Model ID (e.g. sora-2).
+	 * @param string $model            Model ID (e.g. sora-2 on an Azure entry). Required.
 	 * @param string $size             Size (e.g. 1280x720). Default 1280x720.
 	 * @param int    $duration_seconds Duration in seconds (4, 8, or 12). Default 8.
 	 * @param array  $input_reference  Optional image reference payload.
 	 * @return array|WP_Error Response with data[url] or error.
 	 */
-	public static function video( $prompt, $model = 'sora-2', $size = '1280x720', $duration_seconds = 8, $input_reference = array() ) {
+	public static function video( $prompt, $model = '', $size = '1280x720', $duration_seconds = 8, $input_reference = array() ) {
 		$max_polls     = (int) apply_filters( 'alorbach_video_poll_max', 60 );
 		$poll_interval = (int) apply_filters( 'alorbach_video_poll_interval', 5 );
 		// Set a bounded execution time limit covering the full polling window.

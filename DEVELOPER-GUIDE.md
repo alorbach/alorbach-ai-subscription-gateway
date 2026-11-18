@@ -318,7 +318,7 @@ Video generation endpoint.
 Request fields:
 
 - `prompt` required string
-- `model` optional string
+- `model` optional string; defaults to the site's default video model (400 `no_video_model` when none is configured)
 - `size` optional string
 - `duration_seconds` optional integer
 
@@ -496,7 +496,7 @@ Request fields:
 
 Request fields:
 
-- `model` optional
+- `model` optional; defaults to the site's default video model
 
 ### Model Import and Provider Admin Endpoints
 

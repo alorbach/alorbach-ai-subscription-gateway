@@ -1606,15 +1606,17 @@
 		var resultEl = container.querySelector('.alorbach-demo-videos');
 		var referenceInput = container.querySelector('.alorbach-demo-video-reference');
 
-		// sora-2 supports 720p only; sora-2-pro supports all
+		// sora-2 (Azure) supports 720p only; sora-2-pro and other models get every size.
 		function getSizeOptionsForModel(model) {
 			var all = ['1280x720', '720x1280', '1920x1080', '1080x1920', '1024x1792', '1792x1024'];
-			if (!model || model.indexOf('sora-2-pro') !== -1) return all;
-			return ['1280x720', '720x1280'];
+			if (model && model.indexOf('sora-2') !== -1 && model.indexOf('sora-2-pro') === -1) {
+				return ['1280x720', '720x1280'];
+			}
+			return all;
 		}
 
 		function updateSizeOptions() {
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || '';
 			var opts = getSizeOptionsForModel(model);
 			var current = (sizeSelect && sizeSelect.value) || container.dataset.size || '1280x720';
 			if (sizeSelect) {
@@ -1644,7 +1646,7 @@
 					modelSelect.appendChild(o);
 				});
 			}
-			container.dataset.model = video.default || 'sora-2';
+			container.dataset.model = video.default || '';
 
 			var sizeOpts = video.size || {};
 			if (sizeOpts.options && sizeOpts.options.length && sizeSelect) {
@@ -1677,7 +1679,7 @@
 		});
 
 		function refreshVideoCost() {
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || '';
 			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1280x720';
 			var duration = (durationSelect && durationSelect.value) || container.dataset.duration || '8';
 			updateCostEstimate(container, 'video', { type: 'video', model: model, size: size, duration_seconds: parseInt(duration, 10) }, container.querySelector('.alorbach-demo-cost'));
@@ -1691,7 +1693,7 @@
 			var prompt = (promptEl && promptEl.value || '').trim();
 			if (!prompt) return;
 			clearError(container);
-			var model = (modelSelect && modelSelect.value) || container.dataset.model || 'sora-2';
+			var model = (modelSelect && modelSelect.value) || container.dataset.model || '';
 			var size = (sizeSelect && sizeSelect.value) || container.dataset.size || '1280x720';
 			var duration = parseInt((durationSelect && durationSelect.value) || container.dataset.duration || '8', 10);
 			container.classList.add('alorbach-demo-loading');

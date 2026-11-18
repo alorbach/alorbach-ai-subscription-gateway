@@ -475,7 +475,7 @@ class Admin_API_Keys {
 			<div class="setup-guides-grid">
 				<?php self::render_setup_guide_card(
 					__( 'OpenAI', 'alorbach-ai-gateway' ),
-					__( 'Use this for Chat Completions, GPT Image, Whisper-style audio, and Sora-capable OpenAI models.', 'alorbach-ai-gateway' ),
+					__( 'Use this for Chat Completions, GPT Image, and Whisper-style audio. OpenAI retired Sora video on 24 Sep 2026; use an Azure entry for Sora.', 'alorbach-ai-gateway' ),
 					array(
 						__( 'Sign in to the OpenAI dashboard and open API keys.', 'alorbach-ai-gateway' ),
 						__( 'Create a new secret key for the project or account you want to bill.', 'alorbach-ai-gateway' ),

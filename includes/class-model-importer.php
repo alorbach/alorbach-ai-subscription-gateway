@@ -50,6 +50,9 @@ class Model_Importer {
 	/**
 	 * Known video models with default UC per video.
 	 *
+	 * Sora is served only by Azure now: OpenAI shut down Sora and its Videos
+	 * API on 24 Sep 2026, so these are never added to OpenAI entries.
+	 *
 	 * @var array
 	 */
 	private static $video_models = array(
@@ -266,20 +269,9 @@ class Model_Importer {
 				}
 			}
 
-			// Add known OpenAI video/audio models for OpenAI entries.
+			// Add known OpenAI audio models for OpenAI entries. No video models:
+			// OpenAI shut down Sora and its Videos API on 24 Sep 2026.
 			if ( $type === 'openai' ) {
-				$video_ids = array_column( $entry_data['video'], 'id' );
-				foreach ( array_keys( self::$video_models ) as $model ) {
-					if ( ! in_array( $model, $video_ids, true ) ) {
-						$entry_data['video'][] = array(
-							'id'           => $model,
-							'provider'     => 'openai',
-							'type'         => 'video',
-							'capabilities' => array( 'text_to_video' ),
-							'entry_id'     => $entry_data['entry_id'],
-						);
-					}
-				}
 				$audio_ids = array_column( $entry_data['audio'], 'id' );
 				foreach ( self::$audio_models as $model => $rate ) {
 					if ( ! in_array( $model, $audio_ids, true ) ) {
@@ -667,7 +659,7 @@ class Model_Importer {
 
 		$video_to_add = ( $selected_video !== null )
 			? $selected_video
-			: ( $selected_entries !== null ? array() : array_keys( self::$video_models ) );
+			: ( $selected_entries !== null || ! API_Keys_Helper::has_provider( 'azure' ) ? array() : array_keys( self::$video_models ) );
 		$selected_video_entries = array();
 		if ( $selected_entries !== null ) {
 			foreach ( $selected_entries as $entry_id => $sel ) {
