@@ -1,0 +1,19 @@
+includes/class-ai-bridge.php
+  s_96d2274d1b9c05::t_fd0419783606a9 755
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5ffc83c775e7630b9b2d1c9151ebca3a01e9f650",
+  "prompts": {},
+  "sessions": {
+    "s_96d2274d1b9c05": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8944ecb0-55bf-4f84-a1ad-0eec21d4b478",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
