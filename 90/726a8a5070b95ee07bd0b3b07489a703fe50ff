@@ -1,0 +1,52 @@
+includes/class-api-client.php
+  s_93f6ccbef64c94::t_a9907c0aec0972 1699,1703,1709-1712,1718-1720
+  s_93f6ccbef64c94::t_3cff4243b27200 1773,1776,1782
+  s_93f6ccbef64c94::t_0863a74d297416 288-289
+  s_93f6ccbef64c94::t_7897c3d992246c 209-211,213
+admin/class-admin-settings.php
+  s_93f6ccbef64c94::t_c6ceaa0fe34f69 147
+includes/class-api-validator.php
+  s_93f6ccbef64c94::t_f435c250a58569 278,281
+admin/class-admin-api-keys.php
+  s_93f6ccbef64c94::t_e585de2d00c5cc 478
+includes/class-cost-matrix.php
+  s_93f6ccbef64c94::t_fe2e4a241849e0 519
+includes/Providers/OpenAI_Provider.php
+  s_93f6ccbef64c94::t_a194326b946586 36-39,42
+  s_93f6ccbef64c94::t_119addb09ec92d 83-84
+includes/class-model-importer.php
+  s_93f6ccbef64c94::t_e531519b902e06 662
+  s_93f6ccbef64c94::t_26f1eb7fa308b4 272-273
+  s_93f6ccbef64c94::t_cd89e07a0f7399 53-55
+assets/js/demo-pages.js
+  s_93f6ccbef64c94::t_6bfd4c5736503c 1619,1649,1682,1696
+  s_93f6ccbef64c94::t_46b3de26f1b405 1609,1612-1615
+includes/class-rest-proxy.php
+  s_93f6ccbef64c94::t_609b4023887f7e 2492-2495
+  s_93f6ccbef64c94::t_b2b9b4bb4b05a1 1158
+  s_93f6ccbef64c94::t_9b159233bcd648 493,577,2668-2669
+  s_93f6ccbef64c94::t_fccc57366e89a0 2654,2659-2667
+README.md
+  s_93f6ccbef64c94::t_e585de2d00c5cc 16
+DEVELOPER-GUIDE.md
+  s_93f6ccbef64c94::t_3a54588d050e8a 321,499
+admin/class-admin-demo-defaults.php
+  s_93f6ccbef64c94::t_9b159233bcd648 152
+  s_93f6ccbef64c94::t_7938e45b1470d6 290-291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "90726a8a5070b95ee07bd0b3b07489a703fe50ff",
+  "prompts": {},
+  "sessions": {
+    "s_93f6ccbef64c94": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ae4a75b7-9f6d-465d-bf73-c0f5dd0a21cf",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andre Lorbach <alorbach@adiscon.com>"
+    }
+  }
+}
